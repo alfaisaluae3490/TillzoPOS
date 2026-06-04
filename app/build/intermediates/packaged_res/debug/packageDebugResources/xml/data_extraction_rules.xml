@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Data extraction rules for Android 12+ (replaces android:allowBackup).
+
+    cloud backup: excluded — user data lives in their own Google Sheet (zero-shared backend).
+    device transfer: excluded — tokens/credentials must not transfer to new devices.
+
+    See: https://developer.android.com/guide/topics/data/autobackup#IncludingFiles
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- Exclude everything — user data is in Google Sheets, not local storage -->
+        <exclude domain="sharedpref" path="tillzo_setup_prefs.xml" />
+        <exclude domain="sharedpref" path="tillzo_update_prefs.xml" />
+        <exclude domain="database" path="tillzo_pos_db" />
+    </cloud-backup>
+    <device-transfer>
+        <!-- Don't transfer auth tokens or setup data to a new device -->
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="database" path="." />
+    </device-transfer>
+</data-extraction-rules>

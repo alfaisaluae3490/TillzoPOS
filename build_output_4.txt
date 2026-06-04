@@ -1,0 +1,81 @@
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:generateDebugBuildConfig FROM-CACHE
+> Task :app:generateDebugResValues FROM-CACHE
+> Task :app:mapDebugSourceSetPaths
+> Task :app:generateDebugResources FROM-CACHE
+> Task :app:checkDebugAarMetadata
+> Task :app:mergeDebugResources FROM-CACHE
+> Task :app:packageDebugResources FROM-CACHE
+> Task :app:parseDebugLocalResources FROM-CACHE
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug FROM-CACHE
+> Task :app:processDebugMainManifest FROM-CACHE
+> Task :app:processDebugManifest FROM-CACHE
+> Task :app:processDebugManifestForPackage FROM-CACHE
+> Task :app:processDebugResources FROM-CACHE
+> Task :app:javaPreCompileDebug FROM-CACHE
+> Task :app:mergeDebugShaders FROM-CACHE
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets FROM-CACHE
+> Task :app:compressDebugAssets FROM-CACHE
+> Task :app:desugarDebugFileDependencies FROM-CACHE
+> Task :app:mergeDebugJniLibFolders FROM-CACHE
+> Task :app:validateSigningDebug
+> Task :app:writeDebugAppMetadata
+> Task :app:writeDebugSigningConfigVersions
+> Task :app:mergeDebugNativeLibs
+
+> Task :app:stripDebugDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libdatastore_shared_counter.so.
+
+> Task :app:checkDebugDuplicateClasses
+> Task :app:mergeExtDexDebug FROM-CACHE
+> Task :app:mergeLibDexDebug FROM-CACHE
+> Task :app:kspDebugKotlin
+> Task :app:compileDebugKotlin
+w: file:///C:/Users/Faii/Desktop/Tillzo/app/src/main/java/com/tillzo/pos/data/remote/SheetsApiClient.kt:6:8 '@Deprecated(...) class GoogleSignIn : Any' is deprecated. Deprecated in Java.
+w: file:///C:/Users/Faii/Desktop/Tillzo/app/src/main/java/com/tillzo/pos/data/remote/SheetsApiClient.kt:48:23 '@Deprecated(...) class GoogleSignIn : Any' is deprecated. Deprecated in Java.
+w: file:///C:/Users/Faii/Desktop/Tillzo/app/src/main/java/com/tillzo/pos/data/remote/SheetsApiClient.kt:55:23 '@Deprecated(...) class GoogleSignIn : Any' is deprecated. Deprecated in Java.
+w: file:///C:/Users/Faii/Desktop/Tillzo/app/src/main/java/com/tillzo/pos/data/remote/TokenProvider.kt:6:8 '@Deprecated(...) class GoogleSignIn : Any' is deprecated. Deprecated in Java.
+w: file:///C:/Users/Faii/Desktop/Tillzo/app/src/main/java/com/tillzo/pos/data/remote/TokenProvider.kt:42:23 '@Deprecated(...) class GoogleSignIn : Any' is deprecated. Deprecated in Java.
+w: file:///C:/Users/Faii/Desktop/Tillzo/app/src/main/java/com/tillzo/pos/data/remote/TokenProvider.kt:57:23 '@Deprecated(...) class GoogleSignIn : Any' is deprecated. Deprecated in Java.
+w: file:///C:/Users/Faii/Desktop/Tillzo/app/src/main/java/com/tillzo/pos/data/sync/options/token/OAuthTokenManager.kt:9:8 '@Deprecated(...) class GoogleSignIn : Any' is deprecated. Deprecated in Java.
+w: file:///C:/Users/Faii/Desktop/Tillzo/app/src/main/java/com/tillzo/pos/data/sync/options/token/OAuthTokenManager.kt:136:27 '@Deprecated(...) class GoogleSignIn : Any' is deprecated. Deprecated in Java.
+w: file:///C:/Users/Faii/Desktop/Tillzo/app/src/main/java/com/tillzo/pos/di/NetworkModule.kt:26:10 '@Deprecated(...) @InlineMe(...) @CanIgnoreReturnValue() fun setLenient(): GsonBuilder!' is deprecated. Deprecated in Java.
+w: file:///C:/Users/Faii/Desktop/Tillzo/app/src/main/java/com/tillzo/pos/ui/home/AdvancedMenuSheet.kt:70:38 '@property:Deprecated(...) val Icons.Filled.AssignmentReturn: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.AssignmentReturn.
+w: file:///C:/Users/Faii/Desktop/Tillzo/app/src/main/java/com/tillzo/pos/ui/home/AdvancedMenuSheet.kt:94:13 '@Deprecated(...) @Composable() @ComposableTarget(...) fun Divider(modifier: Modifier = ..., thickness: Dp = ..., color: Color = ...): Unit' is deprecated. Renamed to HorizontalDivider.
+w: file:///C:/Users/Faii/Desktop/Tillzo/app/src/main/java/com/tillzo/pos/ui/pos/options/casio/CasioScreen.kt:65:13 '@Deprecated(...) @Composable() @ComposableTarget(...) fun Divider(modifier: Modifier = ..., thickness: Dp = ..., color: Color = ...): Unit' is deprecated. Renamed to HorizontalDivider.
+w: file:///C:/Users/Faii/Desktop/Tillzo/app/src/main/java/com/tillzo/pos/ui/pos/options/casio/CasioScreen.kt:87:13 '@Deprecated(...) @Composable() @ComposableTarget(...) fun Divider(modifier: Modifier = ..., thickness: Dp = ..., color: Color = ...): Unit' is deprecated. Renamed to HorizontalDivider.
+w: file:///C:/Users/Faii/Desktop/Tillzo/app/src/main/java/com/tillzo/pos/ui/signin/SignInViewModel.kt:6:8 '@Deprecated(...) class GoogleSignIn : Any' is deprecated. Deprecated in Java.
+w: file:///C:/Users/Faii/Desktop/Tillzo/app/src/main/java/com/tillzo/pos/ui/signin/SignInViewModel.kt:8:8 '@Deprecated(...) class GoogleSignInClient : GoogleApi<GoogleSignInOptions!>' is deprecated. Deprecated in Java.
+w: file:///C:/Users/Faii/Desktop/Tillzo/app/src/main/java/com/tillzo/pos/ui/signin/SignInViewModel.kt:49:30 '@Deprecated(...) class GoogleSignInClient : GoogleApi<GoogleSignInOptions!>' is deprecated. Deprecated in Java.
+w: file:///C:/Users/Faii/Desktop/Tillzo/app/src/main/java/com/tillzo/pos/ui/signin/SignInViewModel.kt:57:16 '@Deprecated(...) class GoogleSignIn : Any' is deprecated. Deprecated in Java.
+w: file:///C:/Users/Faii/Desktop/Tillzo/app/src/main/java/com/tillzo/pos/ui/signin/SignInViewModel.kt:65:31 '@Deprecated(...) class GoogleSignIn : Any' is deprecated. Deprecated in Java.
+
+> Task :app:compileDebugJavaWithJavac
+> Task :app:hiltAggregateDepsDebug
+> Task :app:hiltJavaCompileDebug
+> Task :app:processDebugJavaRes
+> Task :app:mergeDebugJavaResource
+> Task :app:transformDebugClassesWithAsm
+> Task :app:dexBuilderDebug
+> Task :app:mergeProjectDexDebug
+> Task :app:packageDebug
+> Task :app:createDebugApkListingFileRedirect
+> Task :app:assembleDebug
+
+[Incubating] Problems report is available at: file:///C:/Users/Faii/Desktop/Tillzo/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.2.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 5m 31s
+40 actionable tasks: 21 executed, 19 from cache
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.2.1/userguide/configuration_cache_enabling.html

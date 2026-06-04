@@ -1,0 +1,20 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.tillzo.pos.app-mergeDebugResources-86:/values-hdpi-v4/values-hdpi-v4.xml",
+            "map": [
+                {
+                    "source": "C:\\Users\\Faii\\.gradle\\caches\\9.2.1\\transforms\\d83b3103218710af0fc0bb184dcbde5f\\workspace\\transformed\\appcompat-1.7.0\\res\\values-hdpi-v4\\values-hdpi-v4.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endLines": "6",
+                        "endColumns": "13",
+                        "endOffsets": "327"
+                    }
+                }
+            ]
+        }
+    ]
+}

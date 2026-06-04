@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Full backup rules for Android 11 and below (android:fullBackupContent).
+    Exclude sensitive local data from cloud backup.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="tillzo_setup_prefs.xml" />
+    <exclude domain="sharedpref" path="tillzo_update_prefs.xml" />
+    <exclude domain="database" path="tillzo_pos_db" />
+</full-backup-content>

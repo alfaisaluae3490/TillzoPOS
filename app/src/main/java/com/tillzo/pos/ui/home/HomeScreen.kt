@@ -1,0 +1,672 @@
+package com.tillzo.pos.ui.home
+
+import android.view.KeyEvent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.foundation.BorderStroke
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import com.tillzo.pos.data.local.entity.InventoryEntity
+import com.tillzo.pos.ui.inventory.options.alerts.LowStockViewModel
+import com.tillzo.pos.ui.theme.*
+import com.tillzo.pos.ui.hardware.scanner.InlineCameraBox
+import com.tillzo.pos.ui.hardware.scanner.InlineScannerViewModel
+import android.media.AudioManager
+import android.media.ToneGenerator
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
+import kotlinx.coroutines.delay
+
+/**
+ * M4 POS Main Screen — full selling flow.
+ *
+ * Layout:
+ *   [TopBar] shop name + sync dot + hamburger
+ *   [Search Bar] + [Camera Icon]
+ *   [Quick Grid] pinned inventory items
+ *   [Cart List] with qty controls and swipe-to-dismiss
+ *   [Cart Summary] subtotal / tax / discount / total
+ *   [PAY NOW] button → opens PaymentBottomSheet
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+fun HomeScreen(
+    onOpenMenu: () -> Unit,
+    onNavigateToInventory: () -> Unit = {},
+    onNavigateToReceipt: (String) -> Unit = {},
+    viewModel: PosViewModel = hiltViewModel(),
+    lowStockViewModel: LowStockViewModel = hiltViewModel()
+) {
+    val cartItems by viewModel.cartItems.collectAsStateWithLifecycle()
+    val cartSubtotal by viewModel.cartSubtotal.collectAsStateWithLifecycle()
+    val cartTax by viewModel.cartTax.collectAsStateWithLifecycle()
+    val cartDiscount by viewModel.cartDiscount.collectAsStateWithLifecycle()
+    val cartTotal by viewModel.cartTotal.collectAsStateWithLifecycle()
+    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
+    val quickGridItems by viewModel.quickGridItems.collectAsStateWithLifecycle()
+    val lowStockItems by lowStockViewModel.lowStockItems.collectAsStateWithLifecycle()
+    val saleResult by viewModel.saleResult.collectAsStateWithLifecycle()
+
+    var showPaymentDialog by remember { mutableStateOf(false) }
+    var showClearConfirm by remember { mutableStateOf(false) }
+    var showDecimalQtyDialog by remember { mutableStateOf(false) }
+    var decimalQtyItem by remember { mutableStateOf<InventoryEntity?>(null) }
+    val inlineScannerViewModel: InlineScannerViewModel = hiltViewModel()
+    val isCameraActive by inlineScannerViewModel.isCameraActive.collectAsStateWithLifecycle()
+
+    var scannerBorderColor by remember { mutableStateOf(Color(0xFF1E88E5)) }
+    
+    val context = LocalContext.current
+    val vibrator = remember {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+            (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+        else
+            @Suppress("DEPRECATION") context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+    }
+    val toneGen = remember { ToneGenerator(AudioManager.STREAM_MUSIC, 80) }
+
+    LaunchedEffect(Unit) {
+        inlineScannerViewModel.scanEvent.collect { event ->
+            when (event) {
+                is InlineScannerViewModel.ScanEvent.ProductFound -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        vibrator.vibrate(VibrationEffect.createOneShot(80, VibrationEffect.DEFAULT_AMPLITUDE))
+                    }
+                    toneGen.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
+                    scannerBorderColor = Color(0xFF4CAF50)
+                    delay(300)
+                    scannerBorderColor = Color(0xFF1E88E5)
+                    viewModel.addToCart(event.product, qty = 1.0)
+                }
+                is InlineScannerViewModel.ScanEvent.ProductNotFound -> {
+                    scannerBorderColor = Color(0xFFF44336)
+                    delay(300)
+                    scannerBorderColor = Color(0xFF1E88E5)
+                }
+            }
+        }
+    }
+
+    // Navigate to receipt when sale completes
+    LaunchedEffect(saleResult) {
+        val result = saleResult
+        if (result is SaleResult.Success) {
+            showPaymentDialog = false
+            onNavigateToReceipt(result.sale.sync_uuid)
+        }
+    }
+
+    Scaffold(
+        containerColor = BackgroundDark,
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = "TillzoPOS",
+                        color = TextPrimary,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 18.sp
+                    )
+                },
+                actions = {
+                    // Sync status dot
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(SuccessGreen)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    IconButton(onClick = onNavigateToInventory) {
+                        Icon(Icons.Default.Inventory, contentDescription = "Inventory", tint = AccentBlue)
+                    }
+                    IconButton(onClick = onOpenMenu) {
+                        Icon(Icons.Default.Menu, contentDescription = "Menu", tint = AccentBlue)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = SurfaceDark,
+                    titleContentColor = TextPrimary
+                )
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(BackgroundDark)
+                .padding(padding)
+        ) {
+            // Low Stock Banner
+            if (lowStockItems.isNotEmpty()) {
+                val alertText = "LOW STOCK: " + lowStockItems.take(3).joinToString { "${it.item_name} (${it.current_stock})" } +
+                    if (lowStockItems.size > 3) " +${lowStockItems.size - 3} more" else ""
+                Text(
+                    text = alertText,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.errorContainer)
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            // Inline Camera Scanner and Search Bar Section
+            Column(modifier = Modifier.fillMaxWidth()) {
+                
+                // Camera box — always shown
+                InlineCameraBox(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
+                        .padding(bottom = 8.dp),
+                    isCameraActive = isCameraActive,
+                    onBarcodeDetected = { barcode ->
+                        inlineScannerViewModel.onBarcodeDetected(barcode)
+                    },
+                    onActivateClick = {
+                        inlineScannerViewModel.activateCamera()
+                    },
+                    borderColor = scannerBorderColor
+                )
+
+                // Toggle button — compact, below box
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
+                        .padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            if (isCameraActive) inlineScannerViewModel.deactivateCamera()
+                            else inlineScannerViewModel.activateCamera()
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = if (isCameraActive) Color(0xFFF44336) else Color(0xFF1E88E5)
+                        ),
+                        border = BorderStroke(
+                            1.dp,
+                            if (isCameraActive) Color(0xFFF44336) else Color(0xFF1E88E5)
+                        ),
+                        modifier = Modifier.height(32.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isCameraActive)
+                                Icons.Default.VideocamOff else Icons.Default.Videocam,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (isCameraActive) "Stop Scan" else "Start Scan",
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+
+                // Existing Search Bar
+                PosSearchBar(
+                    query = searchQuery,
+                    onQueryChanged = { viewModel.onSearchQueryChanged(it) },
+                    onSearchSubmit = {
+                        val match = searchResults.firstOrNull()
+                        if (match != null) viewModel.addToCart(match, 1.0)
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
+                )
+            }
+
+            // Search Results Dropdown
+            AnimatedVisibility(
+                visible = searchResults.isNotEmpty(),
+                enter = fadeIn(), exit = fadeOut()
+            ) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp),
+                    colors = CardDefaults.cardColors(containerColor = SurfaceVariant),
+                    shape = RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp)
+                ) {
+                    LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
+                        items(searchResults) { item ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { viewModel.addToCart(item, 1.0) }
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(text = item.item_name, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                    Text(text = item.sku.ifBlank { item.barcode_id }, color = TextSecondary, fontSize = 12.sp)
+                                }
+                                Text(text = "Rs ${item.price_per_unit.toInt()}", color = AccentBlueLight, fontSize = 13.sp)
+                            }
+                            HorizontalDivider(color = SurfaceDark, thickness = 0.5.dp)
+                        }
+                    }
+                }
+            }
+
+            // Quick-Access Grid
+            if (searchResults.isEmpty()) {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(4),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    contentPadding = PaddingValues(4.dp)
+                ) {
+                    items(quickGridItems, key = { it.system_row_id }) { item ->
+                        QuickGridTile(
+                            item = item,
+                            onTapped = {
+                                if (item.unit in listOf("KG", "GM", "ML")) {
+                                    decimalQtyItem = item
+                                    showDecimalQtyDialog = true
+                                } else {
+                                    viewModel.addToCart(item, 1.0)
+                                }
+                            }
+                        )
+                    }
+                }
+            } else {
+                Spacer(modifier = Modifier.weight(1f))
+            }
+
+            // Cart Section
+            if (cartItems.isNotEmpty()) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth().navigationBarsPadding(),
+                    color = SurfaceDark,
+                    shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            "Cart (${cartItems.size})",
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        )
+
+                        LazyColumn(modifier = Modifier.heightIn(max = 220.dp)) {
+                            items(cartItems, key = { it.itemId }) { cartItem ->
+                                CartRow(
+                                    item = cartItem,
+                                    onQtyDecrease = {
+                                        val minQty = if (cartItem.unit in listOf("KG", "GM", "ML")) 0.1 else 1.0
+                                        val newQty = (cartItem.quantity - (if (cartItem.unit in listOf("KG", "GM", "ML")) 0.1 else 1.0)).coerceAtLeast(minQty)
+                                        viewModel.updateCartItemQty(cartItem.itemId, newQty)
+                                    },
+                                    onQtyIncrease = {
+                                        val step = if (cartItem.unit in listOf("KG", "GM", "ML")) 0.1 else 1.0
+                                        viewModel.updateCartItemQty(cartItem.itemId, cartItem.quantity + step)
+                                    },
+                                    onRemove = { viewModel.removeFromCart(cartItem.itemId) }
+                                )
+                                HorizontalDivider(color = BackgroundDark, thickness = 0.5.dp)
+                            }
+                        }
+
+                        Spacer(Modifier.height(8.dp))
+
+                        // Totals
+                        CartSummaryRow("Subtotal", "Rs %.2f".format(cartSubtotal))
+                        if (cartTax > 0) CartSummaryRow("Tax", "Rs %.2f".format(cartTax))
+                        if (cartDiscount > 0) CartSummaryRow("Discount", "- Rs %.2f".format(cartDiscount), color = SuccessGreen)
+                        HorizontalDivider(color = SurfaceVariant, modifier = Modifier.padding(vertical = 6.dp))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("TOTAL", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Text("Rs %.2f".format(cartTotal), color = AccentBlue, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                        }
+
+                        Spacer(Modifier.height(10.dp))
+
+                        // Action Buttons
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = { showClearConfirm = true },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrorRed)
+                            ) {
+                                Text("Clear Cart")
+                            }
+                            Button(
+                                onClick = { showPaymentDialog = true },
+                                modifier = Modifier.weight(2f),
+                                colors = ButtonDefaults.buttonColors(containerColor = AccentBlue),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(Icons.Default.Payment, contentDescription = null)
+                                Spacer(Modifier.width(6.dp))
+                                Text("PAY NOW", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Payment Dialog
+    if (showPaymentDialog) {
+        PaymentDialog(
+            cartTotal = cartTotal,
+            cartItems = cartItems,
+            viewModel = viewModel,
+            onDismiss = { showPaymentDialog = false }
+        )
+    }
+
+    // Clear Cart Confirm
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            title = { Text("Clear Cart?", color = TextPrimary) },
+            text = { Text("All ${cartItems.size} items will be removed.", color = TextSecondary) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.clearCart(); showClearConfirm = false }) {
+                    Text("Clear", color = ErrorRed)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm = false }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            },
+            containerColor = SurfaceDark
+        )
+    }
+
+    // Decimal Qty Dialog (for KG/GM/ML items)
+    if (showDecimalQtyDialog && decimalQtyItem != null) {
+        DecimalQtyDialog(
+            item = decimalQtyItem!!,
+            onConfirm = { qty ->
+                viewModel.addToCart(decimalQtyItem!!, qty)
+                showDecimalQtyDialog = false
+                decimalQtyItem = null
+            },
+            onDismiss = {
+                showDecimalQtyDialog = false
+                decimalQtyItem = null
+            }
+        )
+    }
+
+}
+
+// ── Search Bar ────────────────────────────────────────────────────────────────
+
+@Composable
+fun PosSearchBar(
+    query: String,
+    onQueryChanged: (String) -> Unit,
+    onSearchSubmit: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusRequester = remember { FocusRequester() }
+
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChanged,
+        modifier = modifier
+            .focusRequester(focusRequester)
+            .onKeyEvent { keyEvent ->
+                // HID scanner sends Enter after barcode — auto-submit
+                if (keyEvent.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_ENTER) {
+                    onSearchSubmit()
+                    true
+                } else false
+            },
+        placeholder = { Text("Search by name, SKU, or scan barcode…", color = TextSecondary, fontSize = 13.sp) },
+        singleLine = true,
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = TextPrimary,
+            unfocusedTextColor = TextPrimary,
+            focusedContainerColor = SurfaceVariant,
+            unfocusedContainerColor = SurfaceVariant,
+            focusedBorderColor = AccentBlue,
+            unfocusedBorderColor = Color.Transparent
+        ),
+        shape = RoundedCornerShape(12.dp),
+        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TextSecondary) },
+        trailingIcon = {
+            if (query.isNotEmpty()) {
+                IconButton(onClick = { onQueryChanged("") }) {
+                    Icon(Icons.Default.Clear, contentDescription = "Clear", tint = TextSecondary)
+                }
+            }
+        },
+        textStyle = TextStyle(fontSize = 14.sp, color = TextPrimary),
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Text,
+            imeAction = ImeAction.Search
+        ),
+        keyboardActions = KeyboardActions(
+            onSearch = {
+                onSearchSubmit()
+                keyboardController?.hide()
+            }
+        )
+    )
+}
+
+// ── Quick Grid Tile ───────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun QuickGridTile(item: InventoryEntity, onTapped: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(SurfaceVariant)
+            .combinedClickable(onClick = onTapped)
+            .padding(vertical = 10.dp, horizontal = 6.dp)
+            .fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(text = "🛒", fontSize = 20.sp)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = item.item_name,
+            color = TextPrimary,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = "Rs ${item.price_per_unit.toInt()}/${item.unit}",
+            color = AccentBlueLight,
+            fontSize = 10.sp,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+// ── Cart Row ──────────────────────────────────────────────────────────────────
+
+@Composable
+private fun CartRow(
+    item: com.tillzo.pos.domain.model.CartItem,
+    onQtyDecrease: () -> Unit,
+    onQtyIncrease: () -> Unit,
+    onRemove: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(item.name, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("Rs ${item.pricePerUnit.toInt()} / ${item.unit}", color = TextSecondary, fontSize = 11.sp)
+        }
+        Spacer(Modifier.width(8.dp))
+        // Qty Controls
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SmallIconButton(Icons.Default.Remove, "Decrease") { onQtyDecrease() }
+            Text(
+                text = if (item.unit in listOf("KG", "GM", "ML")) "%.3f".format(item.quantity)
+                       else item.quantity.toInt().toString(),
+                color = TextPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.widthIn(min = 36.dp),
+                textAlign = TextAlign.Center
+            )
+            SmallIconButton(Icons.Default.Add, "Increase") { onQtyIncrease() }
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(
+            "Rs %.0f".format(item.total),
+            color = AccentBlueLight,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.widthIn(min = 48.dp),
+            textAlign = TextAlign.End
+        )
+        Spacer(Modifier.width(6.dp))
+        IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+            Icon(Icons.Default.Close, contentDescription = "Remove", tint = ErrorRed, modifier = Modifier.size(16.dp))
+        }
+    }
+}
+
+@Composable
+private fun SmallIconButton(icon: androidx.compose.ui.graphics.vector.ImageVector, desc: String, onClick: () -> Unit) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(28.dp)
+            .clip(CircleShape)
+            .background(SurfaceHighlight)
+            .clickable { onClick() }
+    ) {
+        Icon(icon, contentDescription = desc, tint = TextPrimary, modifier = Modifier.size(14.dp))
+    }
+}
+
+// ── Cart Summary Row ──────────────────────────────────────────────────────────
+
+@Composable
+private fun CartSummaryRow(label: String, value: String, color: Color = TextSecondary) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, color = TextSecondary, fontSize = 13.sp)
+        Text(value, color = color.takeIf { it != TextSecondary } ?: TextPrimary, fontSize = 13.sp)
+    }
+}
+
+// ── Decimal Qty Dialog ────────────────────────────────────────────────────────
+
+@Composable
+private fun DecimalQtyDialog(
+    item: InventoryEntity,
+    onConfirm: (Double) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var input by remember { mutableStateOf("1.0") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SurfaceDark,
+        title = { Text("Enter Quantity", color = TextPrimary) },
+        text = {
+            Column {
+                Text("Item: ${item.item_name}", color = TextSecondary, fontSize = 13.sp)
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    label = { Text("Qty (${item.unit})", color = TextSecondary) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = AccentBlue
+                    )
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(input.toDoubleOrNull() ?: 1.0) }) {
+                Text("Add to Cart", color = AccentBlue)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = TextSecondary)
+            }
+        }
+    )
+}

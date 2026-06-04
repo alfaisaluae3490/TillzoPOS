@@ -1,0 +1,157 @@
+package com.tillzo.pos.domain.usecase.grn
+
+import com.tillzo.pos.data.local.entity.InventoryEntity
+import com.tillzo.pos.data.local.entity.ProductBatchEntity
+import com.tillzo.pos.domain.repository.ConfirmGrnResult
+import com.tillzo.pos.domain.repository.GrnRepository
+import com.tillzo.pos.domain.repository.InventoryRepository
+import com.tillzo.pos.domain.repository.ProductBatchRepository
+import com.tillzo.pos.data.local.dao.PurchaseOrderDao
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.util.UUID
+import javax.inject.Inject
+
+class ConfirmGrnUseCase @Inject constructor(
+    private val grnRepository: GrnRepository,
+    private val inventoryRepository: InventoryRepository,
+    private val productBatchRepository: ProductBatchRepository,
+    private val purchaseOrderDao: PurchaseOrderDao
+) {
+    suspend operator fun invoke(grnId: String): ConfirmGrnResult {
+        return withContext(Dispatchers.IO) {
+            try {
+                val grnHeader = grnRepository.getGrnById(grnId)
+                    ?: return@withContext ConfirmGrnResult(false, 0, 0, 0, "GRN not found")
+
+                val grnItems = grnRepository.getGrnItems(grnId)
+                var newProductsCreated = 0
+                var batchesAdded = 0
+                var batchesUpdated = 0
+
+                val posTerminalId = grnHeader.posTerminalId.takeIf { it.isNotBlank() } ?: "terminal_1"
+
+                for (item in grnItems) {
+                    when (item.inventoryAction) {
+
+                        "NEW_PRODUCT", "NEW_ITEM" -> {
+                            // Step 1: Create new ProductEntity (InventoryEntity in Tillzo)
+                            val newProduct = InventoryEntity(
+                                item_name = item.productName,
+                                category = item.categoryId.takeIf { it.isNotBlank() } ?: "Uncategorized",
+                                barcode_id = item.barcodeId.takeIf { it.isNotBlank() } ?: item.productId,
+                                unit = item.unit,
+                                price_per_unit = item.sellingPrice,
+                                current_stock = item.receivedQty,
+                                low_stock_threshold = item.lowStockThreshold,
+                                sku = item.sku,
+                                brand = item.brand,
+                                description = "",
+                                cost_price = item.unitCostPrice,
+                                tax_percent = 0.0,
+                                batch_number = item.batchNumber,
+                                expiry_date = item.expiryDate,
+                                manufacturing_date = item.manufacturingDate,
+                                is_damaged_stock = false,
+                                damaged_qty = 0.0,
+                                totalStock = item.receivedQty,
+                                hasBatches = true,
+                                pos_terminal_id = posTerminalId
+                            )
+                            inventoryRepository.insertItem(newProduct)
+
+                            // Step 2: Create first batch for this new product
+                            val batchId = UUID.randomUUID().toString()
+                            val newBatch = ProductBatchEntity(
+                                batchId = batchId,
+                                productId = newProduct.system_row_id,
+                                barcodeId = newProduct.barcode_id,
+                                batchNumber = item.batchNumber,
+                                manufacturingDate = item.manufacturingDate,
+                                expiryDate = item.expiryDate,
+                                stockQty = item.receivedQty,
+                                costPrice = item.unitCostPrice,
+                                sellingPrice = item.sellingPrice,
+                                isActive = true,
+                                posTerminalId = posTerminalId
+                            )
+                            productBatchRepository.insertBatch(newBatch)
+
+                            // Step 3: Update grnItem with new batchId
+                            grnRepository.updateGrnItemBatchId(item.grnItemId, batchId)
+                            newProductsCreated++
+                        }
+
+                        "ADD_BATCH" -> {
+                            // Item exists. Add new batch to existing product.
+                            val batchId = UUID.randomUUID().toString()
+                            val newBatch = ProductBatchEntity(
+                                batchId = batchId,
+                                productId = item.productId,
+                                barcodeId = item.barcodeId.takeIf { it.isNotBlank() } ?: item.productId,
+                                batchNumber = item.batchNumber,
+                                manufacturingDate = item.manufacturingDate,
+                                expiryDate = item.expiryDate,
+                                stockQty = item.receivedQty,
+                                costPrice = item.unitCostPrice,
+                                sellingPrice = item.sellingPrice,
+                                isActive = true,
+                                posTerminalId = posTerminalId
+                            )
+                            productBatchRepository.insertBatch(newBatch)
+
+                            // Recalculate totalStock = sum of all active batches
+                            inventoryRepository.recalculateTotalStock(item.productId)
+
+                            // Update barcodeId on grnItem (and batchId)
+                            grnRepository.updateGrnItemBatchId(item.grnItemId, batchId)
+                            batchesAdded++
+                        }
+
+                        "UPDATE_BATCH", "PENDING" -> {
+                            // Item exists. Add qty to existing batch.
+                            val targetBatchId = item.batchId.takeIf { it.isNotBlank() } ?: continue
+                            productBatchRepository.incrementBatchStock(
+                                batchId = targetBatchId,
+                                additionalQty = item.receivedQty
+                            )
+                            // Recalculate totalStock
+                            inventoryRepository.recalculateTotalStock(item.productId)
+                            batchesUpdated++
+                        }
+                    }
+                }
+
+                // Mark GRN as CONFIRMED
+                grnRepository.updateGrnStatus(grnId, "CONFIRMED")
+
+                // Update linked PO status
+                if (grnHeader.poId.isNotEmpty()) {
+                    updateLinkedPOStatus(grnHeader.poId)
+                }
+
+                ConfirmGrnResult(
+                    success = true,
+                    newProductsCreated = newProductsCreated,
+                    batchesAdded = batchesAdded,
+                    batchesUpdated = batchesUpdated
+                )
+
+            } catch (e: Exception) {
+                ConfirmGrnResult(false, 0, 0, 0, e.message)
+            }
+        }
+    }
+
+    private suspend fun updateLinkedPOStatus(poId: String) {
+        val poItems = purchaseOrderDao.getPOItems(poId)
+        val allFullyReceived = poItems.isNotEmpty() && poItems.all { it.receivedQty >= it.orderedQty }
+        val anyReceived = poItems.any { it.receivedQty > 0 }
+        val newStatus = when {
+            allFullyReceived -> "RECEIVED"
+            anyReceived -> "PARTIALLY_RECEIVED"
+            else -> "SENT" // Or whatever default
+        }
+        purchaseOrderDao.updatePOStatus(poId, newStatus, System.currentTimeMillis())
+    }
+}

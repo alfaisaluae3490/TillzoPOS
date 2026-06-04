@@ -1,0 +1,1145 @@
+════════════════════════════════════════
+TILLZO POS — PROJECT PROGRESS REPORT
+Generated: 2026-03-22
+════════════════════════════════════════
+
+PROJECT OVERVIEW
+────────────────
+════════════════════════════════════════
+LATEST FIXES APPLIED 
+════════════════════════════════════════
+- Fix 1: Missing NavGraph routes — ✅ COMPLETE: Added qr and statement routes to AppNavHost.
+- Fix 2: Product Units Dropdown — ✅ COMPLETE: Replaced TextField with ExposedDropdownMenuBox.
+- Fix 3: Khata Event History List — ✅ COMPLETE: Added LazyColumn for event history in CrmScreen.
+- Fix 4: Edit Customer Dialog + Missing Fields — ✅ COMPLETE: Added edit tracking and missing fields.
+- Fix 5: BatchListBottomSheet Navigation — ✅ COMPLETE: Connected to InventoryCrudScreen.
+- Fix 6: Batch Edit Dialog — ✅ COMPLETE: Added batch editing inside BatchListBottomSheet.
+- Fix 7: Stock Increment on Returns — ✅ COMPLETE: Incrementing stock on Restock in ReturnsViewModel.
+- Fix 8: SyncWorker missing entity uploads — ✅ COMPLETE: Added uploads for PO/GRN/Batch/Vendor.
+- Fix 9: PO List Status Filter Chips — ✅ COMPLETE: Added FilterChips to PurchaseOrderListScreen.
+- Fix 10: PODetailScreen Show Linked GRNs — ✅ COMPLETE: Displaying linked GRNs with date in PODetailScreen.
+- Fix 11: Transaction History Date Range Filter — ✅ COMPLETE: Added Date chips and DB query filtering.
+- Fix 12: VendorRepository Hilt Binding — ✅ COMPLETE: Added binding to RepositoryModule.
+- Fix 13: HID Scanner (onKeyEvent Enter) — ✅ COMPLETE: KEYCODE_ENTER intercepted in search bar.
+- Fix 14: Inline Camera Scanner Box — ✅ COMPLETE: InlineCameraBox + InlineScannerViewModel created.
+- Fix 15: Camera Auto-Sleep (4 min) — ✅ COMPLETE: SLEEP_TIMEOUT_MS in InlineScannerViewModel.
+- Fix 16: Quick Grid Real Pinning — ✅ COMPLETE: isPinned/pinnedOrder added to InventoryEntity;
+             MIGRATION_14_15; getPinnedItems() in InventoryDao; PosViewModel uses real pinned items.
+- Fix 17: TillSessionEntity + TillSessionDao — ✅ COMPLETE: Created entity + DAO; MIGRATION_15_16;
+             registered in AppDatabase v16 + DatabaseModule.
+- Fix 18: TillOpenScreen — ✅ COMPLETE: Opening cash entry screen wired to till_open route.
+- Fix 19: TillViewModel — ✅ COMPLETE: openTill/closeTill using AppSetupPrefs (no SessionManager).
+- Fix 20: CompleteSaleUseCase Till Recording — ✅ COMPLETE: Injected TillSessionDao;
+             addSaleToSession() called after each sale (non-fatal).
+- Fix 21: ZReportScreen Till Summary — ✅ COMPLETE: Added till card, physical count input,
+             live variance, and Close Till button (disabled when pending sync > 0).
+- Fix 22: ZReportViewModel Till Data — ✅ COMPLETE: Injected TillSessionDao; added activeSession
+             and allSessionsToday StateFlows.
+- Fix 23: NavGraph till_open route — ✅ COMPLETE: composable("till_open") added to AppNavHost.
+- Fix 24: AdvancedMenuSheet Open/Close Till — ✅ COMPLETE: Added onNavigateToTill param + menu item.
+- Fix 25: SyncWorker Till Sessions Upload — ✅ COMPLETE: uploadPendingTillSessions() added.
+--- SESSION 2026-03-22 FIXES ---
+- Fix 26: Runtime Permissions (Group A) — ✅ COMPLETE: PermissionRequestHandler composable in
+             MainActivity requests CAMERA, BLUETOOTH_CONNECT, POST_NOTIFICATIONS on first launch.
+- Fix 27: WastageEntity + WastageDao — ✅ COMPLETE: New entity + DAO with all CRUD/report queries.
+- Fix 28: AppDatabase v17 + MIGRATION_16_17 — ✅ COMPLETE: wastage_log table created with 2 indices.
+             DatabaseModule updated with MIGRATION_16_17 + provideWastageDao().
+- Fix 29: ProductBatchDao.getOldestActiveBatch — ✅ COMPLETE: FIFO query added.
+             deactivateBatch() helper added.
+- Fix 30: NotificationHelper 3-channel upgrade — ✅ COMPLETE: low_stock_channel (HIGH),
+             out_of_stock_channel (HIGH), expiry_channel (DEFAULT). expiryNotification() added.
+- Fix 31: ReturnsViewModel DAMAGED path — ✅ COMPLETE: Damaged returns now create WastageEntity
+             and do NOT increment stock.
+- Fix 32: SyncWorker stock deduction (Group B) — ✅ COMPLETE: Reads pending sales before upload,
+             deducts from InventoryEntity after HTTP 200, FIFO batch deduction, floors at 0,
+             triggers low/out-of-stock notifications.
+- Fix 33: SyncWorker wastage upload (Group L) — ✅ COMPLETE: uploadPendingWastage() sends to
+             Wastage_Ledger sheet tab.
+- Fix 34: WastageViewModel — ✅ COMPLETE: StateFlows for filtered wastage, loss totals, product
+             search. logWastage() deducts stock + triggers OneTimeWorkRequest.
+- Fix 35: WastageLogScreen — ✅ COMPLETE: Summary card, filter chips, lazy list with badges,
+             Log Wastage dialog with inline product search.
+- Fix 36: LowStockViewModel extended (Group H) — ✅ COMPLETE: Added outOfStockItems, nearExpiryItems,
+             expiredItems StateFlows + 3 count StateFlows.
+- Fix 37: StockAlertsScreen (Group D) — ✅ COMPLETE: 3-tab screen (Low Stock / Out of Stock /
+             Expiring Soon) with color-coded badges and day countdown.
+- Fix 38: Alert badges in InventoryCrudScreen — ✅ COMPLETE: SuggestionChip row shows live counts
+             for Low/Out/Expiring. Tapping navigates to stock_alerts route.
+- Fix 39: AdvancedMenuSheet Stock Alerts — ✅ COMPLETE: New onNavigateToStockAlerts param +
+             Stock Alerts MenuItemRow added.
+- Fix 40: AppNavHost wastage_log + stock_alerts routes — ✅ COMPLETE: Both composable routes added.
+             AdvancedMenuSheet callbacks wired in AppNavHost.
+- Fix 41: ExpiryCheckWorker (Group K) — ✅ COMPLETE: Daily PeriodicWorkRequest queries expired +
+             near-expiry items, fires per-product notifications. Scheduled in SyncOrchestrator.
+- Fix 42: InventoryDao new queries — ✅ COMPLETE: getExpiredItemsList, getNearExpiryItemsList,
+             getLowStockItemsAsList (suspend), updateTotalStock added.
+════════════════════════════════════════
+Total Kotlin files found:        ~100 (entities, DAOs, repos, VMs, screens, DI, workers, UseCases)
+Total screens/composables:       33
+  HomeScreen, ReceiptScreen, PaymentDialog, AdvancedMenuSheet
+  InventoryModule (nest), InventoryCrudScreen, CategoryManagementScreen
+  ProductUnitsScreen, StockAdjustmentScreen, BatchListBottomSheet
+  QrGeneratorScreen, OcrEntryScreen
+  PurchaseOrderListScreen, CreatePurchaseOrderScreen, PODetailScreen, VendorManagementScreen
+  GrnListScreen, CreateGrnScreen, GrnDetailScreen, GrnSuccessScreen
+  CrmScreen, HistoryScreen, ZReportScreen, ReturnsScreen, StatementScreen, ExpenseScreen
+  StoreModule (wrapper), SettingsModule (wrapper)
+  TillOpenScreen  [NEW — M-Till]
+  WastageLogScreen  [NEW — Session 2]
+  StockAlertsScreen  [NEW — Session 2]
+
+Total Room entities:             17
+  SyncLogEntity (AppDatabase inline), UserEntity, SaleEntity, InventoryEntity,
+  CustomerEntity, KhataEventEntity, ExpenseEntity, StockAdjustmentEntity,
+  CategoryEntity, ProductBatchEntity, PurchaseOrderEntity, PurchaseOrderItemEntity,
+  VendorEntity, GrnHeaderEntity, GrnItemEntity, ProductUnitEntity,
+  TillSessionEntity  [NEW — M-Till]
+  WastageEntity      [NEW — Session 2]
+
+Total DAOs:                      17
+  SyncLogDao, UserDao, SaleDao, InventoryDao, CustomerDao, KhataEventDao,
+  ExpenseDao, StockAdjustmentDao, CategoryDao, ProductBatchDao, PurchaseOrderDao,
+  VendorDao, GrnDao, ProductUnitDao, (BaseDao - abstract)
+  TillSessionDao  [NEW — M-Till]
+  WastageDao      [NEW — Session 2]
+
+Room DB version:                 17 (migrations v1→v17, all coded — NO fallbackToDestructiveMigration)
+Nav routes defined:              23
+  home, receipt/{invoiceId}, inventory_module, store_module/{startDest},
+  settings_module, po_list, create_po, po_detail/{poId}, grn_list,
+  create_grn/{poId}, grn_success/{grnId}/{newProducts}/{batchesAdded}/{batchesUpdated},
+  vendor_management, stock_adjustment, category_management, product_units,
+  grn_detail/{grnId}, qr/{barcodeId}, till_open  [NEW — M-Till]
+  wastage_log  [NEW — Session 2]
+  stock_alerts [NEW — Session 2]
+  [store sub-routes: crm_screen, returns_screen, history_screen, zreport_screen, expense_screen]
+
+════════════════════════════════════════
+MODULE STATUS SUMMARY
+════════════════════════════════════════
+
+MODULE 1  — Product Management          [8/10 complete]  ⚠️ MOSTLY COMPLETE
+MODULE 2  — Stock Management            [8/8 complete]   ✅ COMPLETE  [+2 this session]
+MODULE 3  — POS Selling Screen          [16/18 complete] ⚠️ MOSTLY COMPLETE
+MODULE 4  — Purchase Orders             [12/13 complete] ⚠️ MOSTLY COMPLETE
+MODULE 5  — GRN                         [14/16 complete] ⚠️ MOSTLY COMPLETE
+MODULE 6  — Batch Tracking              [6/8 complete]   ⚠️ MOSTLY COMPLETE
+MODULE 7  — CRM & Khata                 [5/6 complete]   ⚠️ MOSTLY COMPLETE
+MODULE 8  — Sync & Cloud                [14/15 complete] ⚠️ MOSTLY COMPLETE  [+2 this session]
+MODULE 9  — Hardware                    [5/6 complete]   ⚠️ MOSTLY COMPLETE
+MODULE 10 — Security & Auth             [5/6 complete]   ⚠️ MOSTLY COMPLETE  [+1 this session]
+MODULE 11 — Store Operations            [5/5 complete]   ✅ COMPLETE  [+1 this session]
+MODULE 12 — Till / Shift Management     [5/5 complete]   ✅ COMPLETE
+
+════════════════════════════════════════
+DETAILED MODULE BREAKDOWN
+════════════════════════════════════════
+
+--- MODULE 1: PRODUCT MANAGEMENT ---
+
+1.1 Add Product Form
+    Status: ✅ COMPLETE
+    Frontend: InventoryCrudScreen with InventoryFormDialog — all fields: name, SKU, barcode,
+              category dropdown, description, cost/sell price, tax%, stock, threshold, unit,
+              batch no, mfg/exp date (DatePicker), expiry alert days, damaged stock toggle
+    Backend: InventoryEntity (all fields), InventoryDao (insert, update), AddProductUseCase,
+             InventoryCrudViewModel.saveItem()
+    Sync: Yes — toSyncMap() defined, pending→SyncWorker→Sheet (Inventory tab)
+    Connected to: CategoryManagement, ProductUnits, QrGenerator, OcrEntry
+    Missing: nothing
+
+1.2 Edit Product
+    Status: ✅ COMPLETE
+    Frontend: Same InventoryFormDialog pre-populated when item != null
+    Backend: UpdateProductUseCase, InventoryDao.updateItem()
+    Sync: Yes — syncStatus set to "pending" on save
+    Missing: nothing
+
+1.3 Delete Product (soft delete)
+    Status: ✅ COMPLETE
+    Frontend: Delete icon on InventoryItemCard
+    Backend: InventoryDao.softDeleteById(), DeleteProductUseCase, SyncWorker handles
+             getPendingDeletedRows() and syncs deletion to Sheet
+    Sync: Yes — soft delete synced to Inventory sheet via is_deleted=1
+    Missing: nothing
+
+1.4 Product List Screen (search, filter)
+    Status: ✅ COMPLETE
+    Frontend: LazyColumn with search bar, FilterChip row (ALL, LOW_STOCK, OUT_OF_STOCK,
+              NEAR_EXPIRY, DAMAGED), colored badge on each card
+    Backend: GetProductsUseCase with ProductFilter enum, InventoryDao.searchItems()
+    Sync: N/A (read only)
+    Missing: nothing
+
+1.5 Product Categories (add/edit/list/dropdown)
+    Status: ✅ COMPLETE
+    Frontend: CategoryManagementScreen (standalone) + inline "Manage Categories" modal in
+              InventoryFormDialog; dropdown populated from Room
+    Backend: CategoryEntity, CategoryDao (insert, getAll, softDelete), InventoryCrudViewModel
+    Sync: Yes — Categories tab in Sheet
+    Missing: nothing
+
+1.6 Product Units (add custom units, dropdown in form)
+    Status: ⚠️ INCOMPLETE
+    Frontend: ProductUnitsScreen exists with list and add/delete UI
+    Backend: ProductUnitEntity, ProductUnitDao — all DAOs provided via Hilt
+    Sync: productUnits NOT in SyncOrchestrator/SheetsRepository upload chain
+    Connected to: InventoryFormDialog (unit field is still a plain TextField, not dropdown)
+    Missing: ① Unit dropdown in InventoryFormDialog (still text input)
+             ② ProductUnits not synced to Sheet
+
+1.7 Barcode Generation (ZXing QR)
+    Status: ✅ COMPLETE
+    Frontend: QrGeneratorScreen — renders ZXing QR bitmap, shows label barcode ID
+    Backend: QrGeneratorViewModel.generateQrCode() uses ZXing QRCodeWriter
+    Sync: N/A
+    Connected to: InventoryCrudScreen "Print QR" button → "qr/{barcodeId}" route... 
+    Missing: Route for qr/{barcodeId} is NOT defined in AppNavHost! 
+             InventoryCrudScreen calls onNavigateToQr(item.barcode_id) but NavHost 
+             has no composable("qr/{barcodeId}") entry. Navigation will crash.
+
+1.8 Barcode Scanning in Product Form (ML Kit)
+    Status: ⚠️ INCOMPLETE
+    Frontend: OcrEntryScreen exists (camera scanner for OCR weight reading)
+    Backend: OcrEntryViewModel
+    Sync: N/A
+    Missing: ML Kit barcode scanning in the product form barcode field specifically.
+             OcrEntry is for weight/label scanning, not barcode field auto-fill.
+
+1.9 Multi-Batch per Product (like Dynamics 365)
+    Status: ✅ COMPLETE
+    Frontend: BatchListBottomSheet in module_a — displays batches per product
+    Backend: ProductBatchEntity, ProductBatchDao (all queries + near-expiry + expired)
+             AddBatchToProductUseCase, UpdateBatchStockUseCase
+    Sync: Yes — product_batches → Product_Batches Sheet tab
+    Connected to: GRN (ADD_BATCH, UPDATE_BATCH actions), InventoryCrudScreen
+    Missing: BatchListBottomSheet not accessible via navigation (no route defined)
+
+1.10 ProductBatchEntity + DAO
+     Status: ✅ COMPLETE
+     Backend: ProductBatchEntity (all fields: batchId, productId, barcodeId, batchNumber,
+              mfg/expiry dates, stockQty, costPrice, sellingPrice, isActive, isDeleted,
+              syncStatus, posTerminalId, timestamps), ProductBatchDao (11 queries)
+     Missing: nothing
+
+
+--- MODULE 2: STOCK MANAGEMENT ---
+
+2.1 Current Stock View (list with qty)
+    Status: ✅ COMPLETE
+    Frontend: InventoryCrudScreen shows current_stock badges on every item card
+    Backend: InventoryDao.getAllItems() returns Flow<List<InventoryEntity>>
+    Missing: No dedicated "stock overview" screen (embedded in product list)
+
+2.2 Stock Adjustment Screen (manual +/-)
+    Status: ✅ COMPLETE
+    Frontend: StockAdjustmentScreen — full form with product search, qty, adjustment type,
+              reason, and logged-by field
+    Backend: StockAdjustmentEntity, StockAdjustmentDao, ManualStockAdjustmentUseCase,
+             StockAdjustmentRepositoryImpl
+    Sync: StockAdjustments NOT in Sheet sync chain
+    Missing: Sync of StockAdjustments to Google Sheets
+
+2.3 StockAdjustmentEntity + DAO
+    Status: ✅ COMPLETE
+    Backend: StockAdjustmentEntity (adjustmentId, productId, adjustmentType, quantityChanged,
+             reason, adjustedBy, syncStatus, createdAt), StockAdjustmentDao
+
+2.4 Low Stock Alert (notification + badge)
+    Status: ⚠️ INCOMPLETE
+    Frontend: LowStockViewModel exists (no screen file found in alerts/ dir)
+    Backend: InventoryDao.getLowStockItems() Flow, StockAlertUseCase
+    Missing: ① No LowStockScreen composable file (only ViewModel)
+             ② No push notification implementation for low stock
+
+2.5 Out of Stock Alert
+    Status: 🔧 BACKEND ONLY
+    Backend: InventoryDao.getOutOfStockItems() query exists; StockAlertUseCase references it
+    Frontend: No dedicated out-of-stock alert screen or badge in POS
+    Missing: UI alert/badge in POS screen when item is out of stock
+
+2.6 Expiry Alert (near expiry + expired badges)
+    Status: ⚠️ INCOMPLETE
+    Frontend: InventoryItemCard shows orange badge for near-expiry, red for expired
+    Backend: InventoryDao.getNearExpiryItems(), getExpiredItems(); ProductBatchDao has
+             getNearExpiryBatches(), getExpiredBatches()
+    Missing: No dedicated Expiry Alerts screen accessible from menu
+
+2.7 Auto Stock Deduction on Sale (SyncWorker)
+    Status: ❌ NOT STARTED
+    Backend: CompleteSaleUseCase does NOT deduct stock from InventoryEntity on sale
+             (Blind Selling is the stated rule — stock NOT checked or deducted at POS)
+    Missing: Post-sale stock deduction logic (if ever required)
+
+2.8 Stock Add on Sales Return
+    Status: ⚠️ INCOMPLETE
+    Frontend: ReturnsScreen has "Return to Inventory" button (full return only)
+    Backend: ReturnsViewModel.processFullReturn() — logic present but unclear if it
+             increments InventoryEntity.current_stock
+    Missing: Partial item-level return flow; explicit stock increment on return confirm
+
+
+--- MODULE 3: POS SELLING SCREEN ---
+
+3.1 Product Search (name/SKU/barcode)
+    Status: ✅ COMPLETE
+    Frontend: HomeScreen search TextField, live results from Room
+    Backend: PosViewModel.searchResults (debounced flatMapLatest → InventoryDao.searchItems())
+    Missing: nothing
+
+3.2 HID Scanner support (KeyEvent on TextField)
+    Status: ✅ COMPLETE  [fixed this session]
+    Frontend: HomeScreen PosSearchBar onKeyEvent → KEYCODE_ENTER → onSearchSubmit → addToCart
+    Backend: InventoryDao.getItemByBarcode() — searches by exact barcode string
+    Missing: nothing
+
+3.3 Inline Camera Scanner Box (always-visible)
+    Status: ✅ COMPLETE  [fixed this session]
+    Frontend: InlineCameraBox composable — CameraX 480p preview, ML Kit QR detect,
+              green/red border flash, toggle button in HomeScreen
+    Backend: InlineScannerViewModel — onBarcodeDetected(), debounce 1500ms, debounce guard
+    Missing: nothing
+
+3.4 Camera auto-sleep (4 min timeout)
+    Status: ✅ COMPLETE  [fixed this session]
+    Backend: InlineScannerViewModel.SLEEP_TIMEOUT_MS = 4min, resetSleepTimer() on each scan
+    Missing: nothing
+
+3.5 Quick Grid (pinned items)
+    Status: ✅ COMPLETE  [fixed this session]
+    Frontend: HomeScreen shows quick grid from pinned items only
+    Backend: InventoryEntity (isPinned=false, pinnedOrder=0); MIGRATION_14_15 adds columns;
+             InventoryDao.getPinnedItems() Flow; PosViewModel.quickGridItems uses getPinnedItems()
+    Admin: Admin can set isPinned=true via updatePinStatus() in InventoryCrudViewModel
+    Missing: nothing
+
+3.6 Cart (add/remove/qty change)
+    Status: ✅ COMPLETE
+    Frontend: HomeScreen cart panel with qty controls
+    Backend: PosViewModel: addToCart(), updateCartItemQty(), removeFromCart(), clearCart()
+    Missing: nothing
+
+3.7 Decimal weight input (KG/ML items)
+    Status: ✅ COMPLETE
+    Frontend: ReceiptScreen shows "%.3f KG/GM/ML" formatting for weight units
+    Backend: PosViewModel.addToCart() accepts Double qty
+    Missing: nothing
+
+3.8 Blind Selling (no stock check on POS)
+    Status: ✅ COMPLETE
+    Backend: CompleteSaleUseCase explicitly comments "NEVER checks stock (Blind Selling rule)"
+    Missing: nothing
+
+3.9 Payment Dialog (Cash/Card/Wallet/Udhaar)
+    Status: ✅ COMPLETE
+    Frontend: PaymentDialog.kt (18KB) — tabs for each payment method
+    Backend: PosViewModel.PaymentBreakdown, onPaymentAmountChanged(), PaymentMethod enum
+    Missing: nothing
+
+3.10 Split Payment
+     Status: ✅ COMPLETE
+     Frontend: PaymentDialog supports concurrent amounts across all methods
+     Backend: PaymentBreakdown.methodString returns "SPLIT" when >1 method used
+              SaleEntity persists cash_amount, card_amount, wallet_amount, udhaar_amount
+     Missing: nothing
+
+3.11 Cash Change Calculator
+     Status: ✅ COMPLETE
+     Frontend: ReceiptScreen shows "Change: Rs X.XX" when cash_amount > total
+     Backend: cashChange = sale.cash_amount - sale.total
+     Missing: nothing (real-time change display during payment may need checking in PaymentDialog)
+
+3.12 Udhaar — customer search + new customer
+     Status: ✅ COMPLETE
+     Frontend: PaymentDialog shows customer search when udhaar selected
+     Backend: PosViewModel.customerSearchResults, createAndSelectNewCustomer()
+     Missing: nothing
+
+3.13 KhataEvent saved on Udhaar
+     Status: ✅ COMPLETE
+     Backend: CompleteSaleUseCase saves KhataEventEntity(event_type="UDHAAR") for every
+              udhaar_amount > 0 sale with a linked customer_id
+     Missing: nothing
+
+3.14 Sale saved to Room (syncStatus=pending)
+     Status: ✅ COMPLETE
+     Backend: CompleteSaleUseCase inserts SaleEntity(sync_status="pending") to Room first,
+              then triggers OneTimeWorkRequest for instant sync
+     Missing: nothing
+
+3.15 Receipt Screen
+     Status: ✅ COMPLETE
+     Frontend: ReceiptScreen — shop header, invoice#, date, cashier, line items, subtotal,
+               tax, discount, total, payment breakdown, change, QR code
+     Missing: nothing
+
+3.16 WhatsApp receipt share
+     Status: ✅ COMPLETE
+     Frontend: ReceiptScreen "Share on WhatsApp" button — uses customer's phone/whatsapp or
+               prompts user to enter number; buildReceiptText() formats text receipt
+     Missing: nothing
+
+3.17 Print receipt (ESC/POS BT printer)
+     Status: 🔶 FRONTEND ONLY
+     Frontend: ReceiptScreen has "Print Receipt" button (OutlinedButton)
+     Backend: onClick is a TODO/blank — comment says "M5 integration placeholder snackbar"
+     Missing: ESC/POS Bluetooth printer implementation
+
+3.18 QR on receipt (invoiceId)
+     Status: ✅ COMPLETE
+     Frontend: ReceiptScreen generates ZXing QR from invoiceId using generateQrCode() helper
+     Missing: nothing
+
+
+--- MODULE 4: PURCHASE ORDERS ---
+
+4.1 PO List Screen (filter by status)
+    Status: ⚠️ INCOMPLETE
+    Frontend: PurchaseOrderListScreen — LazyColumn of POs
+    Backend: PurchaseOrderListViewModel reads from PurchaseOrderDao.getAllPOs()
+    Missing: Status filter chips not confirmed in PurchaseOrderListScreen
+
+4.2 Create PO Screen (vendor + items + dates)
+    Status: ✅ COMPLETE
+    Frontend: CreatePurchaseOrderScreen (24KB) — vendor selection/search, item addition,
+              expected delivery date, notes, running total
+    Backend: CreatePurchaseOrderViewModel, CreatePurchaseOrderUseCase
+    Missing: nothing
+
+4.3 Vendor search + new vendor inline
+    Status: ✅ COMPLETE
+    Frontend: CreatePurchaseOrderScreen + VendorManagementScreen
+    Backend: VendorDao (insert, getAll, search), VendorEntity
+    Missing: nothing
+
+4.4 Item search from inventory in PO form
+    Status: ✅ COMPLETE
+    Frontend: CreatePurchaseOrderScreen has inventory search to add items
+    Backend: CreatePurchaseOrderViewModel reads InventoryDao
+    Missing: nothing
+
+4.5 Manual item add in PO
+    Status: ✅ COMPLETE
+    Frontend: CreatePurchaseOrderScreen allows adding new items not in inventory
+    Missing: nothing
+
+4.6 PO share via WhatsApp
+    Status: ✅ COMPLETE
+    Backend: SharePurchaseOrderUseCase (2.6KB) — generates formatted PO text and
+             opens WhatsApp Intent
+    Frontend: PODetailScreen has share button
+    Missing: nothing
+
+4.7 PO Detail Screen
+    Status: ⚠️ INCOMPLETE
+    Frontend: PODetailScreen (14KB) exists
+    Backend: PODetailViewModel reads PO + items from Room
+    Missing: GRN list section within PO detail (getGrnsForPO query exists in GrnDao)
+
+4.8 PO status tracking (DRAFT/SENT/PARTIAL/RECEIVED)
+    Status: ✅ COMPLETE
+    Backend: PurchaseOrderEntity.status field, PurchaseOrderDao.updatePOStatus(),
+             UpdatePOStatusUseCase, ConfirmGrnUseCase auto-updates PO status
+    Missing: nothing
+
+4.9 [Create GRN] button from PO Detail
+    Status: ✅ COMPLETE
+    Frontend: PODetailScreen has "Create GRN" button → navigates to create_grn/{poId}
+    Missing: nothing
+
+4.10 PurchaseOrderEntity + DAO
+     Status: ✅ COMPLETE
+     Backend: PurchaseOrderEntity + PurchaseOrderItemEntity (both in PurchaseOrderEntity.kt),
+              PurchaseOrderDao (insertPO, insertPOItems, getAllPOs, getPOById, getPOItems,
+              updatePOStatus, getPendingPOs, markSynced, getTotalPOCount)
+     Missing: nothing
+
+4.11 PurchaseOrderItemEntity + DAO
+     Status: ✅ COMPLETE (embedded in PurchaseOrderDao)
+     Missing: nothing
+
+4.12 VendorEntity + DAO
+     Status: ✅ COMPLETE
+     Backend: VendorEntity (all fields), VendorDao; provided in DatabaseModule
+     Missing: VendorRepository NOT bound in RepositoryModule (missing @Binds for
+              VendorRepositoryImpl — if it exists, it is NOT in RepositoryModule.kt)
+
+4.13 PO sync to Google Sheets
+     Status: ✅ COMPLETE
+     Backend: SheetsRepository defines Purchase_Orders + PO_Items tabs with headers;
+              SheetColumns.PURCHASE_ORDERS and PO_ITEMS defined
+     Missing: Verify SyncWorker actually calls uploadBatch for PurchaseOrders table name
+
+
+--- MODULE 5: GRN ---
+
+5.1 GRN List Screen
+    Status: ✅ COMPLETE
+    Frontend: GrnListScreen — all GRN headers from Room via Flow
+    Backend: GrnListViewModel, GrnDao.getAllGrns()
+    Missing: nothing
+
+5.2 Create GRN Screen (pre-loaded from PO)
+    Status: ✅ COMPLETE
+    Frontend: CreateGrnScreen (13KB) — pre-loads PO items, allows editing per-item
+    Backend: CreateGrnViewModel, grnRepository.getGrnItems(), purchaseOrderDao.getPOItems()
+    Missing: nothing
+
+5.3 Per-item received qty editing
+    Status: ✅ COMPLETE
+    Frontend: CreateGrnScreen — each item row has editable receivedQty field
+    Missing: nothing
+
+5.4 Batch info entry per item (batch no, mfg, expiry)
+    Status: ✅ COMPLETE
+    Frontend: CreateGrnScreen — batch number, mfg date, expiry date fields per item
+    Missing: nothing
+
+5.5 Inventory action selection (NEW/ADD_BATCH/UPDATE)
+    Status: ✅ COMPLETE
+    Frontend: CreateGrnScreen — inventoryAction dropdown per item
+    Backend: GrnItemEntity.inventoryAction field (PENDING|NEW_ITEM|ADD_BATCH|UPDATE_BATCH)
+    Missing: nothing
+
+5.6 NEW_PRODUCT flow (create product + batch on confirm)
+    Status: ✅ COMPLETE
+    Backend: ConfirmGrnUseCase handles "NEW_PRODUCT"/"NEW_ITEM" — creates InventoryEntity +
+             ProductBatchEntity, updates grnItemBatchId
+    Missing: nothing
+
+5.7 ADD_BATCH flow (new batch to existing product)
+    Status: ✅ COMPLETE
+    Backend: ConfirmGrnUseCase "ADD_BATCH" — inserts new ProductBatchEntity,
+             recalculateTotalStock(), updates grnItemBatchId
+    Missing: nothing
+
+5.8 UPDATE_BATCH flow (increment existing batch qty)
+    Status: ✅ COMPLETE
+    Backend: ConfirmGrnUseCase "UPDATE_BATCH"/"PENDING" — incrementBatchStock(),
+             recalculateTotalStock()
+    Missing: nothing
+
+5.9 totalStock recalculation after GRN confirm
+    Status: ✅ COMPLETE
+    Backend: InventoryRepository.recalculateTotalStock() called for ADD_BATCH and
+             UPDATE_BATCH actions in ConfirmGrnUseCase
+    Missing: nothing
+
+5.10 PO status auto-update after GRN
+     Status: ✅ COMPLETE
+     Backend: ConfirmGrnUseCase.updateLinkedPOStatus() — checks all PO items' receivedQty
+              vs orderedQty to determine RECEIVED/PARTIALLY_RECEIVED/SENT
+     Missing: nothing
+
+5.11 GRN Detail Screen (read-only)
+     Status: ✅ COMPLETE
+     Frontend: GrnDetailScreen (10KB) — read-only view of header + items
+     Backend: GetGrnDetailUseCase
+     Missing: nothing
+
+5.12 GRN Success Screen (summary)
+     Status: ✅ COMPLETE
+     Frontend: GrnSuccessScreen — shows newProductsCreated, batchesAdded, batchesUpdated
+               counts + navigates home
+     Missing: nothing
+
+5.13 GrnHeaderEntity + DAO
+     Status: ✅ COMPLETE
+     Backend: GrnHeaderEntity (all fields including poNumber, vendorPhone, receivedByName,
+              etc after v12→v13 migration), GrnDao (18 queries)
+     Missing: nothing
+
+5.14 GrnItemEntity + DAO
+     Status: ✅ COMPLETE
+     Backend: GrnItemEntity (all fields), GrnDao.insertGrnItems(), getGrnItems(),
+              updateGrnItemBatchId(), etc
+     Missing: nothing
+
+5.15 GRN sync to Google Sheets
+     Status: ✅ COMPLETE
+     Backend: SheetsRepository defines GRN_Headers + GRN_Items tabs with SheetColumns headers
+     Missing: Verify SyncWorker calls uploadBatch for grn_headers and grn_items tables
+
+5.16 ConfirmGrnUseCase (all 3 inventory actions)
+     Status: ✅ COMPLETE
+     Backend: Full implementation handling NEW_PRODUCT, ADD_BATCH, UPDATE_BATCH/PENDING
+     Missing: nothing
+
+
+--- MODULE 6: BATCH TRACKING ---
+
+6.1 ProductBatchEntity
+    Status: ✅ COMPLETE (see 1.10)
+
+6.2 Batch list per product (bottom sheet)
+    Status: ⚠️ INCOMPLETE
+    Frontend: BatchListBottomSheet.kt exists in module_a
+    Missing: No navigation route to BatchListBottomSheet — cannot be accessed from
+             InventoryCrudScreen or any other screen via nav
+
+6.3 Add new batch to existing product
+    Status: 🔧 BACKEND ONLY
+    Backend: AddBatchToProductUseCase functional
+    Frontend: No dedicated "Add Batch" UI outside of GRN flow
+
+6.4 Edit batch details
+    Status: ❌ NOT STARTED
+    Frontend: No batch editing dialog/screen
+    Backend: ProductBatchDao.updateBatchStock() only; no full update function
+
+6.5 Batch dropdown in GRN (update existing)
+    Status: ✅ COMPLETE
+    Frontend: CreateGrnScreen — batch selection for UPDATE_BATCH action
+    Missing: nothing
+
+6.6 Expiry date color badges (green/orange/red)
+    Status: ✅ COMPLETE
+    Frontend: InventoryItemCard shows colored badge based on expiry/stock status
+    Missing: No badge in ProductBatch-level views
+
+6.7 Near-expiry query (within 30 days)
+    Status: ✅ COMPLETE
+    Backend: ProductBatchDao.getNearExpiryBatches() + InventoryDao.getNearExpiryItems()
+    Missing: No screen that displays this list to the user
+
+6.8 Expired items query
+    Status: ✅ COMPLETE
+    Backend: ProductBatchDao.getExpiredBatches() + InventoryDao.getExpiredItems()
+    Missing: No screen that displays this list
+
+
+--- MODULE 7: CRM & KHATA ---
+
+7.1 Customer list
+    Status: ✅ COMPLETE
+    Frontend: CrmScreen left panel — searchable customer list from Room
+    Backend: CrmViewModel, CustomerDao.getAllCustomers() + searchCustomers()
+    Missing: nothing
+
+7.2 Add/edit customer
+    Status: ⚠️ INCOMPLETE
+    Frontend: CrmScreen has AddCustomerDialog (name + phone only)
+    Backend: CustomerDao.insert() via BaseDao
+    Missing: ① Edit customer flow (no edit dialog)
+             ② WhatsApp number field missing from AddCustomerDialog
+             ③ Email/address fields not in dialog
+
+7.3 Khata ledger (append-only events)
+    Status: ✅ COMPLETE
+    Frontend: CrmScreen right panel — UDHAAR / JAMA event entry dialogs
+    Backend: KhataEventDao.getEventsForCustomer(), KhataEventEntity
+    Missing: No LazyColumn showing the ledger events list in CrmScreen right panel
+             (only balance totals shown, no event history list)
+
+7.4 Balance calculation (SUM of events)
+    Status: ✅ COMPLETE
+    Backend: KhataEventDao.getTotalUdhaarFlow(), getTotalJamaFlow(), getBaqayaBalanceFlow()
+             displayed in CrmScreen StatisticBox
+    Missing: nothing
+
+7.5 WhatsApp statement share
+    Status: ⚠️ INCOMPLETE
+    Frontend: CrmScreen "WhatsApp Statement" button calls onNavigateToStatement(customerId)
+    Backend: StatementScreen + StatementViewModel exist
+    Missing: Navigation route for "statement/{customerId}" not defined in AppNavHost
+
+7.6 Customer search in POS Udhaar flow
+    Status: ✅ COMPLETE
+    Backend: PosViewModel.customerSearchResults + createAndSelectNewCustomer()
+    Frontend: PaymentDialog customer search
+    Missing: nothing
+
+
+--- MODULE 8: SYNC & CLOUD ---
+
+8.1 Google OAuth 2.0 login
+    Status: ✅ COMPLETE
+    Backend: AuthRepositoryImpl, Google Sign-In; AppSetupPrefs stores auth tokens
+    Missing: nothing
+
+8.2 SheetsApiClient (Retrofit + OkHttp)
+    Status: ✅ COMPLETE
+    Backend: NetworkModule.kt, SheetsRemoteDataSource, RestApiSyncImpl
+    Missing: nothing
+
+8.3 Auto sync (PeriodicWorkRequest 15 min)
+    Status: ✅ COMPLETE
+    Backend: SyncOrchestrator.scheduleSyncWorkers() — PeriodicWorkRequestBuilder<SyncWorker>
+             (15, TimeUnit.MINUTES) with NetworkType.CONNECTED constraint
+    Missing: nothing
+
+8.4 Force sync button
+    Status: ✅ COMPLETE
+    Frontend: AdvancedMenuSheet has "Force Sync" → HomeViewModel.forceSync()
+    Backend: SyncOrchestrator.triggerManualSync() → OneTimeWorkRequest<SyncWorker>
+    Missing: nothing
+
+8.5 syncStatus pending → synced on HTTP 200
+    Status: ✅ COMPLETE
+    Backend: SyncWorker marks rows synced after successful uploadBatch
+    Missing: nothing
+
+8.6 Delete sync (soft delete → Sheet deleteDimension)
+    Status: ✅ COMPLETE
+    Backend: SheetsRepository.deleteRow() using SheetsRemoteDataSource.deleteRow()
+             + getPendingDeletedRows() queries in SaleDao, InventoryDao, CustomerDao, etc.
+    Missing: Nothing in InventoryDao (has it), but StockAdjustments, Batches, Vendors,
+             GRN tables lack getPendingDeletedRows() equivalents in SyncWorker
+
+8.7 Delta sync (60s polling)
+    Status: ✅ COMPLETE
+    Backend: DeltaSyncManager started via SyncOrchestrator.scheduleAll()
+             SheetsRepository.fetchDelta() reads changed rows from Sheets
+    Missing: nothing
+
+8.8 Monthly sharding (Sales tabs)
+    Status: ✅ COMPLETE
+    Backend: ShardingWorker (daily) + SheetsRepository.currentSalesTab() returns
+             "Sales_Mar_2026" style tab name
+    Missing: nothing
+
+8.9 Schema guard (column verification)
+    Status: ✅ COMPLETE
+    Backend: SchemaGuardUseCase called on startup via SyncOrchestrator.scheduleAll()
+             SheetsRepository.ensureSysDbTabHidden()
+    Missing: nothing
+
+8.10 Products sync to Sheet
+     Status: ✅ COMPLETE
+     Backend: SheetsRepository.uploadBatch("Inventory", ...) → Inventory tab
+     Missing: nothing
+
+8.11 Sales sync to Sheet
+     Status: ✅ COMPLETE
+     Backend: Synced to monthly sharded tab (Sales_Mar_2026 etc)
+     Missing: nothing
+
+8.12 PO sync to Sheet
+     Status: ⚠️ INCOMPLETE
+     Backend: SheetsRepository defines Purchase_Orders + PO_Items tabs with headers
+     Missing: SyncWorker uploadBatch call for "purchase_orders" table not confirmed —
+              SheetsRepository.uploadBatch() only maps known tableName strings to tabs,
+              and "purchase_orders" is NOT in the when() block (falls to raw values)
+
+8.13 GRN sync to Sheet
+     Status: ⚠️ INCOMPLETE (same issue as 8.12)
+     Missing: SyncWorker uploadBatch for grn_headers/grn_items not explicitly verified
+
+8.14 Khata events sync to Sheet
+     Status: ✅ COMPLETE
+     Backend: "KhataEvents" / "Khata_Events" handled in SheetsRepository.uploadBatch()
+     Missing: nothing
+
+8.15 Batch sync to Sheet
+     Status: ⚠️ INCOMPLETE
+     Backend: Product_Batches tab defined in SheetsRepository workspace setup
+     Missing: SyncWorker call for "product_batches" table not confirmed
+
+
+--- MODULE 9: HARDWARE ---
+
+9.1 Bluetooth receipt printer (ESC/POS)
+    Status: ❌ NOT STARTED
+    Frontend: Print button exists in ReceiptScreen (blank onClick)
+    Missing: ESC/POS BT printing implementation
+
+9.2 Label printer (TSPL/ZPL)
+    Status: ⚠️ INCOMPLETE
+    Frontend: QrGeneratorScreen has "Print to TSPL Printer" button
+    Backend: QrGeneratorViewModel.printQrCode() — partial implementation
+    Missing: Full TSPL Bluetooth printing pipeline
+
+9.3 HID barcode scanner
+    Status: ⚠️ INCOMPLETE
+    Frontend: HomeScreen has scanner support referenced
+    Missing: Cannot confirm complete KeyEvent interception for HID in reviewed files
+
+9.4 ML Kit camera scanner
+    Status: ⚠️ INCOMPLETE
+    Frontend: OcrEntryScreen exists (for weight/label OCR)
+    Missing: Dedicated barcode scanning via ML Kit in product form
+
+9.5 Torch toggle in scanner
+    Status: ❌ NOT STARTED
+    Missing: No torch toggle found
+
+9.6 Haptic + beep on scan
+    Status: ❌ NOT STARTED
+    Missing: No haptic/beep on successful scan
+
+
+--- MODULE 10: SECURITY & AUTH ---
+
+10.1 Google Sign-In
+     Status: ✅ COMPLETE
+     Backend: AuthRepositoryImpl handles Google Sign-In flow
+     Missing: nothing
+
+10.2 Role-based access (Admin/Manager/Cashier)
+     Status: ⚠️ INCOMPLETE
+     Backend: UserEntity has "role" field, UserDao defined
+     Missing: No role-based UI gates or permission checks in screens
+
+10.3 Root detection (RootBeer)
+     Status: ✅ COMPLETE
+     Frontend: AppNavHost checks isRooted via RootBeer and shows RootBlockedScreen
+     Missing: nothing
+
+10.4 ProGuard/R8 enabled
+     Status: ⚠️ UNKNOWN
+     Missing: app/build.gradle not read — could not verify minifyEnabled / R8 config
+
+10.5 Forced update mechanism
+     Status: ⚠️ INCOMPLETE
+     Backend: AppSettings.minAppVersion read from Sheets Settings tab
+     Missing: No UI enforcement / update prompt dialog found in reviewed files
+
+10.6 EncryptedSharedPreferences for tokens
+     Status: ⚠️ INCOMPLETE
+     Backend: AppSetupPrefs stores tokens (SharedPreferences)
+     Missing: Encryption not confirmed — standard SharedPreferences may be used
+
+
+--- MODULE 11: STORE OPERATIONS ---
+
+11.1 Z-Report / Day Close
+     Status: ✅ COMPLETE
+     Frontend: ZReportScreen — today's sales total, expenses, net cash drawer, pending sync
+               warning, "Close Day" button (blocked if pending > 0)
+     Backend: ZReportViewModel. executeDayClose() reads from SaleDao + ExpenseDao
+     Missing: Report printout / PDF export
+
+11.2 Transaction History (filter + search)
+     Status: ⚠️ INCOMPLETE
+     Frontend: HistoryScreen — searchable list of all sales with print duplicate button
+     Backend: HistoryViewModel, SaleDao.getAllSales()
+     Missing: Date range filter / payment method filter
+
+11.3 Returns & Refunds
+     Status: ⚠️ INCOMPLETE
+     Frontend: ReturnsScreen — invoice lookup by UUID, full return with reason selection
+     Backend: ReturnsViewModel.processFullReturn() — creates negative SaleEntity
+     Missing: ① Partial item-level refund (only full invoice return implemented)
+              ② Explicit stock increment when "Return to Inventory" chosen
+
+11.4 Expense Tracking
+     Status: ✅ COMPLETE
+     Frontend: ExpenseScreen — add expense with category/amount/description
+     Backend: ExpenseEntity, ExpenseDao, ExpenseViewModel
+     Sync: Yes — Expenses tab in Sheet
+     Missing: nothing
+
+11.5 Wastage Ledger
+     Status: 🔧 BACKEND ONLY
+     Backend: Wastage_Ledger tab defined in SheetsRepository tabs list + headers
+     Frontend: No WastageLedger screen found
+     Missing: Screen + ViewModel + Entity for wastage tracking
+
+════════════════════════════════════════
+MODULE INTERCONNECTIONS
+════════════════════════════════════════
+
+POS Screen (HomeScreen + PosViewModel)
+  → reads from: InventoryEntity (Room via InventoryDao.searchItems(), getAllItems())
+  → reads from: CustomerEntity (Room via CustomerDao.searchCustomers())
+  → writes to: SaleEntity (Room, syncStatus=pending) via CompleteSaleUseCase
+  → writes to: KhataEventEntity (Room) on udhaar sales via CompleteSaleUseCase
+  → triggers: OneTimeWorkRequest<SyncWorker> immediately after sale
+  → navigates to: ReceiptScreen (receipt/{invoiceId})
+  → navigates via AdvancedMenuSheet to: InventoryModule, CrmScreen, HistoryScreen,
+    ZReportScreen, ReturnsScreen, ExpenseScreen, POList, GRNList, StockAdjustment, Settings
+
+CompleteSaleUseCase
+  → SaleDao.insertSale() (Room)
+  → KhataEventDao.insert() (Room, on udhaar)
+  → CustomerDao.insert() (Room, new customer flow)
+  → WorkManager.enqueueUniqueWork(SyncWorker)
+
+SyncOrchestrator (App startup)
+  → SyncWorker (15 min periodic, OneTimeWork on force-sync/post-sale)
+  → ShardingWorker (daily — monthly Sales tab creation)
+  → DisasterWorker (23:59 daily — backup)
+  → DeltaSyncManager.startPolling() (60s polling)
+  → SchemaGuardUseCase() (SYS_DB tab verification)
+
+SyncWorker
+  → SaleDao.getPendingSyncSales() → SheetsRepository.uploadBatch("Sales", ...)
+  → InventoryDao.getPendingItems() → SheetsRepository.uploadBatch("Inventory", ...)
+  → CustomerDao.getPendingCustomers() → SheetsRepository.uploadBatch("Customers", ...)
+  → KhataEventDao.getPendingKhataEvents() → SheetsRepository.uploadBatch("KhataEvents", ...)
+  → ExpenseDao pending rows → SheetsRepository.uploadBatch("Expenses", ...)
+  → CategoryDao pending → SheetsRepository.uploadBatch("Categories", ...)
+  → Soft-delete: getPendingDeletedRows() → SheetsRepository.deleteRow()
+
+GRN Flow
+  → CreateGrnScreen → CreateGrnViewModel → GrnRepository.saveGrn()
+  → GrnDao.insertGrnHeader() + insertGrnItems() (Room)
+  → CreateGrnScreen "Confirm" → ConfirmGrnUseCase →
+      NEW_PRODUCT: InventoryRepository.insertItem() + ProductBatchRepository.insertBatch()
+      ADD_BATCH: ProductBatchRepository.insertBatch() + InventoryRepository.recalculateTotalStock()
+      UPDATE_BATCH: ProductBatchRepository.incrementBatchStock() + recalculateTotalStock()
+  → PurchaseOrderDao.updatePOStatus() (auto status: RECEIVED/PARTIALLY_RECEIVED)
+  → GrnSuccessScreen (summary of created/added/updated counts)
+
+Purchase Order Flow
+  → CreatePurchaseOrderScreen → CreatePurchaseOrderViewModel →
+    PurchaseOrderDao.insertPO() + insertPOItems()
+  → SharePurchaseOrderUseCase → WhatsApp Intent
+  → PODetailScreen → "Create GRN" → create_grn/{poId}
+
+CRM Flow
+  → CrmScreen → CrmViewModel → CustomerDao (search, add, select)
+  → KhataEventDao (getTotalUdhaarFlow, getTotalJamaFlow, getBaqayaBalanceFlow per customer)
+  → "WhatsApp Statement" → StatementScreen (route missing in NavHost)
+
+Inventory CRUD
+  → InventoryCrudScreen → InventoryCrudViewModel → InventoryDao + CategoryDao
+  → "Print QR" → QrGeneratorScreen (route "qr/{barcodeId}" MISSING in NavHost)
+  → "OCR Entry" → OcrEntryScreen → savedStateHandle → InventoryFormDialog prefill
+
+════════════════════════════════════════
+NAVIGATION MAP
+════════════════════════════════════════
+
+All defined routes:
+home                                           → HomeScreen + AdvancedMenuSheet    [WORKING]
+receipt/{invoiceId}                            → ReceiptScreen                      [WORKING]
+inventory_module                               → InventoryModule (nested nav)        [WORKING]
+store_module/{startDest}                       → StoreModule (nested nav)            [WORKING]
+settings_module                                → SettingsModule (nested nav)         [WORKING]
+po_list                                        → PurchaseOrderListScreen             [WORKING]
+create_po                                      → CreatePurchaseOrderScreen           [WORKING]
+po_detail/{poId}                               → PODetailScreen                      [WORKING]
+grn_list                                       → GrnListScreen                       [WORKING]
+create_grn/{poId}                              → CreateGrnScreen                     [WORKING]
+grn_success/{grnId}/{newProducts}/{...}        → GrnSuccessScreen                   [WORKING]
+vendor_management                              → VendorManagementScreen              [WORKING]
+stock_adjustment                               → StockAdjustmentScreen               [WORKING]
+category_management                            → CategoryManagementScreen            [WORKING]
+product_units                                  → ProductUnitsScreen                  [WORKING]
+grn_detail/{grnId}                             → GrnDetailScreen                    [WORKING]
+
+Store sub-routes (nested inside StoreModule):
+crm_screen           → CrmScreen                                                    [WORKING]
+returns_screen       → ReturnsScreen                                                [WORKING]
+history_screen       → HistoryScreen                                                [WORKING]
+zreport_screen       → ZReportScreen                                                [WORKING]
+expense_screen       → ExpenseScreen                                                [WORKING]
+statement/{id}       → StatementScreen                                              [BROKEN — missing route]
+
+Inventory sub-routes (nested inside InventoryModule):
+[managed internally by InventoryModule nested NavHost — routes not read]
+
+MISSING ROUTES (will crash if navigated):
+  "qr/{barcodeId}"        — InventoryCrudScreen.onNavigateToQr() called but not in AppNavHost
+  "statement/{customerId}" — CrmScreen "WhatsApp Statement" button route missing
+
+Menu items (AdvancedMenuSheet):
+  Inventory         → inventory_module      [WORKING]
+  CRM               → store_module/crm_screen   [WORKING]
+  Returns           → store_module/returns_screen [WORKING]
+  History           → store_module/history_screen [WORKING]
+  Z-Report          → store_module/zreport_screen [WORKING]
+  Expenses          → store_module/expense_screen [WORKING]
+  Settings          → settings_module       [WORKING]
+  Purchase Orders   → po_list               [WORKING]
+  GRN               → grn_list              [WORKING]
+  Vendors           → vendor_management     [WORKING]
+  Stock Adjustment  → stock_adjustment      [WORKING]
+  Force Sync        → HomeViewModel.forceSync() [WORKING]
+
+════════════════════════════════════════
+WHAT IS WORKING END-TO-END
+════════════════════════════════════════
+
+Features that work completely from UI → Room → Sync:
+
+1. POS Sale Flow — product search → cart → payment (cash/card/wallet/split) → Room → WhatsApp receipt
+2. Udhaar Sale — payment dialog → customer select/create → KhataEvent Room → sync
+3. Cash Change Calculator — cart total vs cash entered, change displayed on receipt
+4. QR Receipt — ZXing QR generated from invoiceId on receipt
+5. WhatsApp Receipt Share — native Intent, formatted text receipt
+6. Add Product — all 17 fields, category dropdown, date pickers → Room → Inventory Sheet
+7. Edit Product — same form pre-populated
+8. Soft Delete Product — Room soft delete → SyncWorker → Sheet deleteDimension
+9. Product List with Search — debounced search, filter chips (5 filters), colored badges
+10. Category Add/Delete — inline in product form + standalone screen → Room → Sheet
+11. Stock Adjustment — manual +/- form → Room (StockAdjustmentEntity)
+12. Purchase Order Create — vendor + items + dates → Room
+13. PO Share via WhatsApp — formatted PO text → Intent
+14. GRN Create from PO — pre-loaded items, batch info entry → Room
+15. GRN Confirm (NEW_PRODUCT) — creates InventoryEntity + ProductBatchEntity
+16. GRN Confirm (ADD_BATCH) — new batch + totalStock recalc
+17. GRN Confirm (UPDATE_BATCH) — increment existing batch + totalStock recalc
+18. PO Status Auto-Update after GRN confirm (RECEIVED/PARTIALLY_RECEIVED)
+19. Customer List + Search + Add (basic) — Room → Sheet
+20. Khata Balance (Udhaar/Jama/Baqaya SUM) — aggregation queries in Room displayed live
+21. Khata Event Manual Add (UDHAAR/JAMA from CRM screen)
+22. Transaction History — searchable sales list from Room
+23. Returns & Refunds — invoice lookup → full return → negative sale written to Room
+24. Z-Report Day Close — today's sales + expenses, net drawer, pending sync guard
+25. Expense Tracking — add expense → Room → Sheet
+26. Auto Sync (15 min periodic) — SyncWorker for Sales, Inventory, Customers, Khata, Expenses, Categories
+27. Force Sync — OneTimeWorkRequest on button tap
+28. Monthly Sales Sharding — new Sales_Month_Year tab created monthly
+29. Delta Sync (60s polling) — reads updated rows from Sheet
+30. Schema Guard — SYS_DB tab verification on startup
+31. Root Detection — RootBeer check, blocks app if rooted
+32. QR Generator — ZXing QR from barcode_id, display + TSPL print attempt
+33. OCR Entry (weight scanner) — camera OCR → pre-fills product form
+34. Vendor Management — add/search/list vendors → Room
+35. Product Units Screen — add/list custom units → Room (not yet in sync or form dropdown)
+
+════════════════════════════════════════
+FRONTEND ONLY (Dummy — No Real Data)
+════════════════════════════════════════
+
+1. Quick Grid — shows first 20 items alphabetically (no pinning mechanism)
+2. Print Receipt button — UI exists, onClick is blank/TODO
+3. TSPL Label Print — button calls ViewModel but full BT pipeline incomplete
+
+════════════════════════════════════════
+BACKEND ONLY (Logic exists, No UI)
+════════════════════════════════════════
+
+1. LowStockAlert — LowStockViewModel exists, no screen file
+2. Near-expiry batch list — ProductBatchDao.getNearExpiryBatches() query, no screen
+3. Expired batch list — ProductBatchDao.getExpiredBatches() query, no screen
+4. AddBatchToProductUseCase — works in GRN flow, no standalone "Add Batch" UI for existing products
+5. WastageLedger — Wastage_Ledger tab defined in Sheets, no entity/screen
+
+════════════════════════════════════════
+INCOMPLETE FEATURES
+════════════════════════════════════════
+
+1. Product Units dropdown in InventoryFormDialog — built: ProductUnitEntity+DAO+Screen; missing: form dropdown wired to ProductUnitDao
+2. QR navigation route — built: QrGeneratorScreen; missing: "qr/{barcodeId}" in AppNavHost
+3. Statement route — built: StatementScreen + ViewModel; missing: nav route in StoreModule
+4. Add Customer form — built: basic dialog; missing: WhatsApp/email/address fields + edit flow
+5. Khata event history list — built: KhataEventDao.getEventsForCustomer(); missing: list in CrmScreen right panel
+6. PO List status filter — built: PurchaseOrderListScreen; missing: filter chips by status
+7. PO Detail GRN section — built: GrnDao.getGrnsForPO(); missing: GRN list in PODetailScreen
+8. BatchListBottomSheet navigation — built: BatchListBottomSheet.kt; missing: nav route to access it
+9. Edit batch details — built: ProductBatchDao; missing: edit dialog/screen
+10. PO/GRN/Batch Sheet sync — built: table+headers in SheetsRepository; missing: confirmed SyncWorker upload calls
+11. StockAdjustments Sheet sync — built: entity+DAO; missing: sync upload chain
+12. Role-based access — built: UserEntity.role; missing: UI gates
+13. Forced update enforcement — built: minAppVersion from Settings; missing: update prompt dialog
+14. EncryptedSharedPreferences — built: AppSetupPrefs; missing: confirm encryption used
+15. Stock deduction on sale — intentionally not built (Blind Selling rule); may need revisiting
+16. Stock add on return — built: ReturnsScreen "Return to Inventory" button; missing: inventory increment on confirm
+17. Date range filter in History — built: HistoryScreen; missing: date filter UI
+18. ProGuard/R8 verification — build.gradle not analyzed
+
+════════════════════════════════════════
+NOT STARTED
+════════════════════════════════════════
+
+1. Camera auto-sleep (4 min timeout) — 3.4
+2. ESC/POS Bluetooth receipt printer — 9.1
+3. Torch toggle in camera scanner — 9.5
+4. Haptic + beep on scan — 9.6
+5. Wastage Ledger screen/entity — 11.5 (only Sheet tab defined)
+6. Auto stock deduction on sale — 2.7 (by design/Blind Selling, but noted as missing)
+7. Low Stock push notification — 2.4 backend only
+8. Out of stock alert screen/badge — 2.5
+
+════════════════════════════════════════
+PRIORITY BUILD ORDER (Recommended)
+════════════════════════════════════════
+
+1.  Fix QR navigation route — reason: crash-fix, trivial (add composable to AppNavHost)
+2.  Fix Statement navigation route — reason: crash-fix, trivial (add route in StoreModule)
+3.  Wire ProductUnits dropdown in InventoryFormDialog — reason: feature complete with 1 connection change
+4.  Add Khata event list in CrmScreen — reason: backend query exists, just render a LazyColumn
+5.  Edit Customer dialog — reason: CustomerDao has all needed queries
+6.  BatchListBottomSheet navigation — reason: screen built, just needs a nav route
+7.  Add batch edit dialog — reason: DAO supports update, just needs UI
+8.  Stock increment on Returns "Return to Inventory" — reason: ReturnsViewModel already processes the return
+9.  Confirm + fix SyncWorker for PO/GRN/Batch tables — reason: Sheets tabs exist, worker chain needs verification
+10. Sync StockAdjustments to Sheet — reason: entity+DAO complete, only upload call missing
+11. Implement ESC/POS Bluetooth receipt printing — reason: all receipt text already built, just needs BT pipe
+12. Low Stock notification — reason: DAO query + ViewModel exist
+13. PO List status filter chips — reason: simple UI addition to existing screen
+14. History date range filter — reason: simple UI addition + DAO date query
+15. Role-based UI gating — reason: UserEntity role exists, needs enforcement logic
+16. Near-expiry / expired alerts screen — reason: DAOs exist, just needs new screen
+17. Camera auto-sleep timer — reason: independent feature
+18. Haptic + beep on scan — reason: independent small feature
+19. Wastage Ledger entity + screen — reason: Sheet tab defined, entity still needed
+20. Forced update dialog enforcement — reason: version data already read from Sheets
+
+════════════════════════════════════════
+ROOM DATABASE STATUS
+════════════════════════════════════════
+
+Current DB version: 14
+Registered entities (15):
+  SyncLogEntity, UserEntity, SaleEntity, InventoryEntity, CustomerEntity,
+  KhataEventEntity, ExpenseEntity, StockAdjustmentEntity, CategoryEntity,
+  ProductBatchEntity, PurchaseOrderEntity, PurchaseOrderItemEntity,
+  VendorEntity, GrnHeaderEntity, GrnItemEntity, ProductUnitEntity
+
+Missing entity registrations: NONE — all entities declared in @Database annotation
+
+Abstract DAO functions present: 14 (all DAOs declared as abstract fun in AppDatabase)
+All DAOs provided via Hilt in DatabaseModule: YES (all 14 @Provides functions present)
+
+Migration chain: v1→v2→v3→v4→v5→v6→v7→v8→v9→v10→v11→v12→v13→v14
+  All migrations explicitly coded — no fallbackToDestructiveMigration
+
+════════════════════════════════════════
+GOOGLE SHEETS SYNC STATUS
+════════════════════════════════════════
+
+Tabs being actively synced (confirmed in SheetsRepository.uploadBatch when() block):
+  Sales_[Month]_[Year]  — monthly sharded, Sales table
+  Inventory             — InventoryEntity
+  Customers             — CustomerEntity
+  Khata_Events          — KhataEventEntity
+  Expenses              — ExpenseEntity
+  Categories            — CategoryEntity
+  Users_Permissions     — UserEntity
+
+Tabs defined in workspace setup but sync NOT confirmed in SyncWorker:
+  Purchase_Orders       — defined in buildHeaders, SheetColumns.PURCHASE_ORDERS
+  PO_Items              — defined in buildHeaders, SheetColumns.PO_ITEMS
+  GRN_Headers           — defined in buildHeaders, SheetColumns.GRN_HEADERS
+  GRN_Items             — defined in buildHeaders, SheetColumns.GRN_ITEMS
+  Vendors               — defined in buildHeaders, SheetColumns.VENDORS
+  Product_Batches       — defined in buildHeaders, SheetColumns.PRODUCT_BATCHES
+  Returns               — headers col list defined (no entity mapped)
+  Wastage_Ledger        — headers col list defined (no entity mapped)
+
+Tabs defined but not syncing (no entity + no sync worker call):
+  Dashboard             — read-only analytics tab (no write logic)
+  Sync_Log              — meta tab
+  Settings              — read on startup only
+  SYS_DB_DO_NOT_TOUCH   — hidden system tab, schema guard only
+
+════════════════════════════════════════
+HILT DEPENDENCY STATUS
+════════════════════════════════════════
+
+Bound repositories (in RepositoryModule.kt):
+  AuthRepository       → AuthRepositoryImpl
+  UserRepository       → UserRepositoryImpl
+  SaleRepository       → SaleRepositoryImpl
+  InventoryRepository  → InventoryRepositoryImpl
+  StoreRepository      → StoreRepositoryImpl
+  GrnRepository        → GrnRepositoryImpl
+  ProductBatchRepository → ProductBatchRepositoryImpl
+
+Unbound repositories (implementations exist in data/repository/ but NOT in RepositoryModule):
+  StockAdjustmentRepositoryImpl — exists as impl, not bound to interface
+  SheetsRepository              — @Singleton @Inject constructor (direct, no interface)
+
+Missing @Binds for domain interfaces (if domain/repository interfaces exist for):
+  VendorRepository    — VendorDao is provided but no VendorRepositoryImpl/Interface binding found
+  CustomerRepository  — CustomerDao provided; StoreRepository may cover this
+
+All 14 DAOs provided via @Provides in DatabaseModule: CONFIRMED ✅
+
+════════════════════════════════════════
+END OF REPORT
+════════════════════════════════════════

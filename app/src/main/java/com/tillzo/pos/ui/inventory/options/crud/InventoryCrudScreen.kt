@@ -1,0 +1,668 @@
+package com.tillzo.pos.ui.inventory.options.crud
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.livedata.observeAsState
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.tillzo.pos.data.local.entity.InventoryEntity
+import com.tillzo.pos.domain.usecase.inventory.ProductFilter
+import androidx.navigation.NavController
+import androidx.navigation.compose.currentBackStackEntryAsState
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.tillzo.pos.ui.inventory.options.alerts.LowStockViewModel
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun InventoryCrudScreen(
+    onNavigateBack: () -> Unit,
+    onNavigateToOcr: () -> Unit,
+    onNavigateToQr: (String) -> Unit,
+    viewModel: InventoryCrudViewModel = hiltViewModel(),
+    alertViewModel: LowStockViewModel = hiltViewModel(),
+    navController: NavController? = null
+) {
+    val items by viewModel.allItems.collectAsState()
+    val selectedItem by viewModel.selectedItem.collectAsState()
+    val currentFilter by viewModel.currentFilter.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
+    val lowCount by alertViewModel.lowStockCount.collectAsState()
+    val outCount by alertViewModel.outOfStockCount.collectAsState()
+    val expiringCount by alertViewModel.expiringCount.collectAsState()
+
+    var showFormDialog by remember { mutableStateOf(false) }
+    var selectedItemForBatches by remember { mutableStateOf<InventoryEntity?>(null) }
+
+    // M6.2 Read OCR scanned values returned from OcrEntryScreen
+    val backStackEntry = navController?.currentBackStackEntryAsState()?.value
+    val scannedWeight = backStackEntry?.savedStateHandle?.getLiveData<String>("ocr_scanned_weight")?.observeAsState()
+
+    LaunchedEffect(scannedWeight?.value) {
+        if (!scannedWeight?.value.isNullOrBlank()) {
+            viewModel.selectItem(null) // New item
+            showFormDialog = true
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Inventory Management", fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onNavigateToOcr) {
+                        Icon(Icons.Default.CameraAlt, contentDescription = "Smart AI Entry (OCR)")
+                    }
+                }
+            )
+        },
+        floatingActionButton = {
+            FloatingActionButton(onClick = {
+                viewModel.selectItem(null)
+                showFormDialog = true
+            }) {
+                Icon(Icons.Default.Add, contentDescription = "Add Item")
+            }
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            // Alert Badge Row
+            if (lowCount > 0 || outCount > 0 || expiringCount > 0) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (lowCount > 0) {
+                        SuggestionChip(
+                            onClick = { navController?.navigate("stock_alerts") },
+                            label = { Text("⚠️ $lowCount Low", fontSize = 12.sp) }
+                        )
+                    }
+                    if (outCount > 0) {
+                        SuggestionChip(
+                            onClick = { navController?.navigate("stock_alerts") },
+                            label = { Text("🚫 $outCount Out", fontSize = 12.sp) }
+                        )
+                    }
+                    if (expiringCount > 0) {
+                        SuggestionChip(
+                            onClick = { navController?.navigate("stock_alerts") },
+                            label = { Text("⏰ $expiringCount Expiring", fontSize = 12.sp) }
+                        )
+                    }
+                }
+            }
+            // Search Bar
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { viewModel.setSearchQuery(it) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                placeholder = { Text("Search items...") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
+                singleLine = true
+            )
+
+            // Filter Chips
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(ProductFilter.entries) { filter ->
+                    FilterChip(
+                        selected = currentFilter == filter,
+                        onClick = { viewModel.setFilter(filter) },
+                        label = { Text(filter.name.replace("_", " ")) }
+                    )
+                }
+            }
+
+            // Products List
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(items, key = { it.system_row_id }) { item ->
+                    InventoryItemCard(
+                        item = item,
+                        onClick = {
+                            viewModel.selectItem(item)
+                            showFormDialog = true
+                        },
+                        onDelete = { viewModel.deleteItem(item.system_row_id) },
+                        onPrintQr = { onNavigateToQr(item.barcode_id) },
+                        onViewBatches = { selectedItemForBatches = item }
+                    )
+                }
+            }
+        }
+    }
+
+    if (showFormDialog) {
+        InventoryFormDialog(
+            item = selectedItem,
+            preFilledWeight = scannedWeight?.value,
+            viewModel = viewModel,
+            onDismiss = {
+                navController?.currentBackStackEntry?.savedStateHandle?.remove<String>("ocr_scanned_weight")
+                showFormDialog = false 
+            },
+            onSave = { name, category, barcode, unit, price, stock, threshold, sku, desc, cost, tax, batch, exp, mfg, expAlert, dmgStock, dmgQty ->
+                viewModel.saveItem(
+                    itemName = name,
+                    category = category,
+                    barcodeInput = barcode,
+                    unit = unit,
+                    pricePerUnit = price,
+                    currentStock = stock,
+                    lowStockThreshold = threshold,
+                    sku = sku,
+                    description = desc,
+                    costPrice = cost,
+                    taxPercent = tax,
+                    batchNumber = batch,
+                    expiryDate = exp,
+                    manufacturingDate = mfg,
+                    expiryAlertDays = expAlert,
+                    isDamaged = dmgStock,
+                    damagedQty = dmgQty
+                )
+                navController?.currentBackStackEntry?.savedStateHandle?.remove<String>("ocr_scanned_weight")
+                showFormDialog = false
+            }
+        )
+    }
+
+    selectedItemForBatches?.let { item ->
+        val batches by viewModel.getBatchesForProduct(item.system_row_id)
+            .collectAsState(initial = emptyList())
+        
+        com.tillzo.pos.ui.inventory.module_a.BatchListBottomSheet(
+            product = item,
+            batches = batches,
+            onAddNewBatch = { 
+                viewModel.showAddBatchDialog(item.system_row_id)
+            },
+            onDismiss = { selectedItemForBatches = null },
+            onEditBatch = { batch, batchNumber, mfgDate, expiryDate, stockQty, sellingPrice ->
+                viewModel.updateBatch(batch, batchNumber, mfgDate, expiryDate, stockQty, sellingPrice)
+            }
+        )
+    }
+}
+
+@Composable
+fun InventoryItemCard(
+    item: InventoryEntity,
+    onClick: () -> Unit,
+    onDelete: () -> Unit,
+    onPrintQr: () -> Unit,
+    onViewBatches: () -> Unit
+) {
+    val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+    val today = dateFormat.format(Date())
+    
+    val badgeColor = when {
+        item.current_stock <= 0.0 || (item.expiry_date.isNotBlank() && item.expiry_date < today) -> Color.Red
+        item.current_stock <= item.low_stock_threshold -> Color.Yellow
+        item.expiry_date.isNotBlank() && isNearExpiry(item.expiry_date) -> Color(0xFFFFA500) // Orange
+        else -> Color.Green
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(item.item_name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    // Colored Badge Indicator
+                    Surface(shape = MaterialTheme.shapes.small, color = badgeColor, modifier = Modifier.size(12.dp)) {}
+                }
+                
+                Text("${item.sku} • ${item.category}", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Badge(containerColor = MaterialTheme.colorScheme.secondaryContainer) {
+                        Text("Rs ${item.price_per_unit} / ${item.unit}", color = MaterialTheme.colorScheme.onSecondaryContainer)
+                    }
+                    Badge(containerColor = MaterialTheme.colorScheme.tertiaryContainer) {
+                        Text("Stock: ${item.current_stock}", color = MaterialTheme.colorScheme.onTertiaryContainer)
+                    }
+                }
+                Text("Barcode: ${item.barcode_id}", style = MaterialTheme.typography.bodySmall, color = Color.Gray, modifier = Modifier.padding(top = 4.dp))
+                if (item.hasBatches) {
+                    TextButton(onClick = onViewBatches, modifier = Modifier.padding(top = 4.dp)) {
+                        Text("View Batches (${item.totalStock})", 
+                             color = Color(0xFF1E88E5), fontSize = 12.sp)
+                    }
+                }
+            }
+
+            IconButton(onClick = onPrintQr) {
+                Icon(Icons.Default.QrCode, contentDescription = "Print QR Code")
+            }
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+}
+
+private fun isNearExpiry(expiryDate: String): Boolean {
+    val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+    return try {
+        val exp = dateFormat.parse(expiryDate)
+        val today = Date()
+        val diff = exp.time - today.time
+        val days = diff / (1000 * 60 * 60 * 24)
+        days in 1..30
+    } catch (e: Exception) {
+        false
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun InventoryFormDialog(
+    item: InventoryEntity?,
+    preFilledWeight: String? = null,
+    viewModel: InventoryCrudViewModel,
+    onDismiss: () -> Unit,
+    onSave: (String, String, String, String, Double, Double, Double, String, String, Double, Double, String, String, String, Int, Boolean, Double) -> Unit
+) {
+    val categories by viewModel.allCategories.collectAsState()
+    var showCategoryManager by remember { mutableStateOf(false) }
+
+    var name by remember { mutableStateOf(item?.item_name ?: "") }
+    var sku by remember { mutableStateOf(item?.sku ?: "") }
+    var category by remember { mutableStateOf(item?.category ?: "") }
+    var desc by remember { mutableStateOf(item?.description ?: "") }
+    
+    var barcode by remember { mutableStateOf(item?.barcode_id ?: "") }
+    var costPrice by remember { mutableStateOf(item?.cost_price?.takeIf { it > 0.0 }?.toString() ?: "") }
+    var price by remember { mutableStateOf(item?.price_per_unit?.takeIf { it > 0.0 }?.toString() ?: "") }
+    var taxPercent by remember { mutableStateOf(item?.tax_percent?.takeIf { it > 0.0 }?.toString() ?: "") }
+    
+    var stock by remember { mutableStateOf(item?.current_stock?.takeIf { it > 0.0 }?.toString() ?: "") }
+    var threshold by remember { mutableStateOf(item?.low_stock_threshold?.takeIf { it > 0.0 }?.toString() ?: "") }
+    var unit by remember { mutableStateOf(item?.unit ?: "PC") }
+    
+    var batch by remember { mutableStateOf(item?.batch_number ?: "") }
+    var expDate by remember { mutableStateOf(item?.expiry_date ?: "") }
+    var mfgDate by remember { mutableStateOf(item?.manufacturing_date ?: "") }
+    var expAlert by remember { mutableStateOf(item?.expiry_alert_days?.toString() ?: "30") }
+    
+    var isDamaged by remember { mutableStateOf(item?.is_damaged_stock ?: false) }
+    var dmgQty by remember { mutableStateOf(item?.damaged_qty?.takeIf { it > 0.0 }?.toString() ?: "") }
+
+    // DatePicker State
+    var showMfgDatePicker by remember { mutableStateOf(false) }
+    var showExpDatePicker by remember { mutableStateOf(false) }
+    val datePickerState = rememberDatePickerState()
+
+    // Common TextField Colors for Dark Theme Visibility
+    val textFieldColors = OutlinedTextFieldDefaults.colors(
+        unfocusedBorderColor = Color.Gray.copy(alpha = 0.5f),
+        focusedBorderColor = MaterialTheme.colorScheme.primary,
+        unfocusedLabelColor = Color.Gray,
+        focusedLabelColor = MaterialTheme.colorScheme.primary
+    )
+
+    LaunchedEffect(preFilledWeight) {
+        if (!preFilledWeight.isNullOrBlank() && name.isBlank()) {
+            name = "$preFilledWeight Product" 
+        }
+    }
+
+    if (showMfgDatePicker || showExpDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = {
+                showMfgDatePicker = false
+                showExpDatePicker = false
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        val localDate = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate()
+                        val formattedDate = localDate.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+                        if (showMfgDatePicker) mfgDate = formattedDate
+                        if (showExpDatePicker) expDate = formattedDate
+                    }
+                    showMfgDatePicker = false
+                    showExpDatePicker = false
+                }) {
+                    Text("OK")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showMfgDatePicker = false
+                    showExpDatePicker = false
+                }) {
+                    Text("Cancel")
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
+    if (showCategoryManager) {
+        var newCategoryName by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showCategoryManager = false },
+            title = { Text("Manage Categories") },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = newCategoryName,
+                            onValueChange = { newCategoryName = it },
+                            label = { Text("New Category") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                        IconButton(onClick = { viewModel.addCategory(newCategoryName); newCategoryName = "" }) {
+                            Icon(Icons.Default.Add, contentDescription = "Add Category")
+                        }
+                    }
+                    LazyColumn(modifier = Modifier.padding(top = 8.dp).heightIn(max = 200.dp)) {
+                        items(categories) { cat ->
+                            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Text(cat.category_name)
+                                IconButton(onClick = { viewModel.deleteCategory(cat.system_row_id) }) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Delete Category", tint = Color.Red)
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showCategoryManager = false }) { Text("Close") }
+            }
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (item == null) "Add Product" else "Edit Product") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Section 1: Basic Info
+                Text("Basic Info", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Product Name *") }, colors = textFieldColors, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = sku, onValueChange = { sku = it }, label = { Text("SKU *") }, colors = textFieldColors, singleLine = true, modifier = Modifier.weight(1f))
+                    if (item == null) {
+                        Button(
+                            onClick = { sku = "SKU-${System.currentTimeMillis().toString().takeLast(6)}" },
+                            modifier = Modifier.padding(top = 8.dp)
+                        ) {
+                            Text("Generate")
+                        }
+                    }
+                }
+                
+                // Category Dropdown
+                var expandingCategories by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = expandingCategories,
+                    onExpandedChange = { expandingCategories = !expandingCategories }
+                ) {
+                    OutlinedTextField(
+                        value = category,
+                        onValueChange = { },
+                        readOnly = true,
+                        label = { Text("Category *") },
+                        colors = textFieldColors,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandingCategories) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = expandingCategories,
+                        onDismissRequest = { expandingCategories = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Manage Categories...", color = MaterialTheme.colorScheme.primary) },
+                            onClick = {
+                                expandingCategories = false
+                                showCategoryManager = true
+                            }
+                        )
+                        Divider()
+                        categories.forEach { cat ->
+                            DropdownMenuItem(
+                                text = { Text(cat.category_name) },
+                                onClick = {
+                                    category = cat.category_name
+                                    expandingCategories = false
+                                }
+                            )
+                        }
+                    }
+                }
+                
+                OutlinedTextField(value = desc, onValueChange = { desc = it }, label = { Text("Description") }, colors = textFieldColors, modifier = Modifier.fillMaxWidth())
+
+                // Section 2: Barcode
+                Text("Barcode", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = barcode, 
+                        onValueChange = { barcode = it }, 
+                        label = { Text("Barcode (Blank = Auto)") }, 
+                        colors = textFieldColors, 
+                        singleLine = true, 
+                        modifier = Modifier.weight(1f)
+                    )
+                    Button(
+                        onClick = { barcode = "TILL-${System.currentTimeMillis().toString().takeLast(8)}" },
+                        modifier = Modifier.padding(top = 8.dp)
+                    ) {
+                        Text("Generate")
+                    }
+                }
+
+                // Section 3: Pricing & Tax
+                Text("Pricing & Tax", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = costPrice, onValueChange = { costPrice = it }, label = { Text("Cost Price") }, colors = textFieldColors, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.weight(1f))
+                    OutlinedTextField(value = price, onValueChange = { price = it }, label = { Text("Selling Price") }, colors = textFieldColors, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.weight(1f))
+                }
+                OutlinedTextField(value = taxPercent, onValueChange = { taxPercent = it }, label = { Text("Tax %") }, colors = textFieldColors, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth())
+
+                // Section 4: Stock
+                Text("Stock", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = stock, onValueChange = { stock = it }, label = { Text("Current Stock") }, colors = textFieldColors, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.weight(1f))
+                    OutlinedTextField(value = threshold, onValueChange = { threshold = it }, label = { Text("Low Alert") }, colors = textFieldColors, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.weight(1f))
+                }
+                var unitExpanded by remember { mutableStateOf(false) }
+                val units by viewModel.productUnits.collectAsState()
+
+                ExposedDropdownMenuBox(
+                    expanded = unitExpanded,
+                    onExpandedChange = { unitExpanded = !unitExpanded }
+                ) {
+                    OutlinedTextField(
+                        value = unit,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Unit (KG/ML/PC)") },
+                        colors = textFieldColors,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(unitExpanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                        singleLine = true
+                    )
+                    ExposedDropdownMenu(
+                        expanded = unitExpanded,
+                        onDismissRequest = { unitExpanded = false }
+                    ) {
+                        units.forEach { u ->
+                            DropdownMenuItem(
+                                text = { Text("${u.unitName} (${u.abbreviation})") },
+                                onClick = {
+                                    unit = u.abbreviation
+                                    unitExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // Section 5: Batch & Expiry
+                Text("Batch & Expiry", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                OutlinedTextField(value = batch, onValueChange = { batch = it }, label = { Text("Batch Number *") }, colors = textFieldColors, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        OutlinedTextField(
+                            value = mfgDate, 
+                            onValueChange = { }, 
+                            label = { Text("Mfg Date") }, 
+                            colors = textFieldColors,
+                            readOnly = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        // Invisible overlay to securely capture clicks on the field
+                        Box(modifier = Modifier.matchParentSize().clickable { showMfgDatePicker = true })
+                    }
+                    Box(modifier = Modifier.weight(1f)) {
+                        OutlinedTextField(
+                            value = expDate, 
+                            onValueChange = { }, 
+                            label = { Text("Exp Date *") }, 
+                            colors = textFieldColors,
+                            readOnly = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Box(modifier = Modifier.matchParentSize().clickable { showExpDatePicker = true })
+                    }
+                }
+                OutlinedTextField(value = expAlert, onValueChange = { expAlert = it }, label = { Text("Expiry Alert (Days Before)") }, colors = textFieldColors, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth())
+
+
+                // Section 6: Damaged Stock (Only show when editing an existing item)
+                if (item != null) {
+                    Text("Damaged Stock", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { isDamaged = !isDamaged }
+                            .padding(vertical = 4.dp)
+                    ) {
+                        Switch(
+                            checked = isDamaged, 
+                            onCheckedChange = { isDamaged = it },
+                            colors = SwitchDefaults.colors(
+                                uncheckedThumbColor = Color.LightGray,
+                                uncheckedTrackColor = Color.DarkGray,
+                                uncheckedBorderColor = Color.Gray
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Mark as having damaged items", color = MaterialTheme.colorScheme.onSurface)
+                    }
+                    if (isDamaged) {
+                        OutlinedTextField(
+                            value = dmgQty, 
+                            onValueChange = { dmgQty = it }, 
+                            label = { Text("Damaged Qty") }, 
+                            colors = textFieldColors, 
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), 
+                            singleLine = true, 
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val priceVal = price.toDoubleOrNull() ?: 0.0
+                    val costVal = costPrice.toDoubleOrNull() ?: 0.0
+                    val stockVal = stock.toDoubleOrNull() ?: 0.0
+                    val thresholdVal = threshold.toDoubleOrNull() ?: 0.0
+
+                    if (name.isNotBlank() && sku.isNotBlank() && barcode.isNotBlank() &&
+                        category.isNotBlank() && batch.isNotBlank() && expDate.isNotBlank() &&
+                        priceVal > 0 && costVal > 0 && stockVal > 0 && thresholdVal > 0) {
+                        
+                        onSave(
+                            name, category, barcode, unit,
+                            priceVal, stockVal, thresholdVal,
+                            sku, desc, costVal,
+                            taxPercent.toDoubleOrNull() ?: 0.0,
+                            batch, expDate, mfgDate,
+                            expAlert.toIntOrNull() ?: 30,
+                            isDamaged,
+                            dmgQty.toDoubleOrNull() ?: 0.0
+                        )
+                    }
+                }
+            ) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}

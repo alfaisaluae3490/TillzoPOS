@@ -1,0 +1,595 @@
+﻿
+POS &amp; INVENTORY SaaS
+Android App â€” Complete Development Blueprint
+
+v3.0 â€” REST API Edition (Google Apps Script REMOVED)
+
+Full Architecture â€¢ Google Sheets REST API + OAuth 2.0 â€¢ Module Specifications â€¢ Optimization Upgrades
+
+
+ðŸ”„
+ARCHITECTURE CHANGE v3.0: Google Apps Script Web App has been COMPLETELY REMOVED. The entire cloud backend now runs on Google Sheets REST API + OAuth 2.0. All functionality, logic, and features remain 100% identical â€” only the backend transport layer has changed.
+
+
+1. App Overview &amp; Business Model
+
+A cloud-synced, AI-assisted Android POS and Inventory Manager designed for small shops (1â€“30 POS terminals). Each shop owner logs in with their own Gmail and all data is saved to their personal Google Sheet â€” zero shared backend, zero server cost. Priced at 2,500 PKR/month after a 5â€“6 month free trial. Target markets: Pakistan, India, Bangladesh, USA, Europe.
+
+1.1 Technology Stack
+
+Parameter
+Specification
+Language
+Kotlin (100%)
+Architecture
+MVVM + Clean Architecture (UI â†’ Domain â†’ Data layers strictly separated)
+Dependency Injection
+Hilt / Dagger
+Local Database
+Room (SQLite) â€” Standard (SQLCipher removed for performance, see OPT-3)
+Async / Threads
+Kotlin Coroutines + WorkManager (zero Main Thread blocking)
+UI Framework
+Material Design 3 â€” Casio Calculator UI (simple front, powerful backend)
+Min Android
+API 26 (Android 8.0 Oreo)
+Target Android
+API 34+ (Android 14)
+Cloud Backend
+Google Sheets REST API + OAuth 2.0 â€” SINGLE backend, Apps Script removed
+OAuth Scope
+drive.file only â€” user&apos;s own files, no server-side scripts needed
+API Base URL
+https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}
+App Size Target
+Under 25 MB â€” no heavy bundled assets
+Khata Conflict System
+Append-Only Event Sourcing Ledger (Zero conflict guarantee)
+Google Sheet Strategy
+Monthly Sharding + Hidden SYS_DB tab + Schema Auto-Repair (done client-side)
+
+âŒ
+REMOVED: Google Apps Script Web App (doPost, doGet, triggers, LockService, SpreadsheetApp). All these are gone. The Android app directly calls Google Sheets REST API using OAuth 2.0 tokens.
+âœ…
+ADDED: Retrofit 2 + OkHttp for REST API calls. Google OAuth 2.0 PKCE flow for authentication. All server-side logic (sharding, schema check, backup) moved to Android WorkManager tasks.
+
+1.2 Module Summary
+
+# / Module Name
+Core Responsibility (v3.0 Updated)
+M1 â€” Foundation &amp; DB Strategy
+MVVM base, Room DB (SQLite only), REST API client setup, OAuth 2.0 integration
+M2 â€” Offline Sync &amp; Cloud Bridge
+REST API sync, ACK state, Delta Polling, Monthly Sharding (client-side), Disaster Recovery
+M3 â€” Auth &amp; RBAC
+Google OAuth 2.0 PKCE login, role levels (Admin/Manager/Cashier), granular permissions
+M4 â€” POS &amp; Checkout Engine
+Blind selling, Quick Grid, Split Payments, WhatsApp receipts, Hardware toggle
+M5 â€” Hardware Integration
+ESC/POS printers, Label printers, HID scanners, ML Kit camera scanner (On-Demand)
+M6 â€” Inventory &amp; AI Entry
+Offline OCR + Regex, QR code generator, barcode label printing
+M7 â€” Store Operations
+CRM/Khata (Event Ledger), Returns/Wastage, Transaction History, Z-Report
+M8 â€” Security &amp; Compliance
+ProGuard, root detection, forced update, Play Store compliance
+
+2. Optimization Upgrades â€” v3.0 REST API Edition
+
+These 4 original optimizations remain fully intact. The only change is: wherever &apos;Apps Script&apos; was mentioned as the mechanism, it is now replaced with &apos;Android client-side logic via WorkManager/Coroutines calling REST API&apos;.
+
+OPT-1: Google Sheets Time Bomb Fix (Volume + Tampering)
+
+Fix A â€” Monthly Sharding (Volume Solution) â€” Now Client-Side
+
+Component
+Specification (v3.0 â€” REST API)
+Trigger Mechanism
+WorkManager PeriodicWorkRequest scheduled for 1st of every month at 00:01 AM (replaces Apps Script Time-Driven Trigger)
+New Tab Name Format
+Sales_MMM_YYYY (e.g., Sales_Feb_2026, Sales_Mar_2026)
+Tab Creation API Call
+POST /v4/spreadsheets/{id}:batchUpdate â†’ addSheet request with title = Sales_MMM_YYYY
+Archive Old Tab
+POST /v4/spreadsheets/{id}:batchUpdate â†’ updateSheetProperties â†’ rename to ARCH_Sales_Jan_2026
+Android App Logic
+SyncWorker writes to current active month tab only. getDelta() reads from all non-archived tabs via REST API.
+Row Limit per Tab
+Hard limit: 18,000 rows max. If exceeded mid-month, WorkManager force-creates overflow tab via batchUpdate.
+Performance Gain
+Query speed stays consistent regardless of total business age.
+
+Fix B â€” Hidden Raw DB + UI Trap (Tampering Solution) â€” Now Client-Side
+
+Tab Type
+Specification (v3.0)
+User-Facing Dashboard
+Dashboard tab â€” visible to shop owner. Beautiful charts, READ ONLY via conditional formatting set by app.
+Raw Database Tab
+SYS_DB_DO_NOT_TOUCH â€” hidden via REST API: POST batchUpdate â†’ updateSheetProperties â†’ hidden: true
+Schema Guard
+On every sync cycle, Android app calls GET /v4/spreadsheets/{id} to verify all tabs and columns exist. Missing column = auto-recreated via batchUpdate.
+When to hide
+SYS_DB tab is hidden via REST API call every time SyncWorker runs â€” replaces Apps Script hideSheet()
+
+OPT-2: Over-Engineering Fix â€” The &apos;Casio Calculator&apos; UI
+
+This optimization is purely UI-side and is completely unaffected by the backend change.
+
+UI Layer
+What Cashier Sees
+What is Hidden
+Primary Screen
+Giant Numpad (full screen)
+â€”
+Primary Screen
+Quick Access Grid (Chicken, Mutton, etc.)
+â€”
+Primary Screen
+Cart total + Payment button
+â€”
+Hidden (Menu)
+â€”
+Wastage Entry
+Hidden (Menu)
+â€”
+Returns &amp; Refunds
+Hidden (Menu)
+â€”
+CRM / Khata
+Hidden (Menu)
+â€”
+Sync Status / Force Sync
+Hidden (Menu)
+â€”
+Z-Report / Day Close
+Hidden (Menu)
+â€”
+Admin Dashboard (P&amp;L)
+
+âœ…
+3-Tap Rule intact: Tap 1 = Select item from Quick Grid. Tap 2 = Enter quantity/weight. Tap 3 = Complete payment. No change needed for this optimization.
+
+OPT-3: Hardware Reality Fix â€” Performance on 2GB RAM Tablets
+
+Optimization
+Behavior (unchanged)
+Drop SQLCipher
+Standard Room SQLite â€” 10x faster reads. Security via Google Account OAuth 2.0 + hidden Sheet.
+On-Demand ML Kit
+ML Kit activates ONLY when user presses Scan button. Auto-deactivates after 30s idle.
+Smart Sync Constraints
+WorkManager runs ONLY when: device is Charging, OR screen is OFF. Rush time = sync paused.
+
+OPT-4: Sync Conflict Fix â€” Append-Only Event Sourcing Ledger
+
+Completely unaffected by backend change. The logic is: never save a balance â€” only append events. The REST API simply appends rows to the Khata_Events tab instead of Apps Script doing it.
+
+Device/Source
+Event Type + Amount
+Result in Sheet
+Terminal A (offline)
+Udhaar (Credit) +1,000 Rs
+New row inserted via REST API POST âœ“
+Terminal B (offline)
+Jama (Payment) -500 Rs
+New row inserted via REST API POST âœ“
+After Sync (both online)
+Auto-reconciled
+Both rows in Sheet, ordered by timestamp
+App reads balance
+SUM(all events)
++1000 â€“ 500 = 500 Rs â€” Exact correct balance âœ“
+
+3. Global Core Rules (Apply to Every Module)
+
+Rule ID
+Rule Specification (v3.0 Updated)
+G-1 â€” Clean Architecture
+Strict MVVM. Separate packages: ui/, domain/, data/, di/, utils/. UI â†’ ViewModel â†’ UseCase â†’ Repository â†’ SheetsApiClient. Hilt/Dagger for all dependencies.
+G-2 â€” Offline-First Architecture
+All data saved to Room first. REST API sync happens in background. UI always reads from Room. Never reads directly from REST API.
+G-3 â€” ACK State Management
+sync_status: pending â†’ synced ONLY after HTTP 200 OK from Sheets REST API. HTTP 429/500/timeout = remains pending. Exponential Backoff: 5s â†’ 15s â†’ 1min â†’ 5min.
+G-4 â€” Compliant Background Sync
+No unkillable processes. Android Foreground Service with notification &apos;Syncing Sales Data...&apos; WorkManager handles all batch uploads. Zero ANR.
+G-5 â€” Single Backend Strategy (v3.0)
+CHANGED: No dual-backend. No FeatureFlag needed. Google Sheets REST API + OAuth 2.0 is the ONE AND ONLY backend. No Apps Script code anywhere in the project.
+G-6 â€” Google Play Compliance
+Subscriptions via official Play Billing Library. No JazzCash direct links. No web payment pages. No PHA libraries.
+G-7 â€” Anti-Tamper &amp; Root Detection
+ProGuard/R8 obfuscation mandatory in release. RootBeer root detection on startup. Rooted device = UI block + cloud log.
+G-8 â€” Forced Update System
+Startup: fetch min_version from Settings tab via REST API GET. Outdated = 3-day countdown. Day 4: full-screen block dialog.
+G-9 â€” Lightweight &amp; Low Resource
+Heavy calculations in Google Sheet formulas. App size under 25 MB. Camera scanner 480p/720p max. WorkManager sync: charging or idle only.
+
+ðŸ”„
+G-5 CHANGED: The old dual-backend strategy (Apps Script active, REST API dormant) is now eliminated. There is ONLY ONE backend: Google Sheets REST API + OAuth 2.0. Remove all FeatureFlag.kt, AppsScriptSyncImpl, and DataSyncInterface dual-impl code.
+
+4. Step-by-Step Development Order
+
+Step / Phase / Module
+What to Build (v3.0)
+Step 1 â€” M1 Foundation
+MVVM structure, Room DB (SQLite only), Black &amp; White UI theme, Retrofit2 + OkHttp setup, SheetsApiClient.kt singleton. NO sync code yet.
+Step 2 â€” M3 Auth
+Google OAuth 2.0 PKCE flow, access/refresh token storage (EncryptedSharedPreferences), user roles (Admin/Manager/Cashier), permission engine.
+Step 3 â€” M6 Inventory
+Add/edit/delete items, Offline OCR + Regex auto-entry, QR code generator.
+Step 4 â€” M4 POS
+Billing screen, Quick Grid (Casio UI), decimal weight, cart, Split Payment, WhatsApp receipt.
+Step 5 â€” M5 Hardware
+ESC/POS receipt printer, TSPL label printer, HID scanner, ML Kit on-demand.
+Step 6 â€” M2 Cloud Sync
+REST API backend, Monthly Sharding (WorkManager), Delta Polling, Event Ledger, Schema Guard, Disaster Recovery â€” ALL via REST API only.
+Step 7 â€” M7 Store Ops
+CRM/Khata (Append-Only Ledger), Returns/Wastage, Transaction History, Z-Report, Day Close.
+Step 8 â€” M8 Security
+ProGuard, root detection, Forced Update, Play Store compliance audit.
+
+5. Module Specifications
+
+M1 â€” Foundation &amp; REST API Client
+
+Option
+Specification (v3.0)
+M1.1 â€” MVVM Base
+Kotlin project with strict MVVM + Clean Architecture. Packages: ui/, domain/, data/, di/, utils/. Wire Hilt/Dagger from day one.
+M1.2 â€” Room DB
+Room Database (Standard SQLite â€” no SQLCipher per OPT-3). Every table must include: system_row_id (UUID, immutable PK), sync_status (TEXT default &apos;pending&apos;), created_at, updated_at, pos_terminal_id.
+M1.3 â€” SheetsApiClient.kt
+Retrofit2 + OkHttp singleton. Base URL: https://sheets.googleapis.com/v4/. Interceptor: auto-attach Bearer {access_token} to every request. Auto-refresh token on 401. Inject via Hilt.
+M1.4 â€” REMOVED: Dual-Backend
+NO FeatureFlag.kt. NO AppsScriptSyncImpl. NO DataSyncInterface dual-implementation. There is only RestApiSyncImpl which is the live, active implementation.
+M1.5 â€” Casio UI Theme
+Material Design 3. Dark: #1A1A1A. White text. Accent: #1E88E5. Home screen = Giant Numpad + Quick Grid. Advanced features hidden in menu.
+M1.6 â€” Forced Update
+Startup: GET Settings tab row 1 via REST API. Fetch min_app_version cell. Compare with BuildConfig.VERSION_CODE. If outdated: 3-day countdown. Day 4+: full-screen block.
+
+M2 â€” Offline Sync &amp; Cloud Bridge (REST API Only)
+
+âŒ
+COMPLETELY REMOVED from M2: doPost(e), LockService.getScriptLock(), SpreadsheetApp, Apps Script deployment URLs, Web App triggers, Time-Driven Triggers. None of these exist anymore.
+
+Option
+Specification (v3.0 â€” REST API Only)
+M2.1 â€” REST API Upload
+SyncWorker.kt: batch-reads all &apos;pending&apos; Room rows â†’ builds JSON payload â†’ POST to Sheets REST API: POST /v4/spreadsheets/{id}/values/{range}:append?valueInputOption=RAW. UUID duplication check: GET range before insert.
+M2.2 â€” Monthly Sharding (WorkManager)
+WorkManager PeriodicWorkRequest fires on 1st of every month. Creates new Sales_[MMM_YYYY] tab: POST batchUpdate â†’ addSheet. Archives previous: POST batchUpdate â†’ updateSheetProperties â†’ rename to ARCH_Sales_[MMM_YYYY]. Hard limit: 18,000 rows/tab.
+M2.3 â€” Hidden DB Tab (Client-Side)
+After each sync cycle, SyncWorker calls: POST batchUpdate â†’ updateSheetProperties â†’ hidden: true for SYS_DB_DO_NOT_TOUCH. Schema check: GET /v4/spreadsheets/{id} â†’ verify sheetProperties. Missing tab = POST batchUpdate â†’ addSheet.
+M2.4 â€” WorkManager Sync Constraints
+WorkManager constraints: requiresCharging(true) OR requires device idle. Exponential backoff on failure: 5s â†’ 15s â†’ 1min â†’ 5min. HTTP 200 OK â†’ mark Room rows as &apos;synced&apos;.
+M2.5 â€” Micro-Batching (20s)
+Sales debounce timer: 20s after first sale. All sales in window â†’ single JSON array â†’ one POST /values/{range}:append request. Avoids 60 req/min Sheets API quota.
+M2.6 â€” Delta Sync (60s)
+Background Coroutine: every 60s, GET Settings tab (single cell) for last_updated_timestamp. If newer â†’ GET /values/{range} for only updated rows (filter by timestamp column). UPSERT via system_row_id in Room.
+M2.7 â€” Immutable UUID PK
+Every item: system_row_id (UUID, never changes). barcode_id is a separate editable field. Renaming barcode never creates a duplicate row.
+M2.8 â€” Multi-POS Sync
+Delta Sync fetches ALL terminals&apos; data â€” not just own. Every device is a complete replica. Terminal A can search/refund Terminal B&apos;s sale offline.
+M2.9 â€” Disaster Recovery
+WorkManager daily trigger at 11:59 PM. Android app reads all Sheet tabs via GET /values/{range}, writes to backup Sheet via POST /values/{range}:append using backup spreadsheetId from Settings. Zero dependency on server.
+M2.10 â€” OAuth Token Management
+Access token stored in EncryptedSharedPreferences. Refresh token used on 401 response via POST to https://oauth2.googleapis.com/token. Auto-retry original request after refresh. If refresh fails: show re-auth dialog.
+
+M3 â€” Auth &amp; Role-Based Access Control (RBAC)
+
+Option
+Specification (v3.0)
+M3.1 â€” OAuth 2.0 PKCE Login
+Google Sign-In via AppAuth Android library (OAuth 2.0 PKCE flow). Scope: openid, email, drive.file. Access + Refresh tokens stored in EncryptedSharedPreferences. Role-based routing after login.
+M3.2 â€” User Management
+Admin: add users, set passwords (hashed), assign roles. User records stored in Users_Permissions tab and mirrored to Room DB. Synced via REST API.
+M3.3 â€” Granular Permissions
+Admin Permission Manager checklist: per-user, per-Module, per-Option toggle. Stored as permissions_json in Room + synced to Users_Permissions tab via REST API.
+M3.4 â€” Session Guard
+Every screen checks current user&apos;s permission map on load. Remote revocation effective on next Delta Sync â€” no logout required.
+M3.5 â€” PIN Quick Unlock
+After first OAuth login, PIN-based quick unlock for subsequent app opens. Avoids full OAuth flow on every session.
+
+Module / Option
+Admin
+Manager / Cashier
+POS Checkout Screen
+Full Access
+Manager: View Only / Cashier: Full Access
+Inventory â€” View
+âœ“
+Both: âœ“
+Inventory â€” Add/Edit/Delete
+âœ“
+Manager: âœ“ / Cashier: âœ— (default)
+Price Edit
+âœ“
+Both: âœ—
+Customer CRM â€” View
+âœ“
+Both: Configurable
+Customer CRM â€” Edit Khata
+âœ“
+Both: âœ—
+Returns &amp; Refunds
+âœ“
+Both: Configurable
+Transaction History
+Full
+Manager: Full / Cashier: Own Terminal Only
+Z-Report
+Full P&amp;L
+Manager: Daily Sales / Cashier: Own Shift
+Admin Dashboard
+âœ“
+Both: âœ—
+User Management
+âœ“
+Both: âœ—
+Settings / Sync Config
+âœ“
+Both: âœ—
+Expense Tracking
+âœ“
+Both: âœ—
+
+M4 â€” POS &amp; Checkout Engine
+
+Option
+Specification (unchanged)
+M4.1 â€” Casio UI POS Screen
+Home screen = Giant Numpad (full screen) + Quick Grid. Search bar. Advanced Options hidden in hamburger menu. 3-tap sale rule: Select â†’ Quantity â†’ Pay.
+M4.2 â€” Quick Access Grid
+Configurable grid of pinned items. Long-press tile â†’ Admin PIN to edit daily rate. Cashier cannot edit price.
+M4.3 â€” Decimal Weight Input
+Loose item tapped â†’ custom decimal numpad. Accepts: 1.5 (kg), 0.750 (grams). weight Ã— admin_price_per_kg = total â†’ cart.
+M4.4 â€” Blind Selling
+NO real-time inventory check on POS screen â€” prevents lag during rush. Stock math happens in background when SyncWorker uploads sale row to Sheets via REST API.
+M4.5 â€” Admin-Locked Price
+Price per kg/unit set by Admin only. Fetched and locked during Delta Sync. Cashier UI has NO price field. Admin PIN for on-screen override.
+M4.6 â€” Multi-Tender / Split
+Payment methods: Cash, Card, Wallet (JazzCash/EasyPaisa), Udhaar. Split: 3000 cash + 2000 card on single bill. All breakdowns in separate DB columns.
+M4.7 â€” Print Toggle
+ON/OFF hardware print toggle on checkout. OFF = no ESC/POS command sent. Per-session preference.
+M4.8 â€” WhatsApp Receipt
+Send via WhatsApp â†’ phone input â†’ bill text summary via Android native Intent â†’ api.whatsapp.com. Zero API cost. Auto-saves to CRM.
+M4.9 â€” Receipt QR Code
+Every receipt includes Invoice UUID as QR code for instant retrieval and fraud verification.
+
+M5 â€” Hardware Integration
+
+Option
+Specification (unchanged)
+M5.1 â€” Universal HID Scanner
+All Bluetooth/USB scanners treated as HID keyboards â€” no custom pairing. POS TextField listens for KeyEvent.KEYCODE_ENTER and IME_ACTION_DONE to capture barcode and auto-trigger add-to-cart.
+M5.2 â€” ML Kit Scanner (On-Demand)
+CameraX + ML Kit Vision. Resolution locked: 480p/720p MAX. Camera activates ONLY when Scan button pressed â€” deactivates after 30s idle. 1500ms debounce. Haptic + beep on success.
+M5.3 â€” ESC/POS Receipt Printer
+Raw ESC/POS commands only â€” no proprietary SDKs. Bluetooth: SPP UUID 00001101-0000-1000-8000-00805F9B34FB. Wi-Fi: TCP/IP Port 9100. Supports 58mm and 80mm. Async Print Queue + Auto-Reconnect (3 retries).
+M5.4 â€” TSPL/ZPL Label Printer
+Separate from ESC/POS. TSPL/ZPL coordinate commands for custom label sizes (1&quot;x1.5&quot; or 0.5&quot;x1&quot;). QR + Item Name on label. Bluetooth SPP streaming. No main thread blocking.
+
+M6 â€” Inventory &amp; Smart AI Entry
+
+Option
+Specification (unchanged)
+M6.1 â€” Inventory CRUD
+Add/edit/delete items. Fields: Item Name, Category, barcode_id (user-editable), system_row_id (hidden UUID), unit (KG/ML/PC/GM), price_per_unit, current_stock, low_stock_threshold.
+M6.2 â€” 100% Offline OCR + Regex
+On-device ML Kit Text Recognition V2. NO cloud Vision API. Capture â†’ raw text â†’ Regex: \d+(\.\d+)?\s*(mg|g|kg|ml|l|oz). Auto-fills form fields. Background thread.
+M6.3 â€” AI Vision API Fallback
+If user enables cloud AI: compress image to Base64, send to Vision API with JSON extraction prompt. Parse: product_title, weight, suggested_price. Flush image from RAM immediately after. Never save images to DB.
+M6.4 â€” Smart Barcode Auto-Assign
+Before OCR: ML Kit Barcode Scanner pass. Barcode found â†’ barcode_id field populate. Not found â†’ auto-generate CUST-100001 style alphanumeric ID.
+M6.5 â€” 2D QR Code Generator
+ZXing library. barcode_id â†’ high-density QR. Preview display. Quantity + label size selection. Pass to M5.4 TSPL engine for Bluetooth label printing.
+M6.6 â€” Low Stock Alerts
+Compare current_stock to low_stock_threshold on every Delta Sync. In-app notification + highlighted item in Inventory list + Admin dashboard log.
+
+M7 â€” Store Operations
+
+Option
+Specification (v3.0)
+M7.1 â€” CRM &amp; Khata Ledger
+Customer profile: Name, Phone, WhatsApp. Khata: Append-Only Event Ledger. App SUMs events in real-time: Total Udhaar, Total Jama, Baqaya. REST API: POST /values/{Khata_Events range}:append for every new event. NEVER update existing rows.
+M7.2 â€” WhatsApp Statement
+One button: auto-generate text Statement of Account (all events, running balance). Fire WhatsApp native Intent to customer number. No paid API.
+M7.3 â€” Returns &amp; Refunds
+Fetch past invoice by QR scan or Invoice ID. Full cancellation or partial line-item returns. Condition toggle: Restock OR Damaged/Wastage. Refund method: Cash/Card Reversal/Khata adjustment. Log as negative sale row via REST API append.
+M7.4 â€” Transaction History
+Filter: Date/Time/Item/POS Terminal. Instant lookup by ID or QR. Reprint any receipt â€” reprinted copy MUST show DUPLICATE/REPRINT header in large text (fraud prevention).
+M7.5 â€” Z-Report &amp; System Health
+Real-time monitors: Room DB count vs synced count, pending queue size, last sync timestamp. Till Management: opening cash, all payment type totals, expected drawer balance. Day Close LOCKED until pending = 0. CSV auto-backup on Day Close.
+M7.6 â€” Expense Tracking
+Admin only: log daily expenses (rent, electricity, wages). Net Profit = Revenue - COGS - Expenses calculated in Sheet formula. Summary on Admin dashboard.
+
+M8 â€” Security &amp; Google Play Compliance
+
+Option
+Specification (unchanged)
+M8.1 â€” ProGuard / R8
+Enable ProGuard/R8 in release build.gradle. Obfuscate all class/method names. Custom keep rules for Room entities and Hilt components needing reflection.
+M8.2 â€” Root Detection
+RootBeer on startup. Rooted = warning dialog + UI blocked + DB access prevented + cloud log of attempt.
+M8.3 â€” Play Store Privacy
+Privacy Policy URL in listing and in-app Settings. Data disclosure: &apos;This app reads/writes only to your own Google Sheet (drive.file scope).&apos; Runtime permissions: Camera, Bluetooth, Notifications. Never log/transmit user data to developer server.
+M8.4 â€” Play Billing
+5â€“6 month free trial via Play Billing Library. Monthly subscription after trial. States: PURCHASED, PENDING, EXPIRED, grace period. No external payment links.
+M8.5 â€” Safe Code Audit
+Before Play Store submission: APK scan via App Signing checker. Remove unused permissions. Confirm no PHA-flagged libraries. Confirm no prohibited background process patterns.
+
+6. Google Sheet Structure (Cloud Database)
+
+The Google Sheet structure is IDENTICAL to v2.0. The only difference is: all read/write operations go through the Sheets REST API instead of Apps Script. The app manages tab creation, hiding, schema checks, and backups directly.
+
+6.1 Sheet Tabs (v3.0 â€” Identical Structure)
+
+Tab Name
+Type
+Columns / Notes
+Sales_[MMM_YYYY] â˜…
+Monthly Sharded
+invoice_id, pos_id, timestamp, items_json, subtotal, tax, total, payment_method, reference_id, cashier_id, sync_uuid
+ARCH_Sales_[MMM_YYYY] â˜…
+Archived (Read-Only)
+Same as Sales â€” previous month auto-archived by WorkManager via REST API batchUpdate
+Inventory
+Standard
+system_row_id, barcode_id, name, category, unit, price, stock_qty, low_threshold, last_updated
+Customers
+Standard
+customer_id, name, phone, last_updated
+Khata_Events â˜…
+Append-Only Ledger
+event_id, customer_id, pos_id, type (UDHAAR/JAMA), amount, timestamp, sync_uuid â€” NEVER UPDATE, ONLY APPEND
+Expenses
+Standard
+expense_id, date, category, amount, notes, added_by
+Returns
+Standard
+return_id, original_invoice_id, item_id, qty_returned, condition, refund_method, amount
+Wastage_Ledger
+Standard
+wastage_id, item_id, qty, value, reason, date
+Users_Permissions
+Standard
+user_id, name, role, password_hash, permissions_json, last_login
+Settings
+Standard
+last_updated_timestamp, min_app_version, backup_sheet_url, shop_name, shop_phone
+Sync_Log
+Standard
+sync_uuid, pos_id, status, timestamp, error_msg
+Dashboard (View Only) â˜…
+User-Facing Charts
+Charts, total sales graphs, summary cards â€” READ ONLY
+SYS_DB_DO_NOT_TOUCH â˜…
+Hidden (System)
+Hidden via REST API batchUpdate â†’ updateSheetProperties â†’ hidden: true on every SyncWorker run
+
+6.2 REST API Calls Required (Replaces Apps Script Functions)
+
+ðŸ”„
+The table below maps every old Apps Script function to its equivalent REST API call. This is the complete replacement guide.
+
+Old Apps Script Function â†’ New REST API Equivalent
+REST API Call Details
+doPost(e) â†’ SyncWorker.uploadBatch()
+POST https://sheets.googleapis.com/v4/spreadsheets/{id}/values/{range}:append?valueInputOption=RAW with JSON body containing rows array
+handleSalesUpload(data) â†’ SalesUploadUseCase
+POST /values/Sales_[MMM_YYYY]!A:Z:append â†’ batch insert sale rows. UUID dedup check: GET /values/{range} before insert.
+handleInventoryUpsert(data) â†’ InventoryUpsertUseCase
+GET /values/Inventory!A:Z to fetch existing. Match by system_row_id. PUT /values/{range} to update OR POST :append for new rows.
+handleKhataEvent(data) â†’ KhataEventUseCase
+POST /values/Khata_Events!A:Z:append â†’ APPEND ONLY. Never PUT or DELETE on this range.
+getDelta(lastTimestamp) â†’ DeltaSyncUseCase
+GET /values/Settings!A1 for timestamp check. Then GET /values/{each_tab}!A:Z for each non-archived tab. Filter locally by timestamp column.
+getSettings() â†’ SettingsRepository
+GET /values/Settings!A1:Z1 â†’ returns first row as settings object.
+monthlySharding() â†’ MonthlyShardWorker
+WorkManager on 1st of month: POST /spreadsheets/{id}:batchUpdate â†’ {addSheet: {properties: {title: &apos;Sales_MMM_YYYY&apos;}}} then rename old tab.
+hideSystemTabs() â†’ SyncWorker post-upload step
+POST /spreadsheets/{id}:batchUpdate â†’ {updateSheetProperties: {properties: {sheetId: X, hidden: true}}}
+schemaCheck() â†’ SchemaGuardUseCase
+GET /spreadsheets/{id} â†’ check sheets[].properties.title for all required tabs. For each tab, GET /values/{tab}!1:1 to verify column headers.
+nightlyBackup() â†’ NightlyBackupWorker
+WorkManager at 23:59 daily. GET all tab ranges from primary Sheet. POST :append to backup spreadsheetId from Settings.backup_sheet_url.
+
+6.3 OAuth 2.0 Setup Details
+
+Component
+Specification
+Library
+AppAuth-Android (net.openid:appauth) â€” PKCE flow, no custom backend needed
+OAuth Scope
+openid email https://www.googleapis.com/auth/drive.file
+Authorization URL
+https://accounts.google.com/o/oauth2/v2/auth
+Token URL
+https://oauth2.googleapis.com/token
+Redirect URI
+com.yourapp.pos:/oauth2redirect (custom scheme in AndroidManifest)
+Token Storage
+EncryptedSharedPreferences (AES-256 encrypted by Android Keystore)
+Access Token Lifetime
+1 hour â€” auto-refresh via refresh_token on 401 response
+Retrofit Interceptor
+OkHttp Interceptor: if (response.code == 401) { refreshToken(); retry() }
+Spreadsheet ID Storage
+After first login: create Sheet via Drive API, store spreadsheetId in EncryptedSharedPreferences
+Sheet Creation on First Run
+POST https://sheets.googleapis.com/v4/spreadsheets with all required tabs in sheets[] array
+
+7. Quick Reference â€” Common Mistakes to Avoid (v3.0)
+
+âŒ Wrong
+âœ… Right (v3.0)
+Calling REST API from UI directly
+UI â†’ ViewModel â†’ UseCase â†’ Repository â†’ SheetsApiClient
+Using Apps Script Web App URL
+DOES NOT EXIST. Use: https://sheets.googleapis.com/v4/spreadsheets/{id}/values/{range}
+Polling every 5 seconds
+Poll Settings!A1 cell every 60 seconds via GET /values/Settings!A1 â€” single cell read
+Full download every sync
+Delta Sync â€” fetch only records newer than last_updated_timestamp
+Saving product images to DB
+Process in RAM only, flush after OCR, never persist
+ESC/POS for label printer
+TSPL/ZPL for labels, ESC/POS only for receipt printers
+Full Drive scope in OAuth
+Only request drive.file scope â€” user&apos;s own files only
+External payment gateway
+Google Play Billing Library for all subscriptions
+Status=&apos;synced&apos; before ACK
+Only &apos;synced&apos; after HTTP 200 OK from REST API confirmed
+Network on Main Thread
+All REST API calls in Coroutine background dispatcher (Dispatchers.IO)
+App running on rooted device
+RootBeer check on startup â€” block if rooted
+SQLCipher on 2GB RAM tablet
+Standard SQLite â€” 10x faster. Security via OAuth 2.0 token + hidden Sheet
+ML Kit running in background
+On-Demand only â€” activate on Scan button press, deactivate after 30s idle
+Syncing during POS rush
+WorkManager constraints: charging OR screen off only
+Saving Khata balance as a value
+Append-Only Event Ledger â€” SUM events in real-time
+All sales in one sheet forever
+Monthly Sharding â€” new tab every 1st of month (done by MonthlyShardWorker)
+Apps Script handling tab hiding
+Android SyncWorker calls REST API batchUpdate â†’ hidden: true after each upload
+Apps Script doing schema repair
+SchemaGuardUseCase runs on app startup and post-sync â€” calls GET /spreadsheets/{id} to verify
+FeatureFlag.USE_APPS_SCRIPT in code
+Delete FeatureFlag.kt entirely. There is no flag â€” REST API is the only backend
+Waiting for Google Apps Script approval
+Not needed. OAuth 2.0 drive.file scope works immediately with user consent
+
+8. v3.0 Architecture Change Summary
+
+Optimization / Change
+Details
+OPT-1 â€” Monthly Sharding
+Now done by MonthlyShardWorker (WorkManager) via REST API batchUpdate. No Apps Script trigger.
+OPT-1 â€” Hidden DB Tab
+Now done by SyncWorker post-upload via REST API batchUpdate â†’ hidden: true.
+OPT-1 â€” Schema Guard
+Now done by SchemaGuardUseCase on app startup via GET /spreadsheets/{id}.
+OPT-2 â€” Casio UI
+No change. Purely Android UI â€” unaffected.
+OPT-3 â€” 2GB RAM Fixes
+No change. SQLite, On-Demand ML Kit, WorkManager constraints â€” all same.
+OPT-4 â€” Event Ledger
+No change. Append-only logic same. REST API :append endpoint used instead of Apps Script.
+G-5 â€” Backend Strategy
+SIMPLIFIED: No dual-backend. No FeatureFlag. Single backend: Sheets REST API.
+Auth
+UPGRADED: Google OAuth 2.0 PKCE (AppAuth-Android) â€” more secure, no server needed.
+Deployment Complexity
+REDUCED: No Apps Script deployment, no Web App URL management, no Script quotas to worry about.
+API Quota
+Sheets REST API: 300 requests/minute/project. Micro-batching (M2.5) keeps usage well within limits.
+
+Blueprint Complete â€” v3.0 REST API Edition
+8 Modules â€¢ 50+ Specifications â€¢ 4 Critical Optimizations â€¢ Google Apps Script = 0 Lines of Code
+Every new AI chat: Share Section 3 (Global Rules) first, then the relevant Module spec.
