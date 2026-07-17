@@ -31,4 +31,7 @@ interface CategoryDao {
 
     @Query("UPDATE Categories SET sync_status = 'synced' WHERE system_row_id = :id")
     suspend fun markSynced(id: String)
+
+    @Query("DELETE FROM Categories WHERE system_row_id = :id")
+    suspend fun hardDeleteCategory(id: String)
 }

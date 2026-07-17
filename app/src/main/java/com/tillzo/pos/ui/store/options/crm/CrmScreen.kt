@@ -146,7 +146,7 @@ fun CrmScreen(
                             ) {
                                 StatisticBox("Total Udhaar", totalUdhaar, Color.Red)
                                 StatisticBox("Total Jama", totalJama, Color(0xFF4CAF50))
-                                StatisticBox("Baqaya (Balance)", baqaya, if (baqaya < 0) Color.Red else Color(0xFF4CAF50))
+                                StatisticBox("Baqaya (Balance)", baqaya, if (baqaya > 0) Color.Red else Color(0xFF4CAF50))
                             }
 
                             Spacer(modifier = Modifier.height(32.dp))

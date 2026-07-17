@@ -1,0 +1,19 @@
+{
+  "output": {
+    "filePath": "repomix-output.md",
+    "style": "markdown"
+  },
+  "include": [
+    "**/*"
+  ],
+  "ignore": {
+    "useGitignore": false,
+    "useDefaultPatterns": false,
+    "customPatterns": [
+      "repomix-output.md",
+      "app/build/**",
+      ".gradle/**",
+      ".idea/**"
+    ]
+  }
+}

@@ -1,6 +1,5 @@
 package com.tillzo.pos.ui.signin
 
-import android.app.Activity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -30,7 +29,7 @@ fun SignInScreen(
     val signInLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) viewModel.onSignInResult(result)
+        viewModel.onSignInResult(result)
     }
 
     LaunchedEffect(uiState) {

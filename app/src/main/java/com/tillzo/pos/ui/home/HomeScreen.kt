@@ -55,6 +55,7 @@ import com.tillzo.pos.ui.inventory.options.alerts.LowStockViewModel
 import com.tillzo.pos.ui.theme.*
 import com.tillzo.pos.ui.hardware.scanner.InlineCameraBox
 import com.tillzo.pos.ui.hardware.scanner.InlineScannerViewModel
+import com.tillzo.pos.ui.till.TillViewModel
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Build
@@ -62,6 +63,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * M4 POS Main Screen — full selling flow.
@@ -80,8 +82,10 @@ fun HomeScreen(
     onOpenMenu: () -> Unit,
     onNavigateToInventory: () -> Unit = {},
     onNavigateToReceipt: (String) -> Unit = {},
+    onNavigateToTill: () -> Unit = {},
     viewModel: PosViewModel = hiltViewModel(),
-    lowStockViewModel: LowStockViewModel = hiltViewModel()
+    lowStockViewModel: LowStockViewModel = hiltViewModel(),
+    tillViewModel: TillViewModel = hiltViewModel()
 ) {
     val cartItems by viewModel.cartItems.collectAsStateWithLifecycle()
     val cartSubtotal by viewModel.cartSubtotal.collectAsStateWithLifecycle()
@@ -93,11 +97,20 @@ fun HomeScreen(
     val quickGridItems by viewModel.quickGridItems.collectAsStateWithLifecycle()
     val lowStockItems by lowStockViewModel.lowStockItems.collectAsStateWithLifecycle()
     val saleResult by viewModel.saleResult.collectAsStateWithLifecycle()
+    val currentTillSession by tillViewModel.currentSession.collectAsStateWithLifecycle()
 
     var showPaymentDialog by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
     var showDecimalQtyDialog by remember { mutableStateOf(false) }
     var decimalQtyItem by remember { mutableStateOf<InventoryEntity?>(null) }
+    var showCartDecimalQtyDialog by remember { mutableStateOf(false) }
+    var cartDecimalQtyTarget by remember { mutableStateOf<com.tillzo.pos.domain.model.CartItem?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    var showAdminPinDialog by remember { mutableStateOf(false) }
+    var showUnpinConfirm by remember { mutableStateOf(false) }
+    var pinTarget by remember { mutableStateOf<InventoryEntity?>(null) }
+    var unpinTarget by remember { mutableStateOf<InventoryEntity?>(null) }
     val inlineScannerViewModel: InlineScannerViewModel = hiltViewModel()
     val isCameraActive by inlineScannerViewModel.isCameraActive.collectAsStateWithLifecycle()
 
@@ -143,8 +156,54 @@ fun HomeScreen(
         }
     }
 
+    // Till session gate — block POS when no active till session
+    if (currentTillSession == null) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(SurfaceDark),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    Icons.Default.Lock,
+                    contentDescription = null,
+                    tint = AccentBlue,
+                    modifier = Modifier.size(72.dp)
+                )
+                Spacer(Modifier.height(24.dp))
+                Text(
+                    "No Active Till Session",
+                    color = TextPrimary,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Please open a till before making sales.",
+                    color = TextSecondary,
+                    fontSize = 14.sp
+                )
+                Spacer(Modifier.height(32.dp))
+                Button(
+                    onClick = onNavigateToTill,
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentBlue),
+                    modifier = Modifier
+                        .widthIn(min = 220.dp)
+                        .height(48.dp)
+                ) {
+                    Icon(Icons.Default.AccountBalanceWallet, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Open Till", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        return
+    }
+
     Scaffold(
         containerColor = BackgroundDark,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -175,8 +234,8 @@ fun HomeScreen(
                     containerColor = SurfaceDark,
                     titleContentColor = TextPrimary
                 )
-            )
-        }
+    )
+}
     ) { padding ->
         Column(
             modifier = Modifier
@@ -297,6 +356,20 @@ fun HomeScreen(
                                     Text(text = item.sku.ifBlank { item.barcode_id }, color = TextSecondary, fontSize = 12.sp)
                                 }
                                 Text(text = "Rs ${item.price_per_unit.toInt()}", color = AccentBlueLight, fontSize = 13.sp)
+                                Spacer(Modifier.width(8.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clip(CircleShape)
+                                        .background(SurfaceHighlight)
+                                        .clickable {
+                                            pinTarget = item
+                                            showAdminPinDialog = true
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(text = "📌", fontSize = 14.sp)
+                                }
                             }
                             HorizontalDivider(color = SurfaceDark, thickness = 0.5.dp)
                         }
@@ -326,6 +399,10 @@ fun HomeScreen(
                                 } else {
                                     viewModel.addToCart(item, 1.0)
                                 }
+                            },
+                            onLongClick = {
+                                unpinTarget = item
+                                showAdminPinDialog = true
                             }
                         )
                     }
@@ -355,15 +432,19 @@ fun HomeScreen(
                                 CartRow(
                                     item = cartItem,
                                     onQtyDecrease = {
-                                        val minQty = if (cartItem.unit in listOf("KG", "GM", "ML")) 0.1 else 1.0
-                                        val newQty = (cartItem.quantity - (if (cartItem.unit in listOf("KG", "GM", "ML")) 0.1 else 1.0)).coerceAtLeast(minQty)
+                                        val minQty = if (cartItem.unit in listOf("KG", "GM", "ML", "L", "Litre", "LITRE", "LTR")) 0.1 else 1.0
+                                        val newQty = (cartItem.quantity - (if (cartItem.unit in listOf("KG", "GM", "ML", "L", "Litre", "LITRE", "LTR")) 0.1 else 1.0)).coerceAtLeast(minQty)
                                         viewModel.updateCartItemQty(cartItem.itemId, newQty)
                                     },
                                     onQtyIncrease = {
-                                        val step = if (cartItem.unit in listOf("KG", "GM", "ML")) 0.1 else 1.0
+                                        val step = if (cartItem.unit in listOf("KG", "GM", "ML", "L", "Litre", "LITRE", "LTR")) 0.1 else 1.0
                                         viewModel.updateCartItemQty(cartItem.itemId, cartItem.quantity + step)
                                     },
-                                    onRemove = { viewModel.removeFromCart(cartItem.itemId) }
+                                    onRemove = { viewModel.removeFromCart(cartItem.itemId) },
+                                    onRowTapped = {
+                                        cartDecimalQtyTarget = cartItem
+                                        showCartDecimalQtyDialog = true
+                                    }
                                 )
                                 HorizontalDivider(color = BackgroundDark, thickness = 0.5.dp)
                             }
@@ -455,6 +536,74 @@ fun HomeScreen(
         )
     }
 
+    // Cart Decimal Qty Dialog (for tapping cart row)
+    if (showCartDecimalQtyDialog && cartDecimalQtyTarget != null) {
+        CartDecimalQtyDialog(
+            item = cartDecimalQtyTarget!!,
+            onConfirm = { qty ->
+                viewModel.updateCartItemQty(cartDecimalQtyTarget!!.itemId, qty)
+                showCartDecimalQtyDialog = false
+                cartDecimalQtyTarget = null
+            },
+            onDismiss = {
+                showCartDecimalQtyDialog = false
+                cartDecimalQtyTarget = null
+            }
+        )
+    }
+
+    // Admin PIN Dialog (gates pin/unpin actions)
+    if (showAdminPinDialog) {
+        AdminPinDialog(
+            onVerified = {
+                showAdminPinDialog = false
+                if (pinTarget != null) {
+                    viewModel.togglePinItem(pinTarget!!.system_row_id, shouldPin = true)
+                    scope.launch { snackbarHostState.showSnackbar("Pinned to quick grid") }
+                    pinTarget = null
+                }
+                if (unpinTarget != null) {
+                    showUnpinConfirm = true
+                }
+            },
+            onDismiss = {
+                showAdminPinDialog = false
+                pinTarget = null
+                unpinTarget = null
+            }
+        )
+    }
+
+    // Unpin Confirmation Dialog
+    if (showUnpinConfirm && unpinTarget != null) {
+        AlertDialog(
+            onDismissRequest = {
+                showUnpinConfirm = false
+                unpinTarget = null
+            },
+            title = { Text("Remove from quick grid?", color = TextPrimary) },
+            text = { Text("Remove ${unpinTarget!!.item_name} from quick grid?", color = TextSecondary) },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.togglePinItem(unpinTarget!!.system_row_id, shouldPin = false)
+                    showUnpinConfirm = false
+                    unpinTarget = null
+                }) {
+                    Text("Remove", color = ErrorRed)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showUnpinConfirm = false
+                    unpinTarget = null
+                }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            },
+            containerColor = SurfaceDark
+        )
+    }
+
 }
 
 // ── Search Bar ────────────────────────────────────────────────────────────────
@@ -518,12 +667,12 @@ fun PosSearchBar(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun QuickGridTile(item: InventoryEntity, onTapped: () -> Unit) {
+private fun QuickGridTile(item: InventoryEntity, onTapped: () -> Unit, onLongClick: () -> Unit = {}) {
     Column(
         modifier = Modifier
             .clip(RoundedCornerShape(10.dp))
             .background(SurfaceVariant)
-            .combinedClickable(onClick = onTapped)
+            .combinedClickable(onClick = onTapped, onLongClick = onLongClick)
             .padding(vertical = 10.dp, horizontal = 6.dp)
             .fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -556,12 +705,14 @@ private fun CartRow(
     item: com.tillzo.pos.domain.model.CartItem,
     onQtyDecrease: () -> Unit,
     onQtyIncrease: () -> Unit,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    onRowTapped: () -> Unit = {}
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp),
+            .padding(vertical = 6.dp)
+            .clickable { onRowTapped() },
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
@@ -573,7 +724,7 @@ private fun CartRow(
         Row(verticalAlignment = Alignment.CenterVertically) {
             SmallIconButton(Icons.Default.Remove, "Decrease") { onQtyDecrease() }
             Text(
-                text = if (item.unit in listOf("KG", "GM", "ML")) "%.3f".format(item.quantity)
+                text = if (item.unit in listOf("KG", "GM", "ML", "L", "Litre", "LITRE", "LTR")) "%.3f".format(item.quantity)
                        else item.quantity.toInt().toString(),
                 color = TextPrimary,
                 fontSize = 13.sp,
@@ -661,6 +812,110 @@ private fun DecimalQtyDialog(
         confirmButton = {
             TextButton(onClick = { onConfirm(input.toDoubleOrNull() ?: 1.0) }) {
                 Text("Add to Cart", color = AccentBlue)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = TextSecondary)
+            }
+        }
+    )
+}
+
+// ── Admin PIN Dialog ──────────────────────────────────────────────────────────
+
+@Composable
+private fun AdminPinDialog(
+    onVerified: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var pinInput by remember { mutableStateOf("") }
+    var showError by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SurfaceDark,
+        title = { Text("Admin PIN Required", color = TextPrimary) },
+        text = {
+            Column {
+                if (showError) {
+                    Text("Incorrect PIN", color = ErrorRed, fontSize = 12.sp)
+                    Spacer(Modifier.height(8.dp))
+                }
+                OutlinedTextField(
+                    value = pinInput,
+                    onValueChange = {
+                        if (it.length <= 4) {
+                            pinInput = it
+                            showError = false
+                        }
+                    },
+                    label = { Text("Enter 4-digit PIN", color = TextSecondary) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = AccentBlue
+                    )
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                if (pinInput == "1234") {
+                    showError = false
+                    onVerified()
+                } else {
+                    showError = true
+                }
+            }) {
+                Text("Confirm", color = AccentBlue)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = TextSecondary)
+            }
+        }
+    )
+}
+
+// ── Cart Decimal Qty Dialog ────────────────────────────────────────────────
+
+@Composable
+private fun CartDecimalQtyDialog(
+    item: com.tillzo.pos.domain.model.CartItem,
+    onConfirm: (Double) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var input by remember { mutableStateOf("%.3f".format(item.quantity)) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SurfaceDark,
+        title = { Text("Enter Quantity", color = TextPrimary) },
+        text = {
+            Column {
+                Text("Item: ${item.name}", color = TextSecondary, fontSize = 13.sp)
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    label = { Text("Qty (${item.unit})", color = TextSecondary) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = AccentBlue
+                    )
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(input.toDoubleOrNull() ?: item.quantity) }) {
+                Text("Update", color = AccentBlue)
             }
         },
         dismissButton = {

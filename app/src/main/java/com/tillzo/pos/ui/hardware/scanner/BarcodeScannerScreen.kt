@@ -48,7 +48,9 @@ import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import com.tillzo.pos.data.local.entity.InventoryEntity
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.util.concurrent.Executors
 
 @Composable
@@ -121,7 +123,7 @@ fun BarcodeScannerScreen(
     }
 
     LaunchedEffect(Unit) {
-        val cameraProvider = cameraProviderFuture.get()
+        val cameraProvider = withContext(Dispatchers.IO) { cameraProviderFuture.get() }
 
         val preview = Preview.Builder().build().also {
             it.setSurfaceProvider(previewView.surfaceProvider)

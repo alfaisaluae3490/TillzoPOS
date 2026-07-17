@@ -1,5 +1,7 @@
 package com.tillzo.pos.ui.inventory
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.Composable
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -15,14 +17,25 @@ import com.tillzo.pos.ui.inventory.options.qr.QrGeneratorScreen
  */
 @Composable
 fun InventoryModule(
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    onNavigateToCategories: () -> Unit = {},
+    onNavigateToUnits: () -> Unit = {}
 ) {
     val navController = rememberNavController()
 
-    NavHost(navController = navController, startDestination = "inventory_crud") {
+    NavHost(
+        navController = navController,
+        startDestination = "inventory_crud",
+        enterTransition = { EnterTransition.None },
+        exitTransition = { ExitTransition.None },
+        popEnterTransition = { EnterTransition.None },
+        popExitTransition = { ExitTransition.None }
+    ) {
         composable("inventory_crud") {
             InventoryCrudScreen(
                 onNavigateBack = onNavigateBack,
+                onNavigateToCategories = onNavigateToCategories,
+                onNavigateToUnits = onNavigateToUnits,
                 onNavigateToOcr = { navController.navigate("ocr_entry") },
                 onNavigateToQr = { barcode -> navController.navigate("qr_generator/$barcode") },
                 navController = navController
@@ -43,6 +56,13 @@ fun InventoryModule(
             val barcode = backStackEntry.arguments?.getString("barcode_id") ?: ""
             QrGeneratorScreen(
                 barcodeId = barcode,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        composable("barcode_print_settings/{item_id}") { backStackEntry ->
+            val itemId = backStackEntry.arguments?.getString("item_id") ?: ""
+            com.tillzo.pos.ui.inventory.options.crud.BarcodePrintSettingsScreen(
+                itemId = itemId,
                 onNavigateBack = { navController.popBackStack() }
             )
         }

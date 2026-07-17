@@ -1,12 +1,15 @@
 package com.tillzo.pos.data.remote
 
+import okhttp3.MultipartBody
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.Multipart
 import retrofit2.http.POST
-import retrofit2.http.Path
-import retrofit2.http.Query
 import retrofit2.http.PATCH
+import retrofit2.http.Path
+import retrofit2.http.Part
+import retrofit2.http.Query
 
 /**
  * SheetsApiService — Retrofit interface for Google Sheets REST API v4.
@@ -84,10 +87,29 @@ interface SheetsApiService {
         @Query("spaces") spaces: String = "drive"
     ): Response<Map<String, @JvmSuppressWildcards Any>>
 
+    /** Create a new folder in Google Drive */
+    @POST("https://www.googleapis.com/drive/v3/files")
+    suspend fun createDriveFolder(
+        @Body body: Map<String, @JvmSuppressWildcards Any>
+    ): Response<Map<String, @JvmSuppressWildcards Any>>
+
     /** Patch a file's appProperties in Google Drive */
     @PATCH("https://www.googleapis.com/drive/v3/files/{fileId}")
     suspend fun updateAppProperties(
         @Path("fileId") fileId: String,
         @Body body: Map<String, @JvmSuppressWildcards Any>
+    ): Response<Map<String, @JvmSuppressWildcards Any>>
+
+    /**
+     * Upload a media file to Google Drive using multipart upload.
+     * Uses uploadType=multipart with two parts: metadata (JSON) + media (raw bytes).
+     */
+    @Multipart
+    @POST("https://www.googleapis.com/upload/drive/v3/files")
+    suspend fun uploadDriveFile(
+        @Query("uploadType") uploadType: String = "multipart",
+        @Query("fields") fields: String = "id,name,mimeType,webViewLink",
+        @Part metadata: MultipartBody.Part,
+        @Part file: MultipartBody.Part
     ): Response<Map<String, @JvmSuppressWildcards Any>>
 }

@@ -17,6 +17,7 @@ fun LoginScreen(
     viewModel: LoginViewModel = hiltViewModel()
 ) {
     val loginState by viewModel.loginState.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -31,24 +32,46 @@ fun LoginScreen(
     }
 
     LaunchedEffect(loginState) {
-        if (loginState is LoginState.Success) {
-            onLoginSuccess()
+        when (loginState) {
+            is LoginState.Success -> onLoginSuccess()
+            is LoginState.Error -> {
+                snackbarHostState.showSnackbar(
+                    message = (loginState as LoginState.Error).message,
+                    duration = SnackbarDuration.Long
+                )
+            }
+            else -> {}
         }
     }
 
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text("Tillzo POS Login", style = MaterialTheme.typography.headlineMedium)
-        Spacer(modifier = Modifier.height(32.dp))
-        
-        when (loginState) {
-            is LoginState.Loading -> CircularProgressIndicator()
-            else -> {
-                Button(onClick = { launcher.launch(viewModel.getAuthIntent()) }) {
-                    Text("Login with Google")
+    Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text("Tillzo POS Login", style = MaterialTheme.typography.headlineMedium)
+            Spacer(modifier = Modifier.height(32.dp))
+
+            when (loginState) {
+                is LoginState.Loading -> CircularProgressIndicator()
+                is LoginState.Error -> {
+                    Text(
+                        text = (loginState as LoginState.Error).message,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(onClick = { launcher.launch(viewModel.getAuthIntent()) }) {
+                        Text("Try Again")
+                    }
+                }
+                else -> {
+                    Button(onClick = { launcher.launch(viewModel.getAuthIntent()) }) {
+                        Text("Login with Google")
+                    }
                 }
             }
         }

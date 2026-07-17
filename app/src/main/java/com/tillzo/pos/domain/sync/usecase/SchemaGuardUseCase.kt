@@ -30,7 +30,10 @@ class SchemaGuardUseCase @Inject constructor(
             "GRN_Headers" to SheetColumns.GRN_HEADERS,
             "GRN_Items" to SheetColumns.GRN_ITEMS,
             "Vendors" to SheetColumns.VENDORS,
-            "Product_Batches" to SheetColumns.PRODUCT_BATCHES
+            "Product_Batches" to SheetColumns.PRODUCT_BATCHES,
+            "Product_Units" to SheetColumns.PRODUCT_UNITS,
+            "BarcodeGeneralConfigs" to SheetColumns.BARCODE_GENERAL_CONFIGS,
+            "BarcodeFieldConfigs" to SheetColumns.BARCODE_FIELD_CONFIGS
         )
     }
 
@@ -46,7 +49,8 @@ class SchemaGuardUseCase @Inject constructor(
                 "Inventory", "Customers", "Khata_Events",
                 "Expenses", "Returns", "Wastage_Ledger", "Users_Permissions",
                 "Settings", "Sync_Log", "Dashboard", "SYS_DB_DO_NOT_TOUCH",
-                "Purchase_Orders", "PO_Items", "GRN_Headers", "GRN_Items", "Vendors", "Product_Batches"
+                "Purchase_Orders", "PO_Items", "GRN_Headers", "GRN_Items", "Vendors", "Product_Batches", "Product_Units",
+                "BarcodeGeneralConfigs", "BarcodeFieldConfigs"
             )
 
             var schemaValid = true

@@ -13,6 +13,10 @@ class ProductBatchRepositoryImpl @Inject constructor(
         productBatchDao.insertBatch(batch)
     }
 
+    override suspend fun getBatchByNumber(productId: String, batchNumber: String): ProductBatchEntity? {
+        return productBatchDao.getBatchByNumber(productId, batchNumber)
+    }
+
     override suspend fun incrementBatchStock(batchId: String, additionalQty: Double) {
         val existing = productBatchDao.getBatchById(batchId) ?: return
         val newQty = existing.stockQty + additionalQty

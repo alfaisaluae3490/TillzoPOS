@@ -19,6 +19,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
@@ -26,6 +27,7 @@ import androidx.core.content.PermissionChecker
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import com.tillzo.pos.domain.update.ForceUpdateState
+import com.tillzo.pos.ui.auth.options.session.PINUnlockScreen
 import com.tillzo.pos.ui.signin.SignInScreen
 import com.tillzo.pos.ui.theme.TillzoPOSTheme
 import com.tillzo.pos.ui.update.ForceUpdateScreen
@@ -75,6 +77,7 @@ private fun TillzoPOSApp(
 ) {
     // Track sign-in / provisioning status
     var isProvisioned by remember { mutableStateOf(appSetupPrefs.isProvisioned) }
+    var isUnlocked by rememberSaveable { mutableStateOf(false) }
     var showAdvancedMenu by remember { mutableStateOf(false) }
     var dismissedCountdown by remember { mutableStateOf(false) }
 
@@ -91,6 +94,15 @@ private fun TillzoPOSApp(
                 // Trigger force update check now that we're online
                 forceUpdateViewModel.checkUpdate()
             }
+        )
+        return
+    }
+
+    val isPinEnabled = appSetupPrefs.isPinEnabled
+    if (isPinEnabled && !isUnlocked) {
+        PINUnlockScreen(
+            onUnlockSuccess = { isUnlocked = true },
+            onNeedsLogin = { isProvisioned = false; isUnlocked = false }
         )
         return
     }

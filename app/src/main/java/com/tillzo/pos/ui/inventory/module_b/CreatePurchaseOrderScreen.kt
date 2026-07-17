@@ -23,11 +23,15 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tillzo.pos.data.local.entity.InventoryEntity
 import com.tillzo.pos.data.local.entity.VendorEntity
 import com.tillzo.pos.ui.inventory.module_b.viewmodel.CreatePurchaseOrderViewModel
 import kotlinx.coroutines.flow.collectLatest
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 // ─── Shared UI helpers ───────────────────────────────────────────────────────
 
@@ -82,6 +86,7 @@ fun CreatePurchaseOrderScreen(
     var inventorySuggestions by remember { mutableStateOf<List<InventoryEntity>>(emptyList()) }
     var notes           by remember { mutableStateOf("") }
     var deliveryDate    by remember { mutableStateOf("") }
+    var showDatePicker  by remember { mutableStateOf(false) }
 
     // Add-vendor dialog state
     var showAddVendor   by remember { mutableStateOf(false) }
@@ -160,6 +165,29 @@ fun CreatePurchaseOrderScreen(
         )
     }
 
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState()
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { millis ->
+                            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+                            deliveryDate = sdf.format(Date(millis))
+                        }
+                        showDatePicker = false
+                    }
+                ) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -182,7 +210,7 @@ fun CreatePurchaseOrderScreen(
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
-                        onClick = { viewModel.savePO(notes, deliveryDate, onNavigateBack) },
+                        onClick = { viewModel.savePO(notes, deliveryDate, onSuccess = onNavigateBack) },
                         modifier = Modifier.weight(1f),
                         border   = BorderStroke(1.dp, Color(0xFF1E88E5)),
                         enabled  = selectedVendor != null && items.isNotEmpty()
@@ -200,7 +228,7 @@ fun CreatePurchaseOrderScreen(
                             else
                                 Uri.parse("https://api.whatsapp.com/send?text=$encoded")
                             try { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) } catch (_: Exception) {}
-                            viewModel.savePO(notes, deliveryDate, onNavigateBack)
+                            viewModel.savePO(notes, deliveryDate, markAsSent = true, onNavigateBack)
                         },
                         modifier = Modifier.weight(1f),
                         colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E88E5)),
@@ -290,14 +318,23 @@ fun CreatePurchaseOrderScreen(
             // ── SECTION 2: PO Details ──────────────────────────────────────────
             item {
                 SectionCard("Order Details") {
-                    OutlinedTextField(
-                        value         = deliveryDate,
-                        onValueChange = { deliveryDate = it },
-                        label         = { Text("Expected Delivery Date (YYYY-MM-DD)") },
-                        leadingIcon   = { Icon(Icons.Default.CalendarToday, null, tint = Color(0xFF1E88E5)) },
-                        modifier      = Modifier.fillMaxWidth(),
-                        colors        = outlinedTextFieldColors()
-                    )
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedTextField(
+                            value         = deliveryDate,
+                            onValueChange = { },
+                            label         = { Text("Expected Delivery Date (YYYY-MM-DD)") },
+                            leadingIcon   = { Icon(Icons.Default.CalendarToday, null, tint = Color(0xFF1E88E5)) },
+                            modifier      = Modifier.fillMaxWidth(),
+                            colors        = outlinedTextFieldColors(),
+                            readOnly      = true,
+                            enabled       = false
+                        )
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .clickable { showDatePicker = true }
+                        )
+                    }
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value         = notes,

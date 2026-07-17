@@ -75,7 +75,7 @@ class InventoryUpsertUseCase @Inject constructor(
                         syncMap["brand"] ?: "",
                         syncMap["description"] ?: "",
                         syncMap["cost_price"] ?: "",
-                        syncMap["price"] ?: "",
+                        syncMap["selling_price"] ?: syncMap["price"] ?: "",
                         syncMap["tax_percent"] ?: "",
                         syncMap["unit"] ?: "",
                         syncMap["stock_qty"] ?: "",

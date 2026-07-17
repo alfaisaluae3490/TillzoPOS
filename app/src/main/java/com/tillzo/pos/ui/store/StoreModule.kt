@@ -1,5 +1,7 @@
 package com.tillzo.pos.ui.store
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.Composable
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -22,7 +24,14 @@ fun StoreModule(
 ) {
     val storeNavController = rememberNavController()
 
-    NavHost(navController = storeNavController, startDestination = startDestination) {
+    NavHost(
+        navController = storeNavController,
+        startDestination = startDestination,
+        enterTransition = { EnterTransition.None },
+        exitTransition = { ExitTransition.None },
+        popEnterTransition = { EnterTransition.None },
+        popExitTransition = { ExitTransition.None }
+    ) {
         
         // M7.1 CRM & Khata Ledger
         composable("crm_screen") {

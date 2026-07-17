@@ -1,8 +1,13 @@
 package com.tillzo.pos.data.remote
 
+import android.util.Log
 import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -301,5 +306,55 @@ class SheetsRemoteDataSource @Inject constructor(
                 (values?.size ?: 1) - 1  // subtract header row
             } catch (e: Exception) { 0 }
         }
+
+    companion object {
+        private const val TAG = "SheetsRemoteDS"
+    }
+
+    // ── Google Drive Document Upload ──────────────────────────────────────────
+
+    /**
+     * Uploads a document to Google Drive and returns (fileId, webViewLink).
+     */
+    suspend fun uploadDocument(
+        filename: String,
+        mimeType: String,
+        fileBytes: ByteArray,
+        parentFolderId: String? = null
+    ): Pair<String, String>? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val metadataJson = JSONObject().apply {
+                    put("name", filename)
+                    put("mimeType", mimeType)
+                    if (!parentFolderId.isNullOrBlank()) {
+                        put("parents", org.json.JSONArray(listOf(parentFolderId)))
+                    }
+                }
+                val metadataBody = metadataJson.toString()
+                    .toRequestBody("application/json; charset=UTF-8".toMediaTypeOrNull())
+                val metadataPart = MultipartBody.Part.createFormData("metadata", "metadata", metadataBody)
+
+                val fileBody = fileBytes.toRequestBody(mimeType.toMediaTypeOrNull())
+                val filePart = MultipartBody.Part.createFormData("file", filename, fileBody)
+
+                val resp = api.uploadDriveFile(metadata = metadataPart, file = filePart)
+                if (!resp.isSuccessful) {
+                    Log.e(TAG, "Drive upload failed: ${resp.code()} ${resp.message()}")
+                    return@withContext null
+                }
+
+                val body = resp.body() ?: return@withContext null
+                val fileId = body["id"] as? String ?: return@withContext null
+                val webViewLink = body["webViewLink"] as? String ?: ""
+
+                Log.d(TAG, "Drive upload success: $filename -> id=$fileId")
+                Pair(fileId, webViewLink)
+            } catch (e: Exception) {
+                Log.e(TAG, "Drive upload exception: ${e.message}", e)
+                null
+            }
+        }
+    }
 }
 

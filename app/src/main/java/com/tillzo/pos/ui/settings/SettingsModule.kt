@@ -1,5 +1,7 @@
 package com.tillzo.pos.ui.settings
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.Composable
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -17,7 +19,14 @@ fun SettingsModule(
 ) {
     val settingsNavController = rememberNavController()
 
-    NavHost(navController = settingsNavController, startDestination = "settings_main") {
+    NavHost(
+        navController = settingsNavController,
+        startDestination = "settings_main",
+        enterTransition = { EnterTransition.None },
+        exitTransition = { ExitTransition.None },
+        popEnterTransition = { EnterTransition.None },
+        popExitTransition = { ExitTransition.None }
+    ) {
         
         composable("settings_main") {
             SettingsScreen(

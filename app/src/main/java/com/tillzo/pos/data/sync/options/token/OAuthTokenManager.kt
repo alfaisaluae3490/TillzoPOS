@@ -111,6 +111,45 @@ class OAuthTokenManager @Inject constructor(
     }
 
     /**
+     * Exchanges a server auth code for access + refresh tokens.
+     * Called from SignInViewModel after a successful Google Sign-In
+     * that included requestServerAuthCode().
+     */
+    suspend fun exchangeAuthCode(authCode: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val body = FormBody.Builder()
+                .add("client_id", Constants.WEB_CLIENT_ID)
+                .add("code", authCode)
+                .add("grant_type", "authorization_code")
+                .build()
+
+            val request = Request.Builder().url(TOKEN_ENDPOINT).post(body).build()
+            val response = tokenHttpClient.newCall(request).execute()
+
+            if (!response.isSuccessful) {
+                Log.w(TAG, "Auth code exchange HTTP ${response.code}")
+                return@withContext null
+            }
+
+            val json = JSONObject(response.body?.string() ?: return@withContext null)
+            val accessToken = json.optString("access_token").takeIf { it.isNotBlank() } ?: return@withContext null
+            val expiresIn = json.optLong("expires_in", 3600L) * 1000L
+            val refreshToken = json.optString("refresh_token").takeIf { it.isNotBlank() }
+
+            cacheToken(accessToken, System.currentTimeMillis() + expiresIn)
+            if (refreshToken != null) {
+                prefs.edit().putString(KEY_REFRESH_TOKEN, refreshToken).apply()
+            }
+
+            Log.i(TAG, "Auth code exchanged successfully — refresh_token=${refreshToken != null}")
+            accessToken
+        } catch (e: Exception) {
+            Log.e(TAG, "Auth code exchange failed: ${e.message}", e)
+            null
+        }
+    }
+
+    /**
      * Stores refresh_token after a fresh sign-in (called from SignInViewModel).
      * Access token is cached from GoogleAuthUtil on first use.
      */

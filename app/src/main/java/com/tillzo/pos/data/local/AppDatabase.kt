@@ -42,6 +42,9 @@ import com.tillzo.pos.data.local.dao.TillSessionDao
 import com.tillzo.pos.data.local.entity.TillSessionEntity
 import com.tillzo.pos.data.local.dao.WastageDao
 import com.tillzo.pos.data.local.entity.WastageEntity
+import com.tillzo.pos.data.local.dao.BarcodeConfigDao
+import com.tillzo.pos.data.local.entity.BarcodeGeneralConfigEntity
+import com.tillzo.pos.data.local.entity.BarcodeFieldConfigEntity
 
 /**
  * Minimal entity for M1 — non-empty entities list required by Room.
@@ -92,9 +95,12 @@ data class SyncLogEntity(
         GrnItemEntity::class,
         ProductUnitEntity::class,         // F1 — Units of Measure
         TillSessionEntity::class,          // M-Till — Shift / Cash Drawer
-        WastageEntity::class               // E1 — Wastage / Damage Logging
+        WastageEntity::class,              // E1 — Wastage / Damage Logging
+        com.tillzo.pos.data.local.entity.ItemGtinEntity::class, // GTIN Support
+        BarcodeGeneralConfigEntity::class,
+        BarcodeFieldConfigEntity::class
     ],
-    version = 17,
+    version = 23,
     exportSchema = false  // Set to true + provide schemaLocation when releasing to production
 )
 @TypeConverters(RoomConverters::class)
@@ -120,6 +126,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun productUnitDao(): ProductUnitDao
     abstract fun tillSessionDao(): TillSessionDao // M-Till — Shift management
     abstract fun wastageDao(): WastageDao          // E1 — Wastage / Damage Logging
+    abstract fun barcodeConfigDao(): BarcodeConfigDao
 
     companion object {
         const val DATABASE_NAME = "tillzo_pos_db"
@@ -620,6 +627,191 @@ abstract class AppDatabase : RoomDatabase() {
                 """.trimIndent())
                 database.execSQL("CREATE INDEX IF NOT EXISTS `index_wastage_log_productId` ON `wastage_log`(`productId`)")
                 database.execSQL("CREATE INDEX IF NOT EXISTS `index_wastage_log_wastageDate` ON `wastage_log`(`wastageDate`)")
+            }
+        }
+
+        // Hierarchical Categories Migration (v18): Adding parent_category_id to Categories table
+        val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE `Categories` ADD COLUMN `parent_category_id` TEXT DEFAULT NULL")
+            }
+        }
+
+        // Vendor Profile Extension Migration (v19): Adding 40+ new fields to vendors table
+        // and Google Drive attachment columns (contractFileId, contractFileUrl)
+        val MIGRATION_18_19 = object : Migration(18, 19) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // ── Geographic ────────────────────────────────────────────────
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `city` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `province` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `country` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `billingAddress` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `ownerName` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+
+                // ── Financial / Tax ───────────────────────────────────────────
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `bankAccountTitle` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `bankName` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `bankAccountNumber` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `bankIban` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `bankSwiftCode` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `bankBranch` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `paymentTerms` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `preferredCurrency` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `creditLimit` REAL NOT NULL DEFAULT 0.0") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `registrationNumber` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `ntnNumber` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `cnicNumber` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `trnNumber` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `tradeLicenseNumber` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `tradeLicenseExpiryDate` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+
+                // ── Contacts — Primary Manager ────────────────────────────────
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `primaryManagerName` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `primaryManagerPhone` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `primaryManagerEmail` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+
+                // ── Contacts — Tech Support ───────────────────────────────────
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `techSupportName` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `techSupportPhone` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `techSupportEmail` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+
+                // ── Contacts — Billing ────────────────────────────────────────
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `billingContactName` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `billingContactPhone` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `billingContactEmail` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+
+                // ── Contacts — Escalation L1 ──────────────────────────────────
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `escalationL1Name` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `escalationL1Phone` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `escalationL1Email` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+
+                // ── Contacts — Escalation L2 ──────────────────────────────────
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `escalationL2Name` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `escalationL2Phone` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `escalationL2Email` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+
+                // ── Contacts — Escalation L3 ──────────────────────────────────
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `escalationL3Name` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `escalationL3Phone` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `escalationL3Email` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+
+                // ── SLA & Files ───────────────────────────────────────────────
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `contractStartDate` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `contractExpiryDate` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `slaResponseTimes` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `warrantyTerms` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `complianceCertificates` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+
+                // ── Google Drive Attachment Metadata ──────────────────────────
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `contractFileId` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `vendors` ADD COLUMN `contractFileUrl` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+            }
+        }
+
+        // GTIN Migration (v20): Adding ItemGtins table and item_number to Inventory
+        val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                try { database.execSQL("ALTER TABLE `Inventory` ADD COLUMN `item_number` INTEGER NOT NULL DEFAULT 0") } catch(_: Exception) {}
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `ItemGtins` (
+                        `gtin_id` TEXT NOT NULL,
+                        `item_id` TEXT NOT NULL,
+                        `gtin` TEXT NOT NULL,
+                        PRIMARY KEY(`gtin_id`),
+                        FOREIGN KEY(`item_id`) REFERENCES `Inventory`(`system_row_id`) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_ItemGtins_item_id` ON `ItemGtins`(`item_id`)")
+                database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_ItemGtins_gtin` ON `ItemGtins`(`gtin`)")
+            }
+        }
+
+        // M22 Migration (v22): Adding attached file columns to grn_headers
+        val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                try { database.execSQL("ALTER TABLE grn_headers ADD COLUMN attachedFileId TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE grn_headers ADD COLUMN attachedFileUrl TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+            }
+        }
+
+        val MIGRATION_22_23 = object : Migration(22, 23) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                try { database.execSQL("ALTER TABLE vendors ADD COLUMN isActive INTEGER NOT NULL DEFAULT 1") } catch(_: Exception) {}
+            }
+        }
+
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `BarcodeGeneralConfigs` (
+                        `system_row_id` TEXT NOT NULL,
+                        `sync_status` TEXT NOT NULL,
+                        `created_at` INTEGER NOT NULL,
+                        `updated_at` INTEGER NOT NULL,
+                        `pos_terminal_id` TEXT NOT NULL,
+                        `is_deleted` INTEGER NOT NULL DEFAULT 0,
+                        `deleted_at` INTEGER,
+                        `labelWidth` INTEGER NOT NULL,
+                        `labelHeight` INTEGER NOT NULL,
+                        `titleTextSize` REAL NOT NULL,
+                        `isTitleBold` INTEGER NOT NULL,
+                        `barcodeSize` REAL NOT NULL,
+                        `currencySymbol` TEXT NOT NULL,
+                        `companyName` TEXT NOT NULL,
+                        `companyLogoPath` TEXT NOT NULL,
+                        `showCompanyName` INTEGER NOT NULL,
+                        `showCompanyLogo` INTEGER NOT NULL,
+                        `titleX` REAL NOT NULL,
+                        `titleY` REAL NOT NULL,
+                        `priceX` REAL NOT NULL,
+                        `priceY` REAL NOT NULL,
+                        `skuX` REAL NOT NULL,
+                        `skuY` REAL NOT NULL,
+                        `gtinX` REAL NOT NULL,
+                        `gtinY` REAL NOT NULL,
+                        `lotX` REAL NOT NULL,
+                        `lotY` REAL NOT NULL,
+                        `expX` REAL NOT NULL,
+                        `expY` REAL NOT NULL,
+                        `snX` REAL NOT NULL,
+                        `snY` REAL NOT NULL,
+                        `barcodeX` REAL NOT NULL,
+                        `barcodeY` REAL NOT NULL,
+                        `companyNameSize` REAL NOT NULL,
+                        `companyLogoSize` REAL NOT NULL,
+                        `companyNameX` REAL NOT NULL,
+                        `companyNameY` REAL NOT NULL,
+                        `companyLogoX` REAL NOT NULL,
+                        `companyLogoY` REAL NOT NULL,
+                        `usePrefix` INTEGER NOT NULL,
+                        `customPrefix` TEXT NOT NULL,
+                        `prefixPosition` INTEGER NOT NULL,
+                        `useSuffix` INTEGER NOT NULL,
+                        `customSuffix` TEXT NOT NULL,
+                        `suffixPosition` INTEGER NOT NULL,
+                        `useSeparator` INTEGER NOT NULL,
+                        PRIMARY KEY(`system_row_id`)
+                    )
+                """.trimIndent())
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `BarcodeFieldConfigs` (
+                        `system_row_id` TEXT NOT NULL,
+                        `sync_status` TEXT NOT NULL,
+                        `created_at` INTEGER NOT NULL,
+                        `updated_at` INTEGER NOT NULL,
+                        `pos_terminal_id` TEXT NOT NULL,
+                        `is_deleted` INTEGER NOT NULL DEFAULT 0,
+                        `deleted_at` INTEGER,
+                        `fieldId` TEXT NOT NULL,
+                        `fieldName` TEXT NOT NULL,
+                        `aiCode` TEXT NOT NULL,
+                        `isEnabled` INTEGER NOT NULL,
+                        `sequenceOrder` INTEGER NOT NULL,
+                        `useFnc1Separator` INTEGER NOT NULL,
+                        `customValue` TEXT NOT NULL DEFAULT '',
+                        PRIMARY KEY(`system_row_id`)
+                    )
+                """.trimIndent())
             }
         }
     }

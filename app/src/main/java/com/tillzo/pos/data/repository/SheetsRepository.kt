@@ -48,6 +48,8 @@ class SheetsRepository @Inject constructor(
             "Purchase_Orders", "PO_Items",
             "GRN_Headers", "GRN_Items",
             "Vendors", "Product_Batches",
+            "Product_Units",
+            "BarcodeGeneralConfigs", "BarcodeFieldConfigs",
             "Settings", "Sync_Log", "Dashboard", "SYS_DB_DO_NOT_TOUCH"
         ).mapIndexed { idx, title ->
             mapOf("properties" to mapOf("title" to title, "index" to idx))
@@ -72,6 +74,14 @@ class SheetsRepository @Inject constructor(
         val headersOk = dataSource.batchWrite(buildHeaders(curTab))
         if (!headersOk) return SheetSetupResult(false, error = "Failed to write headers")
 
+        // Seed default Settings values so last_updated_timestamp is available immediately
+        val initialSettings = listOf(
+            listOf("last_updated_timestamp", "0"),
+            listOf("min_app_version", "1"),
+            listOf("shop_name", shopName)
+        )
+        dataSource.appendRows("Settings!A:B", initialSettings)
+
         return SheetSetupResult(success = true, spreadsheetId = result.spreadsheetId)
     }
 
@@ -88,6 +98,9 @@ class SheetsRepository @Inject constructor(
             "Expenses" -> com.tillzo.pos.utils.SheetColumns.EXPENSES
             "Categories" -> com.tillzo.pos.utils.SheetColumns.CATEGORIES
             "Users", "Users_Permissions" -> com.tillzo.pos.utils.SheetColumns.USERS
+            "Product_Units" -> com.tillzo.pos.utils.SheetColumns.PRODUCT_UNITS
+            "BarcodeGeneralConfigs" -> com.tillzo.pos.utils.SheetColumns.BARCODE_GENERAL_CONFIGS
+            "BarcodeFieldConfigs" -> com.tillzo.pos.utils.SheetColumns.BARCODE_FIELD_CONFIGS
             else -> null
         }
 
@@ -116,20 +129,25 @@ class SheetsRepository @Inject constructor(
     suspend fun fetchDelta(lastTimestamp: Long): DeltaResult {
         val allRows = mutableListOf<Map<String, Any>>()
         val tabs    = listOf(currentSalesTab(), "Inventory", "Customers",
-                             "Khata_Events", "Expenses", "Returns", "Users_Permissions")
+                             "Khata_Events", "Expenses", "Returns", "Users_Permissions",
+                             "Categories", "Product_Units", "Vendors", "Product_Batches",
+                             "BarcodeGeneralConfigs", "BarcodeFieldConfigs")
 
         for (tab in tabs) {
             val raw = dataSource.readRange("$tab!A:Z")
             if (raw.size < 2) continue
 
             val headers = raw[0]
-            val tsIndex = headers.indexOfFirst { it == "last_updated" || it == "timestamp" }
+            val tsIndex = headers.indexOfFirst {
+                it == "updated_at" || it == "updatedAt" || it == "last_updated" ||
+                it == "timestamp" || it == "created_at" || it == "createdAt"
+            }
 
             for (i in 1 until raw.size) {
                 val row    = raw[i]
                 val rowTs  = if (tsIndex >= 0 && tsIndex < row.size)
                     row[tsIndex].toLongOrNull() ?: 0L else 0L
-                if (rowTs > lastTimestamp) {
+                if (lastTimestamp == 0L || rowTs > lastTimestamp) {
                     val obj = mutableMapOf<String, Any>("_sheet" to tab)
                     headers.forEachIndexed { idx, h -> if (idx < row.size) obj[h] = row[idx] }
                     allRows.add(obj)
@@ -154,6 +172,31 @@ class SheetsRepository @Inject constructor(
             shopName             = map["shop_name"] ?: "",
             shopPhone            = map["shop_phone"] ?: ""
         )
+    }
+
+    /**
+     * Updates the remote last_updated_timestamp in the Settings tab.
+     * Called by SyncWorker after a successful full sync cycle.
+     */
+    suspend fun updateLastUpdatedTimestamp(timestamp: Long): Boolean {
+        val rows = dataSource.readRange("Settings!A:B")
+        var rowIndex = -1
+        for (i in 0 until rows.size) {
+            if (rows[i].getOrNull(0) == "last_updated_timestamp") {
+                rowIndex = i + 1
+                break
+            }
+        }
+        val values = listOf(listOf("last_updated_timestamp", timestamp.toString()))
+        return if (rowIndex != -1) {
+            dataSource.batchWrite(listOf(mapOf(
+                "range" to "Settings!A$rowIndex:B$rowIndex",
+                "majorDimension" to "ROWS",
+                "values" to values
+            )))
+        } else {
+            dataSource.appendRows("Settings!A:B", values)
+        }
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -190,6 +233,9 @@ class SheetsRepository @Inject constructor(
         "GRN_Items" to com.tillzo.pos.utils.SheetColumns.GRN_ITEMS,
         "Vendors" to com.tillzo.pos.utils.SheetColumns.VENDORS,
         "Product_Batches" to com.tillzo.pos.utils.SheetColumns.PRODUCT_BATCHES,
+        "Product_Units" to com.tillzo.pos.utils.SheetColumns.PRODUCT_UNITS,
+        "BarcodeGeneralConfigs" to com.tillzo.pos.utils.SheetColumns.BARCODE_GENERAL_CONFIGS,
+        "BarcodeFieldConfigs" to com.tillzo.pos.utils.SheetColumns.BARCODE_FIELD_CONFIGS,
         "Settings" to listOf("setting_key","setting_value"),
         "Sync_Log" to listOf("sync_uuid","pos_id","status","timestamp","error_msg"),
         "SYS_DB_DO_NOT_TOUCH" to listOf("schema_version","last_verified","integrity_check")

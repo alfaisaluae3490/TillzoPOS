@@ -6,12 +6,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -22,8 +24,10 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import android.widget.Toast
 import java.util.UUID
 import javax.inject.Inject
 
@@ -48,40 +52,57 @@ class ProductUnitsViewModel @Inject constructor(
     val units: StateFlow<List<ProductUnitEntity>> = productUnitDao.getAllUnits()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    private val _errorChannel = Channel<String>(Channel.BUFFERED)
+    val errorChannel: Flow<String> = _errorChannel.receiveAsFlow()
+
     init {
         // Seed defaults on first launch
         viewModelScope.launch(Dispatchers.IO) {
-            if (productUnitDao.getActiveCount() == 0) {
-                val now = System.currentTimeMillis()
-                productUnitDao.insertAll(
-                    DEFAULT_UNITS.map { (name, abbr) ->
-                        ProductUnitEntity(
-                            unitId = UUID.randomUUID().toString(),
-                            unitName = name, abbreviation = abbr,
-                            createdAt = now, updatedAt = now
-                        )
-                    }
-                )
+            try {
+                if (productUnitDao.getActiveCount() == 0) {
+                    val now = System.currentTimeMillis()
+                    productUnitDao.insertAll(
+                        DEFAULT_UNITS.map { (name, abbr) ->
+                            ProductUnitEntity(
+                                unitId = UUID.randomUUID().toString(),
+                                unitName = name, abbreviation = abbr,
+                                syncStatus = "synced", // seed defaults are never pushed to Sheets
+                                createdAt = now, updatedAt = now
+                            )
+                        }
+                    )
+                }
+            } catch (e: Exception) {
+                _errorChannel.send(e.localizedMessage ?: "Failed to seed default units")
             }
         }
     }
 
     fun addUnit(name: String, abbreviation: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            val now = System.currentTimeMillis()
-            productUnitDao.insertUnit(
-                ProductUnitEntity(
-                    unitId = UUID.randomUUID().toString(),
-                    unitName = name.trim(), abbreviation = abbreviation.trim().uppercase(),
-                    createdAt = now, updatedAt = now
+            try {
+                val now = System.currentTimeMillis()
+                productUnitDao.insertUnit(
+                    ProductUnitEntity(
+                        unitId = UUID.randomUUID().toString(),
+                        unitName = name.trim(), abbreviation = abbreviation.trim().uppercase(),
+                        syncStatus = "pending", // user-created units picked up by SyncWorker
+                        createdAt = now, updatedAt = now
+                    )
                 )
-            )
+            } catch (e: Exception) {
+                _errorChannel.send(e.localizedMessage ?: "Failed to add unit")
+            }
         }
     }
 
     fun deleteUnit(unitId: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            productUnitDao.softDelete(unitId)
+            try {
+                productUnitDao.softDelete(unitId)
+            } catch (e: Exception) {
+                _errorChannel.send(e.localizedMessage ?: "Failed to delete unit")
+            }
         }
     }
 }
@@ -95,6 +116,14 @@ fun ProductUnitsScreen(
     viewModel: ProductUnitsViewModel = hiltViewModel()
 ) {
     val units by viewModel.units.collectAsState()
+    val context = LocalContext.current
+
+    LaunchedEffect(Unit) {
+        viewModel.errorChannel.collect { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+        }
+    }
+
     var showDialog by remember { mutableStateOf(false) }
 
     if (showDialog) {
@@ -110,7 +139,7 @@ fun ProductUnitsScreen(
                 title = { Text("Units of Measure", color = Color.White, fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, null, tint = Color.White)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF1A1A1A))

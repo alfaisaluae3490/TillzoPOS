@@ -49,7 +49,11 @@ interface TillSessionDao {
 
     @Query("""
         UPDATE till_sessions
-        SET totalCashSales = totalCashSales + :amount,
+        SET totalCashSales = totalCashSales + :cashIn,
+            totalCardSales = totalCardSales + :cardIn,
+            totalWalletSales = totalWalletSales + :walletIn,
+            totalUdhaarSales = totalUdhaarSales + :udhaarIn,
+            totalSplitSales = CASE WHEN :paymentMethod = 'SPLIT' THEN totalSplitSales + :totalAmount ELSE totalSplitSales END,
             totalSalesCount = totalSalesCount + 1,
             expectedCash = expectedCash + :cashIn,
             syncStatus = 'pending',
@@ -58,8 +62,12 @@ interface TillSessionDao {
     """)
     suspend fun addSaleToSession(
         sessionId: String,
-        amount: Double,
+        totalAmount: Double,
         cashIn: Double,
+        cardIn: Double,
+        walletIn: Double,
+        udhaarIn: Double,
+        paymentMethod: String,
         now: Long = System.currentTimeMillis()
     )
 
@@ -68,4 +76,17 @@ interface TillSessionDao {
 
     @Query("UPDATE till_sessions SET syncStatus = 'synced' WHERE sessionId = :id")
     suspend fun markSynced(id: String)
+
+    @Query("""
+        UPDATE till_sessions
+        SET expectedCash = expectedCash - :amount,
+            syncStatus = 'pending',
+            updatedAt = :now
+        WHERE sessionId = :sessionId
+    """)
+    suspend fun deductExpenseFromSession(
+        sessionId: String,
+        amount: Double,
+        now: Long = System.currentTimeMillis()
+    )
 }

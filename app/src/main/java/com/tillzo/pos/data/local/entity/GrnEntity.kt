@@ -23,6 +23,8 @@ data class GrnHeaderEntity(
     val isDeleted: Boolean = false,
     val deletedAt: Long? = null,
     val posTerminalId: String = "",
+    val attachedFileId: String = "",
+    val attachedFileUrl: String = "",
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 ) {
@@ -46,6 +48,8 @@ data class GrnHeaderEntity(
             "is_deleted" to (if (isDeleted) 1 else 0),
             "deleted_at" to (deletedAt ?: ""),
             "pos_terminal_id" to posTerminalId,
+            "attached_file_id" to attachedFileId,
+            "attached_file_url" to attachedFileUrl,
             "created_at" to createdAt,
             "updated_at" to updatedAt
         )

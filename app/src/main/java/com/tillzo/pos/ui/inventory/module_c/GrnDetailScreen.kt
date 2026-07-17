@@ -1,5 +1,7 @@
 package com.tillzo.pos.ui.inventory.module_c
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -65,6 +67,7 @@ fun GrnDetailScreen(
 ) {
     val header by viewModel.header.collectAsState()
     val items by viewModel.items.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     Scaffold(
         topBar = {
@@ -139,6 +142,22 @@ fun GrnDetailScreen(
                             Text("Total Items: ${grn.totalItems}", color = Color.White.copy(alpha = 0.7f))
                             Text("PKR ${String.format("%,.0f", grn.totalAmount)}",
                                 color = Color(0xFF1E88E5), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        }
+                        if (grn.attachedFileUrl.isNotEmpty()) {
+                            Spacer(Modifier.height(12.dp))
+                            OutlinedButton(
+                                onClick = {
+                                    try {
+                                        val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(grn.attachedFileUrl))
+                                        context.startActivity(browserIntent)
+                                    } catch (_: Exception) { }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.OpenInBrowser, null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("View Attached Document")
+                            }
                         }
                     }
                 }

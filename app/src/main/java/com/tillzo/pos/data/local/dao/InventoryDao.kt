@@ -89,4 +89,19 @@ interface InventoryDao {
 
     @Query("UPDATE Inventory SET totalStock = :total, updated_at = :time WHERE system_row_id = :id")
     suspend fun updateTotalStock(id: String, total: Double, time: Long = System.currentTimeMillis())
+
+    @Query("SELECT MAX(item_number) FROM Inventory")
+    suspend fun getMaxItemNumber(): Int?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertGtins(gtins: List<com.tillzo.pos.data.local.entity.ItemGtinEntity>)
+
+    @Query("SELECT * FROM ItemGtins WHERE item_id = :itemId")
+    suspend fun getGtinsForItem(itemId: String): List<com.tillzo.pos.data.local.entity.ItemGtinEntity>
+
+    @Query("SELECT * FROM ItemGtins WHERE item_id = :itemId")
+    fun getGtinsForItemFlow(itemId: String): Flow<List<com.tillzo.pos.data.local.entity.ItemGtinEntity>>
+
+    @Query("DELETE FROM ItemGtins WHERE item_id = :itemId")
+    suspend fun deleteGtinsForItem(itemId: String)
 }

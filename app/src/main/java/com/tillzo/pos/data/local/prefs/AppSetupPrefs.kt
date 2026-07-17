@@ -38,6 +38,9 @@ class AppSetupPrefs @Inject constructor(
         const val KEY_SPREADSHEET_ID     = "spreadsheet_id"
         const val KEY_USER_EMAIL         = "user_email"
         const val KEY_USER_DISPLAY_NAME  = "user_display_name"
+        const val KEY_IS_PIN_ENABLED     = "is_pin_enabled"
+        const val KEY_GRN_FOLDER_ID      = "grn_folder_id"
+        const val KEY_GRN_FOLDER_NAME    = "grn_folder_name"
     }
 
     // ── Read ──────────────────────────────────────────────────────────────
@@ -53,6 +56,25 @@ class AppSetupPrefs @Inject constructor(
 
     val userDisplayName: String
         get() = prefs.getString(KEY_USER_DISPLAY_NAME, "") ?: ""
+
+    var isPinEnabled: Boolean
+        get() = prefs.getBoolean(KEY_IS_PIN_ENABLED, true)
+        set(value) = prefs.edit().putBoolean(KEY_IS_PIN_ENABLED, value).apply()
+
+    var grnFolderId: String
+        get() = prefs.getString(KEY_GRN_FOLDER_ID, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_GRN_FOLDER_ID, value).apply()
+
+    var grnFolderName: String
+        get() = prefs.getString(KEY_GRN_FOLDER_NAME, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_GRN_FOLDER_NAME, value).apply()
+
+    fun saveGrnFolder(folderId: String, name: String) {
+        prefs.edit()
+            .putString(KEY_GRN_FOLDER_ID, folderId)
+            .putString(KEY_GRN_FOLDER_NAME, name)
+            .apply()
+    }
 
     // ── Write ─────────────────────────────────────────────────────────────
 

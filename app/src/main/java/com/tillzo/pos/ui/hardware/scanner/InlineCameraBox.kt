@@ -1,5 +1,6 @@
 package com.tillzo.pos.ui.hardware.scanner
 
+import android.annotation.SuppressLint
 import android.util.Size
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -32,8 +33,13 @@ import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import java.util.concurrent.Executors
 
+@SuppressLint("UnsafeOptInUsageError")
 @Composable
 fun InlineCameraBox(
     modifier: Modifier = Modifier,
@@ -71,7 +77,22 @@ fun InlineCameraBox(
 
     // Bind/unbind camera when active state changes
     LaunchedEffect(isCameraActive) {
-        val cameraProvider = ProcessCameraProvider.getInstance(context).get()
+        val cameraProvider = suspendCancellableCoroutine<ProcessCameraProvider> { continuation ->
+            val future = ProcessCameraProvider.getInstance(context)
+            future.addListener(
+                {
+                    try {
+                        continuation.resumeWith(Result.success(future.get()))
+                    } catch (e: Exception) {
+                        continuation.resumeWith(Result.failure(e))
+                    }
+                },
+                ContextCompat.getMainExecutor(context)
+            )
+            continuation.invokeOnCancellation {
+                future.cancel(false)
+            }
+        }
 
         if (isCameraActive) {
             // Build preview
@@ -122,7 +143,6 @@ fun InlineCameraBox(
         } else {
             // Camera sleeping — unbind to free resources
             try {
-                val cameraProvider = ProcessCameraProvider.getInstance(context).get()
                 cameraProvider.unbindAll()
             } catch (e: Exception) { }
         }
@@ -133,9 +153,12 @@ fun InlineCameraBox(
         onDispose {
             cameraExecutor.shutdown()
             barcodeScanner.close()
-            try {
-                ProcessCameraProvider.getInstance(context).get().unbindAll()
-            } catch (e: Exception) { }
+            val future = ProcessCameraProvider.getInstance(context)
+            future.addListener({
+                try {
+                    future.get().unbindAll()
+                } catch (e: Exception) { }
+            }, ContextCompat.getMainExecutor(context))
         }
     }
 

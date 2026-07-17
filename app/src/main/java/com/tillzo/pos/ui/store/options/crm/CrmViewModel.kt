@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tillzo.pos.data.local.entity.CustomerEntity
 import com.tillzo.pos.data.local.entity.KhataEventEntity
+import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import com.tillzo.pos.domain.repository.StoreRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,7 +18,8 @@ import javax.inject.Inject
 
 @HiltViewModel
 class CrmViewModel @Inject constructor(
-    private val storeRepository: StoreRepository
+    private val storeRepository: StoreRepository,
+    private val appSetupPrefs: AppSetupPrefs
 ) : ViewModel() {
 
     private val _customers = MutableStateFlow<List<CustomerEntity>>(emptyList())
@@ -86,7 +88,7 @@ class CrmViewModel @Inject constructor(
         whatsapp: String, email: String, address: String
     ) {
         viewModelScope.launch(Dispatchers.IO) {
-            val termId = "terminal_1"
+            val termId = appSetupPrefs.spreadsheetId.take(20).ifBlank { "TERM_1" }
             val customer = existing?.copy(
                 name = name, phone = phone,
                 whatsapp = whatsapp, email = email, address = address,
@@ -109,8 +111,8 @@ class CrmViewModel @Inject constructor(
         val custId = _selectedCustomer.value?.system_row_id ?: return
         if (amount <= 0) return
         viewModelScope.launch {
-            val termId = "terminal_1"
-            val actualAmount = if (type == "UDHAAR") -amount else amount // Udhaar decreases balance, Jama increases
+            val termId = appSetupPrefs.spreadsheetId.take(20).ifBlank { "TERM_1" }
+            val actualAmount = amount
             
             val event = KhataEventEntity(
                 customer_id = custId,

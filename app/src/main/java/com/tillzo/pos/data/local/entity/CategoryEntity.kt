@@ -14,6 +14,7 @@ data class CategoryEntity(
     override val pos_terminal_id: String,
 
     val category_name: String,
+    val parent_category_id: String? = null,
     
     override val is_deleted: Boolean = false,
     override val deleted_at: Long? = null
@@ -22,6 +23,7 @@ data class CategoryEntity(
         return mapOf(
             "system_row_id" to system_row_id,
             "category_name" to category_name,
+            "parent_category_id" to (parent_category_id ?: ""),
             "is_deleted" to (if (is_deleted) 1 else 0),
             "deleted_at" to (deleted_at ?: ""),
             "sync_status" to "synced",

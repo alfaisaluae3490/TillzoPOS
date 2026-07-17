@@ -7,18 +7,29 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import androidx.work.WorkInfo
 import com.tillzo.pos.data.sync.SyncOrchestrator
 import javax.inject.Inject
 
 /**
  * HomeScreen state — immutable snapshot of everything shown on the POS home screen.
  */
+enum class SyncStatus {
+    IDLE,
+    RUNNING,
+    SUCCESS,
+    FAILED
+}
+
 data class HomeUiState(
     val displayValue: String = "0",        // Giant numpad display
     val cartTotal: Double = 0.0,           // Running cart total
     val cartItemCount: Int = 0,            // Number of items in cart
     val quickGridItems: List<QuickGridItem> = emptyList(), // Configurable pinned items
-    val isLoading: Boolean = false
+    val isLoading: Boolean = false,
+    val syncStatus: SyncStatus = SyncStatus.IDLE,
+    val syncMessage: String? = null
 )
 
 data class QuickGridItem(
@@ -38,6 +49,44 @@ data class QuickGridItem(
 class HomeViewModel @Inject constructor(
     private val syncOrchestrator: SyncOrchestrator
 ) : BaseViewModel<HomeUiState>(HomeUiState()) {
+
+    init {
+        viewModelScope.launch {
+            syncOrchestrator.getManualSyncWorkInfo().collect { workInfoList ->
+                val workInfo = workInfoList.firstOrNull() ?: return@collect
+                when (workInfo.state) {
+                    WorkInfo.State.RUNNING -> {
+                        updateState(uiState.value.copy(
+                            syncStatus = SyncStatus.RUNNING,
+                            syncMessage = "Sync in progress..."
+                        ))
+                    }
+                    WorkInfo.State.SUCCEEDED -> {
+                        updateState(uiState.value.copy(
+                            syncStatus = SyncStatus.SUCCESS,
+                            syncMessage = "Sync Completed Successfully!"
+                        ))
+                        delay(3000)
+                        updateState(uiState.value.copy(syncStatus = SyncStatus.IDLE, syncMessage = null))
+                    }
+                    WorkInfo.State.FAILED -> {
+                        updateState(uiState.value.copy(
+                            syncStatus = SyncStatus.FAILED,
+                            syncMessage = "Sync Failed. Please check connection."
+                        ))
+                        delay(3000)
+                        updateState(uiState.value.copy(syncStatus = SyncStatus.IDLE, syncMessage = null))
+                    }
+                    else -> {
+                        updateState(uiState.value.copy(
+                            syncStatus = SyncStatus.IDLE,
+                            syncMessage = null
+                        ))
+                    }
+                }
+            }
+        }
+    }
 
     // Numpad digit buffer
     private val _inputBuffer = StringBuilder("0")

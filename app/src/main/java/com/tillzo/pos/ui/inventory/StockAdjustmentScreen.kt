@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tillzo.pos.data.local.dao.InventoryDao
+import com.tillzo.pos.data.local.dao.ProductBatchDao
 import com.tillzo.pos.data.local.dao.StockAdjustmentDao
 import com.tillzo.pos.data.local.entity.InventoryEntity
 import com.tillzo.pos.data.local.entity.StockAdjustmentEntity
@@ -45,7 +46,8 @@ private val ADJUSTMENT_TYPES = listOf(
 @HiltViewModel
 class StockAdjustmentViewModel @Inject constructor(
     private val inventoryDao: InventoryDao,
-    private val stockAdjustmentDao: StockAdjustmentDao
+    private val stockAdjustmentDao: StockAdjustmentDao,
+    private val productBatchDao: ProductBatchDao
 ) : ViewModel() {
 
     private val _searchResults = MutableStateFlow<List<InventoryEntity>>(emptyList())
@@ -95,6 +97,16 @@ class StockAdjustmentViewModel @Inject constructor(
                     updated_at = System.currentTimeMillis()
                 )
             )
+            // 3. Update the oldest active batch (FIFO) so batch stock stays in sync
+            val batch = productBatchDao.getOldestActiveBatch(product.system_row_id)
+            if (batch != null) {
+                val newBatchStock = (batch.stockQty + qtyChange).coerceAtLeast(0.0)
+                productBatchDao.updateBatchStock(batch.batchId, newBatchStock, System.currentTimeMillis())
+                if (newBatchStock <= 0.0) {
+                    productBatchDao.deactivateBatch(batch.batchId, System.currentTimeMillis())
+                }
+            }
+
             // 2. Record adjustment log
             stockAdjustmentDao.insertStockAdjustment(
                 StockAdjustmentEntity(

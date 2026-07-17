@@ -26,6 +26,30 @@ interface VendorDao {
     @Query("SELECT * FROM vendors WHERE syncStatus = 'pending' AND isDeleted = 0")
     suspend fun getPendingVendors(): List<VendorEntity>
 
+    @Query("SELECT * FROM vendors WHERE vendorId = :vendorId")
+    suspend fun getVendorById(vendorId: String): VendorEntity?
+
     @Query("UPDATE vendors SET syncStatus = 'synced' WHERE vendorId = :vendorId")
     suspend fun markSynced(vendorId: String)
+
+    @Query("UPDATE vendors SET syncStatus = 'synced' WHERE vendorId IN (:vendorIds)")
+    suspend fun markMultipleSynced(vendorIds: List<String>)
+
+    @Query("UPDATE vendors SET contractFileId = :fileId, contractFileUrl = :fileUrl, syncStatus = 'pending', updatedAt = :updatedAt WHERE vendorId = :vendorId")
+    suspend fun updateContractFile(vendorId: String, fileId: String, fileUrl: String, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE vendors SET isDeleted = 1, syncStatus = 'pending', updatedAt = :timestamp WHERE vendorId = :vendorId")
+    suspend fun softDeleteVendor(vendorId: String, timestamp: Long = System.currentTimeMillis())
+
+    @Query("DELETE FROM vendors WHERE vendorId = :vendorId")
+    suspend fun hardDeleteVendor(vendorId: String)
+
+    @Query("SELECT * FROM vendors WHERE isDeleted = 1 AND syncStatus = 'pending'")
+    suspend fun getPendingSyncDeleted(): List<VendorEntity>
+
+    @Query("SELECT * FROM vendors WHERE isDeleted = 0 AND isActive = 1 ORDER BY name ASC")
+    fun getActiveVendors(): Flow<List<VendorEntity>>
+
+    @Query("SELECT * FROM vendors WHERE (name LIKE '%' || :query || '%' OR phone LIKE '%' || :query || '%') AND isDeleted = 0 AND isActive = 1 ORDER BY name ASC")
+    suspend fun searchActiveVendors(query: String): List<VendorEntity>
 }

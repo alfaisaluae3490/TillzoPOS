@@ -1,10 +1,9 @@
 package com.tillzo.pos.data.remote
 
-import android.accounts.Account
 import android.content.Context
-import com.google.android.gms.auth.GoogleAuthUtil
-import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.tillzo.pos.data.sync.options.token.OAuthTokenManager
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.runBlocking
 import okhttp3.Authenticator
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
@@ -34,44 +33,21 @@ import javax.inject.Singleton
  */
 @Singleton
 class SheetsApiClient @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val tokenManager: OAuthTokenManager
 ) {
     companion object {
         const val BASE_URL = "https://sheets.googleapis.com/v4/"
-        private const val SCOPE =
-            "oauth2:https://www.googleapis.com/auth/drive.file"
-    }
-
-    // ── Token fetch helper ────────────────────────────────────────────────────
-
-    private fun fetchFreshToken(): String? {
-        val account = GoogleSignIn.getLastSignedInAccount(context) ?: return null
-        val email = account.email ?: return null
-        return try {
-            GoogleAuthUtil.getToken(context, Account(email, "com.google"), SCOPE)
-        } catch (e: Exception) { null }
-    }
-
-    private fun invalidateAndRefresh(): String? {
-        val account = GoogleSignIn.getLastSignedInAccount(context) ?: return null
-        val email = account.email ?: return null
-        return try {
-            val staleToken = GoogleAuthUtil.getToken(
-                context, Account(email, "com.google"), SCOPE
-            )
-            GoogleAuthUtil.clearToken(context, staleToken)
-            GoogleAuthUtil.getToken(context, Account(email, "com.google"), SCOPE)
-        } catch (e: Exception) { null }
     }
 
     // ── Bearer Interceptor ────────────────────────────────────────────────────
 
     /**
-     * Attaches fresh Bearer token to every outgoing request.
-     * Called before each request — token is cached by GoogleAuthUtil if still valid.
+     * Attaches Bearer token from OAuthTokenManager to every outgoing request.
+     * Uses runBlocking to bridge the coroutine-based tokenManager into OkHttp's sync interceptor.
      */
     private val bearerInterceptor = Interceptor { chain ->
-        val token   = fetchFreshToken()
+        val token = runBlocking { tokenManager.getValidToken() }
         val request = if (token != null) {
             chain.request().newBuilder()
                 .addHeader("Authorization", "Bearer $token")
@@ -86,18 +62,21 @@ class SheetsApiClient @Inject constructor(
 
     /**
      * Called by OkHttp automatically when server returns 401.
-     * Invalidates stale token, gets fresh one, retries request once.
+     * Invalidates stale tokens, gets fresh one, retries request once.
      * Returns null after first retry to prevent infinite loop.
      */
     private val tokenAuthenticator = object : Authenticator {
         override fun authenticate(route: Route?, response: Response): Request? {
-            // Prevent infinite retry loop
             if (response.request.header("Authorization-Retry") != null) return null
 
-            val newToken = invalidateAndRefresh() ?: return null
+            val newToken = runBlocking {
+                tokenManager.invalidateTokens()
+                tokenManager.getValidToken()
+            } ?: return null
+
             return response.request.newBuilder()
                 .header("Authorization", "Bearer $newToken")
-                .header("Authorization-Retry", "true")  // Mark retry to prevent loop
+                .header("Authorization-Retry", "true")
                 .build()
         }
     }

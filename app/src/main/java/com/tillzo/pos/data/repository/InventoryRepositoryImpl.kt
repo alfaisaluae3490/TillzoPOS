@@ -74,6 +74,8 @@ class InventoryRepositoryImpl @Inject constructor(
     }
 
     override suspend fun deleteItemById(id: String) {
-        inventoryDao.deleteItemById(id, System.currentTimeMillis())
+        val timestamp = System.currentTimeMillis()
+        inventoryDao.deleteItemById(id, timestamp)
+        productBatchDao.softDeleteAllForProduct(id, timestamp)
     }
 }

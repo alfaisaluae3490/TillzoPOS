@@ -85,6 +85,40 @@ class DriveSearchHelper @Inject constructor(
         }
     }
 
+    suspend fun searchFolders(): List<PosSheetInfo> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val url = buildDriveFolderSearchUrl()
+                fetchDriveFiles(url)
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
+
+    suspend fun createFolder(folderName: String): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val body = mapOf<String, Any>(
+                    "name" to folderName,
+                    "mimeType" to "application/vnd.google-apps.folder"
+                )
+                val resp = sheetsApiClient.createService<SheetsApiService>().createDriveFolder(body)
+                if (!resp.isSuccessful) return@withContext null
+                val id = resp.body()?.get("id") as? String ?: return@withContext null
+                id
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+
+    private fun buildDriveFolderSearchUrl(): String {
+        val query = "mimeType='application/vnd.google-apps.folder' and trashed=false"
+        val encoded = URLEncoder.encode(query, "UTF-8")
+        return "https://www.googleapis.com/drive/v3/files?q=$encoded&fields=files(id,name,createdTime,modifiedTime,appProperties)&orderBy=modifiedTime+desc&pageSize=20"
+    }
+
     private data class DriveResponse(
         @SerializedName("files") val files: List<DriveFile>?
     )

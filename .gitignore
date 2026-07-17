@@ -1,0 +1,31 @@
+# Gradle files
+.gradle/
+**/.gradle/
+build/
+**/build/
+
+# IDEs and Editors
+.idea/
+**/.idea/
+.vscode/
+**/.vscode/
+*.iml
+.DS_Store
+
+# Local configuration (SDK paths, local API keys, etc.)
+local.properties
+
+# Log files
+*.log
+**/*.log
+
+# Temporary and output files
+docx_temp/
+repomix-output.md
+.aider*
+*.class
+**/*.class
+
+# Python caches
+__pycache__/
+*.pyc

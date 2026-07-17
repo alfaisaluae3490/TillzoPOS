@@ -7,6 +7,7 @@ import com.tillzo.pos.data.remote.DriveSearchHelper
 import com.tillzo.pos.data.remote.PosSheetInfo
 import com.tillzo.pos.data.remote.SheetsRemoteDataSource
 import com.tillzo.pos.data.repository.SheetsRepository
+import com.tillzo.pos.data.sync.options.delta.DeltaSyncManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,7 +22,8 @@ class SheetPickerViewModel @Inject constructor(
     private val appSetupPrefs: AppSetupPrefs,
     private val driveSearchHelper: DriveSearchHelper,
     private val sheetsRepository: SheetsRepository,
-    private val sheetsRemoteDataSource: SheetsRemoteDataSource
+    private val sheetsRemoteDataSource: SheetsRemoteDataSource,
+    private val deltaSyncManager: DeltaSyncManager
 ) : ViewModel() {
 
     sealed class UiState {
@@ -54,6 +56,7 @@ class SheetPickerViewModel @Inject constructor(
     fun selectSheet(sheet: PosSheetInfo) {
         viewModelScope.launch(Dispatchers.IO) {
             appSetupPrefs.saveProvisioningResult(sheet.spreadsheetId)
+            deltaSyncManager.triggerImmediatePoll()
         }
     }
 

@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -187,6 +188,20 @@ class PosViewModel @Inject constructor(
         }
         _cartItems.value = currentCart
         _searchQuery.value = ""
+    }
+
+    // ── Quick Grid Pinning ────────────────────────────────────────────────────
+
+    fun togglePinItem(itemId: String, shouldPin: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (shouldPin) {
+                val pinnedItems = inventoryDao.getPinnedItemsOnce()
+                val nextOrder = pinnedItems.size + 1
+                inventoryDao.updatePinStatus(itemId, pinned = true, order = nextOrder)
+            } else {
+                inventoryDao.updatePinStatus(itemId, pinned = false, order = 0)
+            }
+        }
     }
 
     fun updateCartItemQty(itemId: String, newQty: Double) {

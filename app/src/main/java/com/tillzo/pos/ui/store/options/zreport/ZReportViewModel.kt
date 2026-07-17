@@ -40,6 +40,19 @@ class ZReportViewModel @Inject constructor(
     private val _reportStatus = MutableStateFlow<String?>(null)
     val reportStatus = _reportStatus.asStateFlow()
 
+    // Payment breakdown from active till session
+    private val _totalCashSales = MutableStateFlow(0.0)
+    val totalCashSales = _totalCashSales.asStateFlow()
+
+    private val _totalCardSales = MutableStateFlow(0.0)
+    val totalCardSales = _totalCardSales.asStateFlow()
+
+    private val _totalWalletSales = MutableStateFlow(0.0)
+    val totalWalletSales = _totalWalletSales.asStateFlow()
+
+    private val _totalUdhaarSales = MutableStateFlow(0.0)
+    val totalUdhaarSales = _totalUdhaarSales.asStateFlow()
+
     // Till / Shift data
     private val todayDate = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
 
@@ -85,6 +98,18 @@ class ZReportViewModel @Inject constructor(
             // Simulate reading sync logic (M2 artifact)
             _pendingSyncCount.value = 0 // In real impl: syncLogDao.getPendingRowCountsSum() 
         }
+
+        // Populate payment breakdown from active till session
+        viewModelScope.launch {
+            activeSession.collect { session ->
+                if (session != null) {
+                    _totalCashSales.value = session.totalCashSales
+                    _totalCardSales.value = session.totalCardSales
+                    _totalWalletSales.value = session.totalWalletSales
+                    _totalUdhaarSales.value = session.totalUdhaarSales
+                }
+            }
+        }
     }
 
     fun executeDayClose() {
@@ -94,6 +119,17 @@ class ZReportViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
+            // Close the active till session in the database
+            val session = activeSession.value
+            if (session != null) {
+                tillSessionDao.closeSession(
+                    sessionId = session.sessionId,
+                    closingCash = session.expectedCash,
+                    netCash = 0.0,
+                    closedAt = System.currentTimeMillis()
+                )
+            }
+
             _reportStatus.value = "Day Closed Successfully! Printing Z-Report..."
             try {
                 val zReportContent = buildString {
@@ -102,8 +138,13 @@ class ZReportViewModel @Inject constructor(
                     append("Date: ${java.util.Date()}\n")
                     append("POS ID: TERMINAL_1\n")
                     append("--------------------------------\n")
-                    append("Gross Sales: Rs ${String.format("%.2f", _totalSalesToday.value)}\n")
-                    append("Expenses:    Rs ${String.format("%.2f", _totalExpensesToday.value)}\n")
+                    append("Cash Sales:   Rs ${String.format("%.2f", _totalCashSales.value)}\n")
+                    append("Card Sales:   Rs ${String.format("%.2f", _totalCardSales.value)}\n")
+                    append("Wallet Sales: Rs ${String.format("%.2f", _totalWalletSales.value)}\n")
+                    append("Udhaar Sales: Rs ${String.format("%.2f", _totalUdhaarSales.value)}\n")
+                    append("--------------------------------\n")
+                    append("Gross Sales:  Rs ${String.format("%.2f", _totalSalesToday.value)}\n")
+                    append("Expenses:     Rs ${String.format("%.2f", _totalExpensesToday.value)}\n")
                     append("--------------------------------\n")
                     append("NET IN DRAWER: Rs ${String.format("%.2f", _netCashDrawer.value)}\n")
                     append("================================\n")

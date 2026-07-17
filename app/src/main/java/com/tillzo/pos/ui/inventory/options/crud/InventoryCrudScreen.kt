@@ -9,9 +9,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Search
@@ -27,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tillzo.pos.data.local.entity.InventoryEntity
+import com.tillzo.pos.data.local.entity.CategoryEntity
 import com.tillzo.pos.domain.usecase.inventory.ProductFilter
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -43,6 +46,8 @@ import com.tillzo.pos.ui.inventory.options.alerts.LowStockViewModel
 @Composable
 fun InventoryCrudScreen(
     onNavigateBack: () -> Unit,
+    onNavigateToCategories: () -> Unit = {},
+    onNavigateToUnits: () -> Unit = {},
     onNavigateToOcr: () -> Unit,
     onNavigateToQr: (String) -> Unit,
     viewModel: InventoryCrudViewModel = hiltViewModel(),
@@ -59,6 +64,7 @@ fun InventoryCrudScreen(
 
     var showFormDialog by remember { mutableStateOf(false) }
     var selectedItemForBatches by remember { mutableStateOf<InventoryEntity?>(null) }
+    var itemToPrint by remember { mutableStateOf<InventoryEntity?>(null) }
 
     // M6.2 Read OCR scanned values returned from OcrEntryScreen
     val backStackEntry = navController?.currentBackStackEntryAsState()?.value
@@ -77,10 +83,46 @@ fun InventoryCrudScreen(
                 title = { Text("Inventory Management", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
+                    Button(
+                        onClick = onNavigateToCategories,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        modifier = Modifier.height(32.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF1E88E5),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Category,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Categories",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Button(
+                        onClick = onNavigateToUnits,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        modifier = Modifier.height(32.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF1E88E5),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text(
+                            text = "Units",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                     IconButton(onClick = onNavigateToOcr) {
                         Icon(Icons.Default.CameraAlt, contentDescription = "Smart AI Entry (OCR)")
                     }
@@ -171,7 +213,7 @@ fun InventoryCrudScreen(
                             showFormDialog = true
                         },
                         onDelete = { viewModel.deleteItem(item.system_row_id) },
-                        onPrintQr = { onNavigateToQr(item.barcode_id) },
+                        onPrintQr = { navController?.navigate("barcode_print_settings/${item.system_row_id}") },
                         onViewBatches = { selectedItemForBatches = item }
                     )
                 }
@@ -186,13 +228,13 @@ fun InventoryCrudScreen(
             viewModel = viewModel,
             onDismiss = {
                 navController?.currentBackStackEntry?.savedStateHandle?.remove<String>("ocr_scanned_weight")
-                showFormDialog = false 
+                showFormDialog = false
             },
-            onSave = { name, category, barcode, unit, price, stock, threshold, sku, desc, cost, tax, batch, exp, mfg, expAlert, dmgStock, dmgQty ->
+            onSave = { name, category, gtinsList, unit, price, stock, threshold, sku, desc, cost, tax, batch, exp, mfg, expAlert, dmgStock, dmgQty ->
                 viewModel.saveItem(
                     itemName = name,
                     category = category,
-                    barcodeInput = barcode,
+                    gtins = gtinsList,
                     unit = unit,
                     pricePerUnit = price,
                     currentStock = stock,
@@ -210,7 +252,8 @@ fun InventoryCrudScreen(
                 )
                 navController?.currentBackStackEntry?.savedStateHandle?.remove<String>("ocr_scanned_weight")
                 showFormDialog = false
-            }
+            },
+            onNavigateToUnits = onNavigateToUnits
         )
     }
 
@@ -303,7 +346,7 @@ fun InventoryItemCard(
 private fun isNearExpiry(expiryDate: String): Boolean {
     val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
     return try {
-        val exp = dateFormat.parse(expiryDate)
+        val exp = dateFormat.parse(expiryDate) ?: return false
         val today = Date()
         val diff = exp.time - today.time
         val days = diff / (1000 * 60 * 60 * 24)
@@ -320,7 +363,8 @@ fun InventoryFormDialog(
     preFilledWeight: String? = null,
     viewModel: InventoryCrudViewModel,
     onDismiss: () -> Unit,
-    onSave: (String, String, String, String, Double, Double, Double, String, String, Double, Double, String, String, String, Int, Boolean, Double) -> Unit
+    onSave: (String, String, List<String>, String, Double, Double, Double, String, String, Double, Double, String, String, String, Int, Boolean, Double) -> Unit,
+    onNavigateToUnits: () -> Unit = {}
 ) {
     val categories by viewModel.allCategories.collectAsState()
     var showCategoryManager by remember { mutableStateOf(false) }
@@ -330,7 +374,8 @@ fun InventoryFormDialog(
     var category by remember { mutableStateOf(item?.category ?: "") }
     var desc by remember { mutableStateOf(item?.description ?: "") }
     
-    var barcode by remember { mutableStateOf(item?.barcode_id ?: "") }
+    var gtins by remember { mutableStateOf(item?.barcode_id?.let { listOf(it) } ?: emptyList()) }
+    var currentGtinInput by remember { mutableStateOf("") }
     var costPrice by remember { mutableStateOf(item?.cost_price?.takeIf { it > 0.0 }?.toString() ?: "") }
     var price by remember { mutableStateOf(item?.price_per_unit?.takeIf { it > 0.0 }?.toString() ?: "") }
     var taxPercent by remember { mutableStateOf(item?.tax_percent?.takeIf { it > 0.0 }?.toString() ?: "") }
@@ -347,6 +392,10 @@ fun InventoryFormDialog(
     var isDamaged by remember { mutableStateOf(item?.is_damaged_stock ?: false) }
     var dmgQty by remember { mutableStateOf(item?.damaged_qty?.takeIf { it > 0.0 }?.toString() ?: "") }
 
+    // Hierarchical Category Selection State
+    var selectedMainCategory by remember { mutableStateOf<CategoryEntity?>(null) }
+    var selectedSubCategory by remember { mutableStateOf<CategoryEntity?>(null) }
+
     // DatePicker State
     var showMfgDatePicker by remember { mutableStateOf(false) }
     var showExpDatePicker by remember { mutableStateOf(false) }
@@ -360,9 +409,31 @@ fun InventoryFormDialog(
         focusedLabelColor = MaterialTheme.colorScheme.primary
     )
 
+    // Filtered category lists based on hierarchy
+    val mainCategoriesList = remember(categories) { categories.filter { it.parent_category_id.isNullOrBlank() } }
+    val subCategoriesList = remember(categories) { categories.filter { !it.parent_category_id.isNullOrBlank() } }
+
     LaunchedEffect(preFilledWeight) {
         if (!preFilledWeight.isNullOrBlank() && name.isBlank()) {
-            name = "$preFilledWeight Product" 
+            name = "$preFilledWeight Product"
+        }
+    }
+
+    // Restore category selection state when editing an existing product
+    LaunchedEffect(categories, item) {
+        if (item != null) {
+            val matchedCategory = categories.find { it.category_name == item.category }
+            if (matchedCategory != null) {
+                if (!matchedCategory.parent_category_id.isNullOrBlank()) {
+                    // It's a subcategory
+                    selectedSubCategory = matchedCategory
+                    selectedMainCategory = categories.find { it.system_row_id == matchedCategory.parent_category_id }
+                } else {
+                    // It's a main category
+                    selectedMainCategory = matchedCategory
+                    selectedSubCategory = null
+                }
+            }
         }
     }
 
@@ -461,63 +532,117 @@ fun InventoryFormDialog(
                     }
                 }
                 
-                // Category Dropdown
-                var expandingCategories by remember { mutableStateOf(false) }
+                // Category - Main Category Dropdown
+                var expandingMainCat by remember { mutableStateOf(false) }
                 ExposedDropdownMenuBox(
-                    expanded = expandingCategories,
-                    onExpandedChange = { expandingCategories = !expandingCategories }
+                    expanded = expandingMainCat,
+                    onExpandedChange = { expandingMainCat = !expandingMainCat }
                 ) {
                     OutlinedTextField(
-                        value = category,
+                        value = selectedMainCategory?.category_name ?: "Select Main Category",
                         onValueChange = { },
                         readOnly = true,
-                        label = { Text("Category *") },
+                        label = { Text("Main Category *") },
                         colors = textFieldColors,
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandingCategories) },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandingMainCat) },
                         modifier = Modifier.menuAnchor().fillMaxWidth()
                     )
                     ExposedDropdownMenu(
-                        expanded = expandingCategories,
-                        onDismissRequest = { expandingCategories = false }
+                        expanded = expandingMainCat,
+                        onDismissRequest = { expandingMainCat = false }
                     ) {
                         DropdownMenuItem(
                             text = { Text("Manage Categories...", color = MaterialTheme.colorScheme.primary) },
                             onClick = {
-                                expandingCategories = false
+                                expandingMainCat = false
                                 showCategoryManager = true
                             }
                         )
-                        Divider()
-                        categories.forEach { cat ->
+                        HorizontalDivider()
+                        mainCategoriesList.forEach { cat ->
                             DropdownMenuItem(
                                 text = { Text(cat.category_name) },
                                 onClick = {
+                                    selectedMainCategory = cat
+                                    selectedSubCategory = null
                                     category = cat.category_name
-                                    expandingCategories = false
+                                    expandingMainCat = false
                                 }
                             )
+                        }
+                    }
+                }
+
+                // Category - Subcategory Dropdown (only if main category selected and has subcategories)
+                if (selectedMainCategory != null) {
+                    val availableSubCategories = subCategoriesList.filter { it.parent_category_id == selectedMainCategory?.system_row_id }
+                    if (availableSubCategories.isNotEmpty()) {
+                        var expandingSubCat by remember { mutableStateOf(false) }
+                        ExposedDropdownMenuBox(
+                            expanded = expandingSubCat,
+                            onExpandedChange = { expandingSubCat = !expandingSubCat }
+                        ) {
+                            OutlinedTextField(
+                                value = selectedSubCategory?.category_name ?: "Select Subcategory",
+                                onValueChange = { },
+                                readOnly = true,
+                                label = { Text("Subcategory") },
+                                colors = textFieldColors,
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandingSubCat) },
+                                modifier = Modifier.menuAnchor().fillMaxWidth()
+                            )
+                            ExposedDropdownMenu(
+                                expanded = expandingSubCat,
+                                onDismissRequest = { expandingSubCat = false }
+                            ) {
+                                availableSubCategories.forEach { sub ->
+                                    DropdownMenuItem(
+                                        text = { Text(sub.category_name) },
+                                        onClick = {
+                                            selectedSubCategory = sub
+                                            category = sub.category_name
+                                            expandingSubCat = false
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
                 
                 OutlinedTextField(value = desc, onValueChange = { desc = it }, label = { Text("Description") }, colors = textFieldColors, modifier = Modifier.fillMaxWidth())
 
-                // Section 2: Barcode
-                Text("Barcode", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = barcode, 
-                        onValueChange = { barcode = it }, 
-                        label = { Text("Barcode (Blank = Auto)") }, 
-                        colors = textFieldColors, 
-                        singleLine = true, 
-                        modifier = Modifier.weight(1f)
-                    )
-                    Button(
-                        onClick = { barcode = "TILL-${System.currentTimeMillis().toString().takeLast(8)}" },
-                        modifier = Modifier.padding(top = 8.dp)
-                    ) {
-                        Text("Generate")
+                // Section 2: GTINs (Barcodes)
+                Text("GTINs (Barcodes)", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    gtins.forEachIndexed { index, gtin ->
+                        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(gtin, modifier = Modifier.weight(1f))
+                            IconButton(onClick = { gtins = gtins.filterIndexed { i, _ -> i != index } }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Remove GTIN", tint = Color.Red)
+                            }
+                        }
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = currentGtinInput, 
+                            onValueChange = { currentGtinInput = it }, 
+                            label = { Text("Add GTIN (Leave blank for Auto)") }, 
+                            colors = textFieldColors, 
+                            singleLine = true, 
+                            modifier = Modifier.weight(1f)
+                        )
+                        Button(
+                            onClick = { 
+                                if (currentGtinInput.isNotBlank()) {
+                                    gtins = gtins + currentGtinInput
+                                    currentGtinInput = ""
+                                }
+                            },
+                            modifier = Modifier.padding(top = 8.dp)
+                        ) {
+                            Text("Add")
+                        }
                     }
                 }
 
@@ -556,6 +681,14 @@ fun InventoryFormDialog(
                         expanded = unitExpanded,
                         onDismissRequest = { unitExpanded = false }
                     ) {
+                        DropdownMenuItem(
+                            text = { Text("Manage Units...", color = MaterialTheme.colorScheme.primary) },
+                            onClick = {
+                                unitExpanded = false
+                                onNavigateToUnits()
+                            }
+                        )
+                        HorizontalDivider()
                         units.forEach { u ->
                             DropdownMenuItem(
                                 text = { Text("${u.unitName} (${u.abbreviation})") },
@@ -643,12 +776,15 @@ fun InventoryFormDialog(
                     val stockVal = stock.toDoubleOrNull() ?: 0.0
                     val thresholdVal = threshold.toDoubleOrNull() ?: 0.0
 
-                    if (name.isNotBlank() && sku.isNotBlank() && barcode.isNotBlank() &&
+                    if (name.isNotBlank() && sku.isNotBlank() &&
                         category.isNotBlank() && batch.isNotBlank() && expDate.isNotBlank() &&
-                        priceVal > 0 && costVal > 0 && stockVal > 0 && thresholdVal > 0) {
+                        priceVal >= 0 && costVal >= 0 && stockVal >= 0 && thresholdVal >= 0) {
+                        
+                        // Include the current input if the user forgot to hit "Add"
+                        val finalGtins = if (currentGtinInput.isNotBlank()) gtins + currentGtinInput else gtins
                         
                         onSave(
-                            name, category, barcode, unit,
+                            name, category, finalGtins, unit,
                             priceVal, stockVal, thresholdVal,
                             sku, desc, costVal,
                             taxPercent.toDoubleOrNull() ?: 0.0,

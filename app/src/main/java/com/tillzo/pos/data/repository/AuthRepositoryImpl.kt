@@ -1,17 +1,27 @@
+@file:Suppress("DEPRECATION")
+
 package com.tillzo.pos.data.repository
 
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.tasks.Tasks
+import com.tillzo.pos.data.sync.options.token.OAuthTokenManager
 import com.tillzo.pos.domain.repository.AuthRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.suspendCancellableCoroutine
 import net.openid.appauth.*
 import javax.inject.Inject
+import kotlin.coroutines.resume
 
 class AuthRepositoryImpl @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val tokenManager: OAuthTokenManager
 ) : AuthRepository {
 
     private val masterKey = MasterKey.Builder(context)
@@ -36,7 +46,7 @@ class AuthRepositoryImpl @Inject constructor(
 
         val authRequestBuilder = AuthorizationRequest.Builder(
             serviceConfig,
-            "169970921764-1l1b6it59oojkigk92f80h59nsl4c194.apps.googleusercontent.com", // Example Client ID. Make sure to retrieve this from buildConfig or resources dynamically later
+            WEB_CLIENT_ID,
             ResponseTypeValues.CODE,
             Uri.parse("com.tillzo.pos:/oauth2redirect")
         ).setScopes("openid", "email", "https://www.googleapis.com/auth/drive.file")
@@ -46,24 +56,55 @@ class AuthRepositoryImpl @Inject constructor(
     }
 
     override suspend fun loginWithOAuth(authCode: String): Result<Unit> {
-        // Implementation for exchanging auth code for tokens using AppAuth
-        // M3.1: To be implemented fully when integrating the AppAuth flow.
-        return Result.success(Unit)
+        return suspendCancellableCoroutine { continuation ->
+            val serviceConfig = AuthorizationServiceConfiguration(
+                Uri.parse("https://accounts.google.com/o/oauth2/v2/auth"),
+                Uri.parse("https://oauth2.googleapis.com/token")
+            )
+
+            val tokenRequest = TokenRequest.Builder(
+                serviceConfig,
+                WEB_CLIENT_ID
+            ).setAuthorizationCode(authCode)
+                .setRedirectUri(Uri.parse("com.tillzo.pos:/oauth2redirect"))
+                .build()
+
+            authService.performTokenRequest(tokenRequest) { response, ex ->
+                if (ex != null) {
+                    Log.e("AuthRepository", "Token exchange failed", ex)
+                    continuation.resume(Result.failure(ex))
+                } else if (response != null) {
+                    saveTokens(response.accessToken ?: "", response.refreshToken)
+                    Log.d("AuthRepository", "Token exchange success")
+                    continuation.resume(Result.success(Unit))
+                } else {
+                    val err = Exception("Token response was null")
+                    Log.e("AuthRepository", "Token exchange: null response", err)
+                    continuation.resume(Result.failure(err))
+                }
+            }
+        }
     }
 
+    @Suppress("DEPRECATION")
     override suspend fun logout() {
+        tokenManager.invalidateTokens()
         sharedPrefs.edit()
             .remove(KEY_ACCESS_TOKEN)
             .remove(KEY_REFRESH_TOKEN)
             .apply()
+        val googleSignInClient = GoogleSignIn.getClient(context, GoogleSignInOptions.DEFAULT_SIGN_IN)
+        Tasks.await(googleSignInClient.signOut())
     }
 
     override fun getAccessToken(): String? {
         return sharedPrefs.getString(KEY_ACCESS_TOKEN, null)
     }
 
+    @Suppress("DEPRECATION")
     override fun isLoggedIn(): Boolean {
-        return getAccessToken() != null
+        if (getAccessToken() != null) return true
+        return GoogleSignIn.getLastSignedInAccount(context) != null
     }
 
     override suspend fun setPIN(pin: String) {
@@ -94,5 +135,7 @@ class AuthRepositoryImpl @Inject constructor(
         private const val KEY_ACCESS_TOKEN = "access_token"
         private const val KEY_REFRESH_TOKEN = "refresh_token"
         private const val KEY_APP_PIN = "app_pin"
+
+        private const val WEB_CLIENT_ID = "191290481305-3ag6k2hakgtdjkted28bulmig9eb1eaq.apps.googleusercontent.com"
     }
 }

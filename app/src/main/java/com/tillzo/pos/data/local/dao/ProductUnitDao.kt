@@ -24,4 +24,16 @@ interface ProductUnitDao {
 
     @Query("UPDATE product_units SET isDeleted = 1, updatedAt = :time WHERE unitId = :id")
     suspend fun softDelete(id: String, time: Long = System.currentTimeMillis())
+
+    @Query("SELECT * FROM product_units WHERE syncStatus = 'pending'")
+    suspend fun getPendingSyncUnits(): List<ProductUnitEntity>
+
+    @Query("SELECT * FROM product_units WHERE isDeleted = 1 AND syncStatus = 'pending'")
+    suspend fun getPendingSyncDeleted(): List<ProductUnitEntity>
+
+    @Query("DELETE FROM product_units WHERE unitId = :id")
+    suspend fun hardDeleteUnit(id: String)
+
+    @Query("UPDATE product_units SET syncStatus = 'synced' WHERE unitId = :id")
+    suspend fun markSynced(id: String)
 }

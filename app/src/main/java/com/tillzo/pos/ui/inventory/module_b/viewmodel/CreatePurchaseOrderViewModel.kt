@@ -1,5 +1,6 @@
 package com.tillzo.pos.ui.inventory.module_b.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tillzo.pos.data.local.dao.InventoryDao
@@ -38,9 +39,9 @@ class CreatePurchaseOrderViewModel @Inject constructor(
 
     /** Returns a Flow of vendor search results; collect in composable via LaunchedEffect */
     fun searchVendors(query: String): Flow<List<VendorEntity>> =
-        if (query.isBlank()) vendorDao.getAllVendors()
+        if (query.isBlank()) vendorDao.getActiveVendors()
         else kotlinx.coroutines.flow.flow {
-            emit(vendorDao.searchVendors(query))
+            emit(vendorDao.searchActiveVendors(query))
         }
 
     fun setVendor(vendor: VendorEntity) {
@@ -49,17 +50,21 @@ class CreatePurchaseOrderViewModel @Inject constructor(
 
     fun saveNewVendorAndSelect(name: String, phone: String, whatsapp: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            val vendor = VendorEntity(
-                vendorId  = UUID.randomUUID().toString(),
-                name      = name,
-                phone     = phone,
-                whatsapp  = whatsapp,
-                syncStatus = "pending",
-                createdAt = System.currentTimeMillis(),
-                updatedAt = System.currentTimeMillis()
-            )
-            vendorDao.insertVendor(vendor)
-            _selectedVendor.value = vendor
+            try {
+                val vendor = VendorEntity(
+                    vendorId  = UUID.randomUUID().toString(),
+                    name      = name,
+                    phone     = phone,
+                    whatsapp  = whatsapp,
+                    syncStatus = "pending",
+                    createdAt = System.currentTimeMillis(),
+                    updatedAt = System.currentTimeMillis()
+                )
+                vendorDao.insertVendor(vendor)
+                _selectedVendor.value = vendor
+            } catch (e: Exception) {
+                Log.e("CreatePOVM", "Failed to save new vendor", e)
+            }
         }
     }
 
@@ -118,7 +123,7 @@ class CreatePurchaseOrderViewModel @Inject constructor(
 
     // ── save PO ──────────────────────────────────────────────────────────────
 
-    fun savePO(notes: String, expectedDate: String, onSuccess: () -> Unit) {
+    fun savePO(notes: String, expectedDate: String, markAsSent: Boolean = false, onSuccess: () -> Unit) {
         val vendor = _selectedVendor.value ?: return
         val currentItems = _items.value
         if (currentItems.isEmpty()) return
@@ -134,7 +139,7 @@ class CreatePurchaseOrderViewModel @Inject constructor(
                 poNumber              = poNumber,
                 vendorId              = vendor.vendorId,
                 vendorName            = vendor.name,
-                status                = "DRAFT",
+                status                = if (markAsSent) "SENT" else "DRAFT",
                 notes                 = notes,
                 totalAmount           = _totalAmount.value,
                 currency              = "PKR",

@@ -2,7 +2,9 @@ package com.tillzo.pos.ui.store.options.expense
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.tillzo.pos.data.local.dao.TillSessionDao
 import com.tillzo.pos.data.local.entity.ExpenseEntity
+import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import com.tillzo.pos.domain.repository.StoreRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,7 +15,9 @@ import javax.inject.Inject
 
 @HiltViewModel
 class ExpenseViewModel @Inject constructor(
-    private val storeRepository: StoreRepository
+    private val storeRepository: StoreRepository,
+    private val tillSessionDao: TillSessionDao,
+    private val appSetupPrefs: AppSetupPrefs
 ) : ViewModel() {
 
     private val _expenses = MutableStateFlow<List<ExpenseEntity>>(emptyList())
@@ -42,10 +46,20 @@ class ExpenseViewModel @Inject constructor(
                 amount = amount,
                 description = description,
                 timestamp = System.currentTimeMillis(),
-                logged_by_user_id = "user_1", // TODO: Auth repo
-                pos_terminal_id = "terminal_1"
+                logged_by_user_id = appSetupPrefs.userEmail.ifBlank { "cashier" },
+                pos_terminal_id = appSetupPrefs.spreadsheetId.take(20).ifBlank { "TERM_1" }
             )
             storeRepository.insertExpense(expense)
+
+            val posTerminalId = appSetupPrefs.spreadsheetId.take(20)
+            try {
+                val session = tillSessionDao.getOpenSession(posTerminalId)
+                if (session != null) {
+                    tillSessionDao.deductExpenseFromSession(session.sessionId, amount)
+                }
+            } catch (_: Exception) {
+                // Non-fatal: expense already saved, no open session to deduct from
+            }
         }
     }
 }

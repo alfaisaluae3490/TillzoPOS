@@ -11,15 +11,21 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tillzo.pos.data.local.entity.GrnItemEntity
+import com.tillzo.pos.data.local.entity.ProductBatchEntity
 import com.tillzo.pos.ui.inventory.module_c.viewmodel.CreateGrnViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -35,6 +41,23 @@ fun CreateGrnScreen(
     val confirmResult by viewModel.confirmResult.collectAsState()
     val confirmedGrnId by viewModel.confirmedGrnId.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val attachedFileUri by viewModel.attachedFileUri.collectAsState()
+    val attachedFileName by viewModel.attachedFileName.collectAsState()
+
+    val context = LocalContext.current
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let {
+            val cursor = context.contentResolver.query(it, null, null, null, null)
+            val fileName = cursor?.use { c ->
+                val nameIndex = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                c.moveToFirst()
+                if (nameIndex >= 0) c.getString(nameIndex) else "attachment"
+            } ?: "attachment"
+            viewModel.setAttachedFile(it, fileName)
+        }
+    }
 
     var notes by remember { mutableStateOf("") }
     var expandedItemId by remember { mutableStateOf<String?>(null) }
@@ -107,6 +130,26 @@ fun CreateGrnScreen(
                 )
                 
                 Spacer(modifier = Modifier.height(16.dp))
+
+                OutlinedButton(
+                    onClick = { filePickerLauncher.launch("*/*") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF1E88E5))
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (attachedFileName.isNotEmpty()) attachedFileName else "Attach Document")
+                }
+                if (attachedFileUri != null) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "File selected",
+                        color = Color(0xFF4CAF50),
+                        fontSize = 12.sp
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
                 Divider(color = Color.DarkGray)
                 Spacer(modifier = Modifier.height(8.dp))
 
@@ -115,8 +158,11 @@ fun CreateGrnScreen(
 
                 LazyColumn(Modifier.fillMaxSize()) {
                     items(items, key = { it.grnItemId }) { item ->
+                        val batches by viewModel.getBatchesForProduct(item.productId)
+                            .collectAsState(initial = emptyList())
                         GrnItemAccordion(
                             item = item,
+                            batches = batches,
                             isExpanded = expandedItemId == item.grnItemId,
                             onToggle = { 
                                 expandedItemId = if (expandedItemId == item.grnItemId) null else item.grnItemId 
@@ -125,7 +171,10 @@ fun CreateGrnScreen(
                             onBatchInfoChange = { batch, mfg, exp -> viewModel.updateItemBatchInfo(item.grnItemId, batch, mfg, exp) },
                             onActionChange = { action, isNew -> viewModel.updateItemInventoryAction(item.grnItemId, action, isNew) },
                             onCategoryBrandChange = { cat, brand -> viewModel.updateItemCategoryAndBrand(item.grnItemId, cat, brand) },
-                            onSellingPriceChange = { price -> viewModel.updateItemSellingPrice(item.grnItemId, price) }
+                            onSellingPriceChange = { price -> viewModel.updateItemSellingPrice(item.grnItemId, price) },
+                            onBatchSelected = { batchId, batchNumber, mfg, exp ->
+                                viewModel.updateItemBatchSelection(item.grnItemId, batchId, batchNumber, mfg, exp)
+                            }
                         )
                     }
                 }
@@ -137,13 +186,15 @@ fun CreateGrnScreen(
 @Composable
 fun GrnItemAccordion(
     item: GrnItemEntity,
+    batches: List<ProductBatchEntity> = emptyList(),
     isExpanded: Boolean,
     onToggle: () -> Unit,
     onQtyChange: (Double) -> Unit,
     onBatchInfoChange: (String, String, String) -> Unit,
     onActionChange: (String, Boolean) -> Unit,
     onCategoryBrandChange: (String, String) -> Unit,
-    onSellingPriceChange: (Double) -> Unit
+    onSellingPriceChange: (Double) -> Unit,
+    onBatchSelected: (String, String, String, String) -> Unit = { _, _, _, _ -> }
 ) {
     Card(
         modifier = Modifier
@@ -162,7 +213,7 @@ fun GrnItemAccordion(
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(item.productName, style = MaterialTheme.typography.titleMedium, color = Color.White)
-                    Text("Recv: ${item.receivedQty} ${item.unit} | Cost: ₹${item.unitCostPrice}", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+                    Text("Recv: ${item.receivedQty} ${item.unit} | Cost: Rs ${item.unitCostPrice}", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
                 }
                 Icon(
                     imageVector = Icons.Default.ArrowDropDown,
@@ -228,6 +279,52 @@ fun GrnItemAccordion(
                             modifier = Modifier.fillMaxWidth(),
                             colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White)
                         )
+                    }
+
+                    if (item.inventoryAction == "UPDATE_BATCH") {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("Select Existing Batch", color = Color(0xFF1E88E5), style = MaterialTheme.typography.labelLarge)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        if (batches.isEmpty()) {
+                            Text(
+                                "No active batches found for this product. Select 'Add as New Batch' instead.",
+                                color = Color(0xFFFFA726),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        } else {
+                            var expanded by remember { mutableStateOf(false) }
+                            val selectedBatch = batches.find { it.batchId == item.batchId }
+                            Box {
+                                OutlinedButton(
+                                    onClick = { expanded = true },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                                ) {
+                                    Text(
+                                        text = selectedBatch?.let { "${it.batchNumber} (Stock: ${it.stockQty})" }
+                                            ?: "Select a batch...",
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                                }
+                                DropdownMenu(
+                                    expanded = expanded,
+                                    onDismissRequest = { expanded = false }
+                                ) {
+                                    batches.forEach { batch ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text("${batch.batchNumber} — Stock: ${batch.stockQty} | Exp: ${batch.expiryDate}")
+                                            },
+                                            onClick = {
+                                                onBatchSelected(batch.batchId, batch.batchNumber, batch.manufacturingDate, batch.expiryDate)
+                                                expanded = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     if (item.inventoryAction in listOf("NEW_PRODUCT", "ADD_BATCH")) {

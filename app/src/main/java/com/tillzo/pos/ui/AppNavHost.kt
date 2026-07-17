@@ -1,7 +1,12 @@
 package com.tillzo.pos.ui
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -9,6 +14,7 @@ import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import com.tillzo.pos.ui.setup.SheetPickerScreen
 import com.tillzo.pos.ui.home.HomeScreen
 import com.tillzo.pos.ui.home.HomeViewModel
+import com.tillzo.pos.ui.home.SyncStatus
 import com.tillzo.pos.ui.home.AdvancedMenuSheet
 import com.tillzo.pos.ui.home.PosViewModel
 import com.tillzo.pos.ui.home.ReceiptScreen
@@ -21,6 +27,18 @@ import com.tillzo.pos.ui.inventory.options.alerts.StockAlertsScreen
 import com.tillzo.pos.ui.inventory.options.wastage.WastageLogScreen
 import com.scottyab.rootbeer.RootBeer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
 import androidx.hilt.navigation.compose.hiltViewModel
 
 /**
@@ -47,7 +65,14 @@ fun AppNavHost(
     val appSetupPrefs = remember { AppSetupPrefs(context) }
     val startDest = if (appSetupPrefs.spreadsheetId.isEmpty()) "sheet_picker" else "home"
 
-    NavHost(navController = navController, startDestination = startDest) {
+    NavHost(
+        navController = navController,
+        startDestination = startDest,
+        enterTransition = { EnterTransition.None },
+        exitTransition = { ExitTransition.None },
+        popEnterTransition = { EnterTransition.None },
+        popExitTransition = { ExitTransition.None }
+    ) {
         
         composable("sheet_picker") {
             val shopName = appSetupPrefs.userDisplayName
@@ -67,10 +92,45 @@ fun AppNavHost(
             val homeViewModel: HomeViewModel = hiltViewModel()
             val posViewModel: PosViewModel = hiltViewModel()
 
+            val homeState by homeViewModel.uiState.collectAsStateWithLifecycle()
+            val homeContext = LocalContext.current
+
+            LaunchedEffect(homeState.syncStatus, homeState.syncMessage) {
+                val message = homeState.syncMessage
+                if (!message.isNullOrEmpty() && (homeState.syncStatus == SyncStatus.SUCCESS || homeState.syncStatus == SyncStatus.FAILED)) {
+                    android.widget.Toast.makeText(homeContext, message, android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+
+            if (homeState.syncStatus == SyncStatus.RUNNING) {
+                androidx.compose.ui.window.Dialog(
+                    onDismissRequest = { /* prevent dismissal */ }
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        tonalElevation = 8.dp
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            CircularProgressIndicator()
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = homeState.syncMessage ?: "Syncing...",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
+            }
+
             HomeScreen(
                 onOpenMenu = onOpenMenu,
                 onNavigateToInventory = { navController.navigate("inventory_module") },
                 onNavigateToReceipt = { invoiceId -> navController.navigate("receipt/$invoiceId") },
+                onNavigateToTill = { navController.navigate("till_open") },
                 viewModel = posViewModel
             )
 
@@ -120,7 +180,9 @@ fun AppNavHost(
         // M6: Inventory & Smart AI Entry Module
         composable("inventory_module") {
             InventoryModule(
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToCategories = { navController.navigate("category_management") },
+                onNavigateToUnits = { navController.navigate("product_units") }
             )
         }
 

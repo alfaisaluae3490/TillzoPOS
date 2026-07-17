@@ -109,15 +109,40 @@ class ConfirmGrnUseCase @Inject constructor(
                         }
 
                         "UPDATE_BATCH", "PENDING" -> {
-                            // Item exists. Add qty to existing batch.
-                            val targetBatchId = item.batchId.takeIf { it.isNotBlank() } ?: continue
-                            productBatchRepository.incrementBatchStock(
-                                batchId = targetBatchId,
-                                additionalQty = item.receivedQty
-                            )
+                            // Item exists. Look up batch by batchNumber, then fall back to batchId.
+                            val existingBatch = item.batchNumber.takeIf { it.isNotBlank() }
+                                ?.let { productBatchRepository.getBatchByNumber(item.productId, it) }
+                            val targetBatchId = existingBatch?.batchId
+                                ?: item.batchId.takeIf { it.isNotBlank() }
+
+                            if (targetBatchId != null) {
+                                productBatchRepository.incrementBatchStock(
+                                    batchId = targetBatchId,
+                                    additionalQty = item.receivedQty
+                                )
+                                batchesUpdated++
+                            } else {
+                                // Fallback: create new batch under this product
+                                val newBatchId = UUID.randomUUID().toString()
+                                val newBatch = ProductBatchEntity(
+                                    batchId = newBatchId,
+                                    productId = item.productId,
+                                    barcodeId = item.barcodeId.takeIf { it.isNotBlank() } ?: item.productId,
+                                    batchNumber = item.batchNumber,
+                                    manufacturingDate = item.manufacturingDate,
+                                    expiryDate = item.expiryDate,
+                                    stockQty = item.receivedQty,
+                                    costPrice = item.unitCostPrice,
+                                    sellingPrice = item.sellingPrice,
+                                    isActive = true,
+                                    posTerminalId = posTerminalId
+                                )
+                                productBatchRepository.insertBatch(newBatch)
+                                grnRepository.updateGrnItemBatchId(item.grnItemId, newBatchId)
+                                batchesAdded++
+                            }
                             // Recalculate totalStock
                             inventoryRepository.recalculateTotalStock(item.productId)
-                            batchesUpdated++
                         }
                     }
                 }

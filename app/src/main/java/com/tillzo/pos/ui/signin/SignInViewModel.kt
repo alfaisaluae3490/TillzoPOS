@@ -1,22 +1,24 @@
 package com.tillzo.pos.ui.signin
 
 import android.content.Context
+import android.util.Log
 import androidx.activity.result.ActivityResult
 import androidx.lifecycle.viewModelScope
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.Scope
 import com.tillzo.pos.data.local.prefs.AppSetupPrefs
+import com.tillzo.pos.data.remote.SheetsRemoteDataSource
+import com.tillzo.pos.data.sync.options.token.OAuthTokenManager
 import com.tillzo.pos.domain.setup.SheetSetupUseCase
 import com.tillzo.pos.ui.base.BaseViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.launch
 import javax.inject.Inject
-
-import com.tillzo.pos.data.remote.SheetsRemoteDataSource
 
 sealed class SignInUiState {
     object Idle : SignInUiState()
@@ -47,12 +49,15 @@ sealed class SignInUiState {
 class SignInViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val sheetSetupUseCase: SheetSetupUseCase,
-    private val appSetupPrefs: AppSetupPrefs
+    private val appSetupPrefs: AppSetupPrefs,
+    private val tokenManager: OAuthTokenManager
 ) : BaseViewModel<SignInUiState>(SignInUiState.Idle) {
 
     fun buildSignInClient(): GoogleSignInClient {
         val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
+            .requestIdToken(WEB_CLIENT_ID)
+            .requestServerAuthCode(WEB_CLIENT_ID, true)
             .requestScopes(
                 // Blueprint Security Rule: sirf drive.file — broader scope kabhi nahi
                 Scope("https://www.googleapis.com/auth/drive.file")
@@ -66,12 +71,51 @@ class SignInViewModel @Inject constructor(
             try {
                 updateState(SignInUiState.SigningIn)
 
-                val task    = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+                val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+
+                if (!task.isSuccessful) {
+                    val apiEx = task.exception as? ApiException
+                    val statusCode = apiEx?.statusCode ?: 0
+                    Log.e("SignInViewModel", "Google Sign-In failed: statusCode=$statusCode", apiEx)
+                    if (statusCode == 12501) {
+                        updateState(SignInUiState.Idle)
+                        return@launch
+                    }
+                    val message = when (statusCode) {
+                        10 -> "Developer Error (10): SHA-1 mismatch or Client ID misconfiguration. Check Logcat."
+                        12500 -> "Sign-in failed (12500): Check Google Cloud Console and SHA-1 fingerprint."
+                        else -> apiEx?.localizedMessage ?: "Sign-in failed (code=$statusCode)"
+                    }
+                    updateState(SignInUiState.Error(message))
+                    return@launch
+                }
+
                 val account = task.result as? GoogleSignInAccount
-                    ?: run { updateState(SignInUiState.Error("Sign-in cancelled")); return@launch }
+                if (account == null) {
+                    Log.e("SignInViewModel", "Google Sign-In: task succeeded but account was null")
+                    updateState(SignInUiState.Error("Sign-in returned empty account"))
+                    return@launch
+                }
 
                 val email       = account.email ?: ""
                 val displayName = account.displayName ?: "Shop Owner"
+                val idToken     = account.idToken ?: "null"
+                val serverAuthCode = account.serverAuthCode
+
+                Log.d("SignInViewModel", "Sign-in success: email=$email, idToken present=${account.idToken != null}, serverAuthCode present=${serverAuthCode != null}")
+
+                // Exchange server auth code for offline access + refresh tokens
+                if (!serverAuthCode.isNullOrBlank()) {
+                    Log.d("SignInViewModel", "Exchanging server auth code for tokens...")
+                    val exchanged = tokenManager.exchangeAuthCode(serverAuthCode)
+                    if (exchanged != null) {
+                        Log.d("SignInViewModel", "Auth code exchange succeeded")
+                    } else {
+                        Log.w("SignInViewModel", "Auth code exchange returned null — falling back")
+                    }
+                } else {
+                    Log.w("SignInViewModel", "No serverAuthCode returned — offline access not granted")
+                }
 
                 // Save user info
                 appSetupPrefs.saveUser(email, displayName)
@@ -80,7 +124,23 @@ class SignInViewModel @Inject constructor(
                 updateState(SignInUiState.Done)
 
             } catch (e: Exception) {
-                updateState(SignInUiState.Error(e.message ?: "Sign-in failed"))
+                val apiEx = e as? ApiException
+                if (apiEx != null) {
+                    Log.e("SignInViewModel", "ApiException: statusCode=${apiEx.statusCode}", apiEx)
+                    if (apiEx.statusCode == 12501) {
+                        updateState(SignInUiState.Idle)
+                        return@launch
+                    }
+                    val message = when (apiEx.statusCode) {
+                        10 -> "Developer Error (10): SHA-1 mismatch or Client ID misconfiguration."
+                        12500 -> "Sign-in failed (12500): Check Google Cloud Console configuration."
+                        else -> apiEx.localizedMessage ?: "Sign-in failed (code=${apiEx.statusCode})"
+                    }
+                    updateState(SignInUiState.Error(message))
+                } else {
+                    Log.e("SignInViewModel", "Unexpected sign-in error", e)
+                    updateState(SignInUiState.Error(e.localizedMessage ?: "Sign-in failed"))
+                }
             }
         }
     }
@@ -110,8 +170,6 @@ class SignInViewModel @Inject constructor(
     fun retrySignIn() { updateState(SignInUiState.Idle) }
 
     companion object {
-        // Web Client ID from Google Cloud Console
-        // APIs & Services → Credentials → OAuth 2.0 → Web Client → Client ID
-        const val WEB_CLIENT_ID = "191290481305-3m583fdj0hq5je8mnj34frqih33lssqc.apps.googleusercontent.com"
+        const val WEB_CLIENT_ID = "191290481305-3ag6k2hakgtdjkted28bulmig9eb1eaq.apps.googleusercontent.com"
     }
 }

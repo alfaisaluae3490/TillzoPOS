@@ -12,7 +12,7 @@ object Constants {
      * Used by: SignInViewModel, OAuthTokenManager.
      */
     const val WEB_CLIENT_ID =
-        "191290481305-3m583fdj0hq5je8mnj34frqih33lssqc.apps.googleusercontent.com"
+        "191290481305-3ag6k2hakgtdjkted28bulmig9eb1eaq.apps.googleusercontent.com"
 
     /**
      * Google OAuth token refresh endpoint.
@@ -111,6 +111,7 @@ object SheetColumns {
         "system_row_id",
         "name",
         "phone",
+        "whatsapp",
         "email",
         "address",
         "is_deleted",
@@ -154,6 +155,7 @@ object SheetColumns {
     val CATEGORIES = listOf(
         "system_row_id",
         "category_name",
+        "parent_category_id",
         "is_deleted",
         "deleted_at",
         "sync_status",
@@ -179,8 +181,49 @@ object SheetColumns {
 
     val PURCHASE_ORDERS = listOf("po_id", "po_number", "vendor_id", "vendor_name", "status", "notes", "total_amount", "currency", "expected_delivery_date", "created_by", "sync_status", "pos_terminal_id", "created_at", "updated_at")
     val PO_ITEMS = listOf("po_item_id", "po_id", "product_id", "product_name", "sku", "barcode_id", "ordered_qty", "received_qty", "unit_cost_price", "total_cost", "unit", "sync_status", "created_at", "updated_at")
-    val GRN_HEADERS = listOf("grn_id", "grn_number", "po_id", "vendor_id", "vendor_name", "status", "notes", "received_by", "total_amount", "sync_status", "pos_terminal_id", "created_at", "updated_at")
+    val GRN_HEADERS = listOf("grn_id", "grn_number", "po_id", "vendor_id", "vendor_name", "status", "notes", "received_by", "total_amount", "sync_status", "pos_terminal_id", "attached_file_id", "attached_file_url", "created_at", "updated_at")
     val GRN_ITEMS = listOf("grn_item_id", "grn_id", "po_item_id", "product_id", "product_name", "barcode_id", "sku", "received_qty", "unit_cost_price", "total_cost", "unit", "batch_number", "manufacturing_date", "expiry_date", "inventory_action", "is_new_item", "sync_status", "created_at", "updated_at")
-    val VENDORS = listOf("vendor_id", "name", "phone", "whatsapp", "email", "address", "is_deleted", "sync_status", "created_at", "updated_at")
+    val VENDORS = listOf(
+        "vendor_id", "name", "phone", "whatsapp", "email", "address",
+        "city", "province", "country", "billing_address", "owner_name",
+        "bank_account_title", "bank_name", "bank_account_number", "bank_iban",
+        "bank_swift_code", "bank_branch", "payment_terms", "preferred_currency",
+        "credit_limit", "registration_number", "ntn_number", "cnic_number",
+        "trn_number", "trade_license_number", "trade_license_expiry_date",
+        "primary_manager_name", "primary_manager_phone", "primary_manager_email",
+        "tech_support_name", "tech_support_phone", "tech_support_email",
+        "billing_contact_name", "billing_contact_phone", "billing_contact_email",
+        "escalation_l1_name", "escalation_l1_phone", "escalation_l1_email",
+        "escalation_l2_name", "escalation_l2_phone", "escalation_l2_email",
+        "escalation_l3_name", "escalation_l3_phone", "escalation_l3_email",
+        "contract_start_date", "contract_expiry_date", "sla_response_times",
+        "warranty_terms", "compliance_certificates", "contract_file_id",
+        "contract_file_url",
+        "is_active",
+        "is_deleted", "sync_status", "created_at", "updated_at"
+    )
     val PRODUCT_BATCHES = listOf("batch_id", "product_id", "barcode_id", "batch_number", "manufacturing_date", "expiry_date", "stock_qty", "cost_price", "selling_price", "is_active", "is_deleted", "deleted_at", "sync_status", "pos_terminal_id", "created_at", "updated_at")
+    val PRODUCT_UNITS = listOf(
+        "unitId",
+        "unitName",
+        "abbreviation",
+        "isDeleted",
+        "syncStatus",
+        "createdAt",
+        "updatedAt"
+    )
+
+    val BARCODE_GENERAL_CONFIGS = listOf(
+        "system_row_id", "sync_status", "created_at", "updated_at", "pos_terminal_id", "is_deleted", "deleted_at",
+        "labelWidth", "labelHeight", "titleTextSize", "isTitleBold", "barcodeSize", "currencySymbol", "companyName",
+        "companyLogoPath", "showCompanyName", "showCompanyLogo", "titleX", "titleY", "priceX", "priceY", "skuX",
+        "skuY", "gtinX", "gtinY", "lotX", "lotY", "expX", "expY", "snX", "snY", "barcodeX", "barcodeY",
+        "companyNameSize", "companyLogoSize", "companyNameX", "companyNameY", "companyLogoX", "companyLogoY",
+        "usePrefix", "customPrefix", "prefixPosition", "useSuffix", "customSuffix", "suffixPosition", "useSeparator"
+    )
+
+    val BARCODE_FIELD_CONFIGS = listOf(
+        "system_row_id", "sync_status", "created_at", "updated_at", "pos_terminal_id", "is_deleted", "deleted_at",
+        "fieldId", "fieldName", "aiCode", "isEnabled", "sequenceOrder", "useFnc1Separator", "customValue"
+    )
 }

@@ -1,4 +1,4 @@
-﻿package com.tillzo.pos.data.sync.options.worker
+package com.tillzo.pos.data.sync.options.worker
 
 import android.content.Context
 import android.util.Log
@@ -11,14 +11,18 @@ import com.tillzo.pos.data.local.AppDatabase
 import com.tillzo.pos.data.local.SyncLogEntity
 import com.tillzo.pos.data.local.entity.WastageEntity
 import com.tillzo.pos.data.local.entity.toSheetRow
+import com.tillzo.pos.data.remote.SheetsRemoteDataSource
 import com.tillzo.pos.data.repository.SheetsRepository
 import com.tillzo.pos.domain.sync.DataSyncInterface
 import com.tillzo.pos.domain.sync.SyncPayload
 import com.tillzo.pos.domain.sync.SyncResult
+import com.tillzo.pos.domain.sync.usecase.CategoryUpsertUseCase
 import com.tillzo.pos.domain.sync.usecase.InventoryUpsertUseCase
 import com.tillzo.pos.domain.sync.usecase.KhataEventUseCase
 import com.tillzo.pos.domain.sync.usecase.SalesUploadUseCase
 import com.tillzo.pos.domain.sync.usecase.SchemaGuardUseCase
+import com.tillzo.pos.domain.sync.usecase.ProductUnitUpsertUseCase
+import com.tillzo.pos.domain.sync.usecase.VendorUpsertUseCase
 import com.tillzo.pos.utils.Constants
 import com.tillzo.pos.utils.NotificationHelper
 import dagger.assisted.Assisted
@@ -50,8 +54,12 @@ class SyncWorker @AssistedInject constructor(
     private val salesUploadUseCase: SalesUploadUseCase,
     private val inventoryUpsertUseCase: InventoryUpsertUseCase,
     private val khataEventUseCase: KhataEventUseCase,
+    private val categoryUpsertUseCase: CategoryUpsertUseCase,
+    private val productUnitUpsertUseCase: ProductUnitUpsertUseCase,
+    private val vendorUpsertUseCase: VendorUpsertUseCase,
     private val schemaGuardUseCase: SchemaGuardUseCase,
     private val sheetsRepository: SheetsRepository,
+    private val sheetsRemoteDataSource: SheetsRemoteDataSource,
     private val notificationHelper: NotificationHelper
 ) : CoroutineWorker(context, params) {
 
@@ -71,6 +79,11 @@ class SyncWorker @AssistedInject constructor(
             syncLogDao.ensureTableRegistered("Sales")
             syncLogDao.ensureTableRegistered("Inventory")
             syncLogDao.ensureTableRegistered("KhataEvents")
+            syncLogDao.ensureTableRegistered("Categories")
+            syncLogDao.ensureTableRegistered("Product_Units")
+            syncLogDao.ensureTableRegistered("Vendors")
+            syncLogDao.ensureTableRegistered("BarcodeGeneralConfigs")
+            syncLogDao.ensureTableRegistered("BarcodeFieldConfigs")
 
             // ── Step 1: Get all tracked tables ──────────────────────────────
             val tables = syncLogDao.getAllTrackedTables()
@@ -89,6 +102,8 @@ class SyncWorker @AssistedInject constructor(
             uploadPendingStockAdjustments()
             uploadPendingTillSessions()
             uploadPendingWastage()
+            uploadPendingBarcodeGeneralConfigs()
+            uploadPendingBarcodeFieldConfigs()
 
             // ── Step 2: Capture pending sales BEFORE upload for stock deduction ──
             val salesBeforeSync = try {
@@ -129,6 +144,11 @@ class SyncWorker @AssistedInject constructor(
                 Result.retry()
             } else {
                 Log.d(TAG, "SyncWorker completed successfully")
+                try {
+                    sheetsRepository.updateLastUpdatedTimestamp(System.currentTimeMillis())
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to update Settings timestamp: ${e.message}")
+                }
                 Result.success()
             }
 
@@ -206,6 +226,8 @@ class SyncWorker @AssistedInject constructor(
             "Sales"       -> salesUploadUseCase(tableName, posTerminalId)
             "Inventory"   -> inventoryUpsertUseCase(posTerminalId)
             "KhataEvents" -> khataEventUseCase(tableName, posTerminalId)
+            "Categories"  -> categoryUpsertUseCase(posTerminalId)
+            "Product_Units" -> productUnitUpsertUseCase(posTerminalId)
             else -> {
                 Log.w(TAG, "Unknown table name for sync: $tableName")
                 true
@@ -268,10 +290,12 @@ class SyncWorker @AssistedInject constructor(
 
     private suspend fun uploadPendingVendors() {
         try {
-            val vendorDao = appDatabase.vendorDao()
-            val pendingVendors = vendorDao.getPendingVendors()
-            uploadTableIfNeeded("Vendors", pendingVendors.map { it.toSheetRow() })
-            pendingVendors.forEach { vendorDao.markSynced(it.vendorId) }
+            val success = vendorUpsertUseCase.invoke()
+            if (success) {
+                Log.d(TAG, "Vendors synced via VendorUpsertUseCase")
+            } else {
+                Log.w(TAG, "VendorUpsertUseCase reported failure — will retry")
+            }
         } catch (e: Exception) { Log.e(TAG, "Vendor Upload failed", e) }
     }
 
@@ -315,7 +339,7 @@ class SyncWorker @AssistedInject constructor(
                 )
             }
             val result = sheetsRepository.uploadBatch("Till_Sessions", rows)
-            if (result != null) {
+            if (result is SyncResult.Success) {
                 pendingSessions.forEach { tillDao.markSynced(it.sessionId) }
                 Log.d(TAG, "Till sessions synced: ${pendingSessions.size}")
             }
@@ -329,11 +353,123 @@ class SyncWorker @AssistedInject constructor(
             if (pendingWastage.isEmpty()) return
             val rows = pendingWastage.map { it.toSheetRow() }
             val result = sheetsRepository.uploadBatch("Wastage_Ledger", rows)
-            if (result != null) {
+            if (result is SyncResult.Success) {
                 pendingWastage.forEach { wastageDao.markSynced(it.wastageId) }
                 Log.d(TAG, "Wastage records synced: ${pendingWastage.size}")
             }
         } catch (e: Exception) { Log.e(TAG, "Wastage Upload failed", e) }
+    }
+
+    private suspend fun uploadPendingBarcodeGeneralConfigs() {
+        val tableName = "BarcodeGeneralConfigs"
+        try {
+            val dao = appDatabase.barcodeConfigDao()
+            val pending = dao.getPendingGeneralConfigs()
+            if (pending.isEmpty()) return
+
+            val remoteRows = sheetsRemoteDataSource.readRange("$tableName!A:ZZ")
+            val idToRowMap = mutableMapOf<String, Int>()
+            if (remoteRows.isNotEmpty()) {
+                val headers = remoteRows[0]
+                val idIndex = headers.indexOf("system_row_id")
+                if (idIndex != -1) {
+                    for (i in 1 until remoteRows.size) {
+                        val row = remoteRows[i]
+                        if (idIndex < row.size) {
+                            idToRowMap[row[idIndex]] = i + 1
+                        }
+                    }
+                }
+            }
+
+            var anyFailure = false
+            val itemsToUpdate = mutableListOf<Map<String, Any>>()
+            val itemsToAppend = mutableListOf<List<Any>>()
+
+            for (item in pending) {
+                val values = item.toSheetRow()
+                if (idToRowMap.containsKey(item.system_row_id)) {
+                    val rowIndex = idToRowMap[item.system_row_id]
+                    itemsToUpdate.add(mapOf(
+                        "range" to "$tableName!A$rowIndex:AS$rowIndex",
+                        "majorDimension" to "ROWS",
+                        "values" to listOf(values)
+                    ))
+                } else {
+                    itemsToAppend.add(values)
+                }
+            }
+
+            if (itemsToUpdate.isNotEmpty()) {
+                if (!sheetsRemoteDataSource.batchWrite(itemsToUpdate)) anyFailure = true
+            }
+
+            if (itemsToAppend.isNotEmpty()) {
+                val result = sheetsRepository.uploadBatch(tableName, itemsToAppend)
+                if (result !is SyncResult.Success) anyFailure = true
+            }
+
+            if (!anyFailure) {
+                pending.forEach { dao.markGeneralConfigSynced(it.system_row_id) }
+                Log.d(TAG, "BarcodeGeneralConfigs synced: ${pending.size}")
+            }
+        } catch (e: Exception) { Log.e(TAG, "BarcodeGeneralConfigs upload failed", e) }
+    }
+
+    private suspend fun uploadPendingBarcodeFieldConfigs() {
+        val tableName = "BarcodeFieldConfigs"
+        try {
+            val dao = appDatabase.barcodeConfigDao()
+            val pending = dao.getPendingFields()
+            if (pending.isEmpty()) return
+
+            val remoteRows = sheetsRemoteDataSource.readRange("$tableName!A:ZZ")
+            val idToRowMap = mutableMapOf<String, Int>()
+            if (remoteRows.isNotEmpty()) {
+                val headers = remoteRows[0]
+                val idIndex = headers.indexOf("system_row_id")
+                if (idIndex != -1) {
+                    for (i in 1 until remoteRows.size) {
+                        val row = remoteRows[i]
+                        if (idIndex < row.size) {
+                            idToRowMap[row[idIndex]] = i + 1
+                        }
+                    }
+                }
+            }
+
+            var anyFailure = false
+            val itemsToUpdate = mutableListOf<Map<String, Any>>()
+            val itemsToAppend = mutableListOf<List<Any>>()
+
+            for (item in pending) {
+                val values = item.toSheetRow()
+                if (idToRowMap.containsKey(item.system_row_id)) {
+                    val rowIndex = idToRowMap[item.system_row_id]
+                    itemsToUpdate.add(mapOf(
+                        "range" to "$tableName!A$rowIndex:N$rowIndex",
+                        "majorDimension" to "ROWS",
+                        "values" to listOf(values)
+                    ))
+                } else {
+                    itemsToAppend.add(values)
+                }
+            }
+
+            if (itemsToUpdate.isNotEmpty()) {
+                if (!sheetsRemoteDataSource.batchWrite(itemsToUpdate)) anyFailure = true
+            }
+
+            if (itemsToAppend.isNotEmpty()) {
+                val result = sheetsRepository.uploadBatch(tableName, itemsToAppend)
+                if (result !is SyncResult.Success) anyFailure = true
+            }
+
+            if (!anyFailure) {
+                pending.forEach { dao.markFieldSynced(it.system_row_id) }
+                Log.d(TAG, "BarcodeFieldConfigs synced: ${pending.size}")
+            }
+        } catch (e: Exception) { Log.e(TAG, "BarcodeFieldConfigs upload failed", e) }
     }
 } // end SyncWorker class
 
@@ -349,7 +485,8 @@ fun com.tillzo.pos.data.local.entity.PurchaseOrderItemEntity.toSheetRow() = list
 )
 fun com.tillzo.pos.data.local.entity.GrnHeaderEntity.toSheetRow() = listOf(
     grnId, grnNumber, poId, vendorId, vendorName, status, notes,
-    receivedBy, totalAmount, syncStatus, posTerminalId, createdAt, updatedAt
+    receivedBy, totalAmount, syncStatus, posTerminalId,
+    attachedFileId, attachedFileUrl, createdAt, updatedAt
 )
 fun com.tillzo.pos.data.local.entity.GrnItemEntity.toSheetRow() = listOf(
     grnItemId, grnId, poItemId, productId, productName, barcodeId, sku,
@@ -359,6 +496,20 @@ fun com.tillzo.pos.data.local.entity.GrnItemEntity.toSheetRow() = listOf(
 )
 fun com.tillzo.pos.data.local.entity.VendorEntity.toSheetRow() = listOf(
     vendorId, name, phone, whatsapp, email, address,
+    city, province, country, billingAddress, ownerName,
+    bankAccountTitle, bankName, bankAccountNumber, bankIban,
+    bankSwiftCode, bankBranch, paymentTerms, preferredCurrency,
+    creditLimit, registrationNumber, ntnNumber, cnicNumber,
+    trnNumber, tradeLicenseNumber, tradeLicenseExpiryDate,
+    primaryManagerName, primaryManagerPhone, primaryManagerEmail,
+    techSupportName, techSupportPhone, techSupportEmail,
+    billingContactName, billingContactPhone, billingContactEmail,
+    escalationL1Name, escalationL1Phone, escalationL1Email,
+    escalationL2Name, escalationL2Phone, escalationL2Email,
+    escalationL3Name, escalationL3Phone, escalationL3Email,
+    contractStartDate, contractExpiryDate, slaResponseTimes,
+    warrantyTerms, complianceCertificates, contractFileId,
+    contractFileUrl,
     if (isDeleted) 1 else 0, syncStatus, createdAt, updatedAt
 )
 fun com.tillzo.pos.data.local.entity.ProductBatchEntity.toSheetRow() = listOf(
@@ -369,4 +520,18 @@ fun com.tillzo.pos.data.local.entity.ProductBatchEntity.toSheetRow() = listOf(
 fun com.tillzo.pos.data.local.entity.StockAdjustmentEntity.toSheetRow() = listOf(
     adjustmentId, productId, adjustmentType, quantityChanged, reason, adjustedBy, syncStatus,
     "terminal_1", createdAt, createdAt
+)
+
+fun com.tillzo.pos.data.local.entity.BarcodeGeneralConfigEntity.toSheetRow() = listOf(
+    system_row_id, sync_status, created_at, updated_at, pos_terminal_id, if (is_deleted) 1 else 0, deleted_at ?: "",
+    labelWidth, labelHeight, titleTextSize, if (isTitleBold) 1 else 0, barcodeSize, currencySymbol, companyName,
+    companyLogoPath, if (showCompanyName) 1 else 0, if (showCompanyLogo) 1 else 0, titleX, titleY, priceX, priceY, skuX,
+    skuY, gtinX, gtinY, lotX, lotY, expX, expY, snX, snY, barcodeX, barcodeY,
+    companyNameSize, companyLogoSize, companyNameX, companyNameY, companyLogoX, companyLogoY,
+    if (usePrefix) 1 else 0, customPrefix, prefixPosition, if (useSuffix) 1 else 0, customSuffix, suffixPosition, if (useSeparator) 1 else 0
+)
+
+fun com.tillzo.pos.data.local.entity.BarcodeFieldConfigEntity.toSheetRow() = listOf(
+    system_row_id, sync_status, created_at, updated_at, pos_terminal_id, if (is_deleted) 1 else 0, deleted_at ?: "",
+    fieldId, fieldName, aiCode, if (isEnabled) 1 else 0, sequenceOrder, if (useFnc1Separator) 1 else 0, customValue
 )

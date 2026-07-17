@@ -97,6 +97,12 @@ class SyncOrchestrator @Inject constructor(
         )
     }
 
+    /** Exposes WorkInfo flow for the manual sync request to observe its state. */
+    fun getManualSyncWorkInfo(): kotlinx.coroutines.flow.Flow<List<androidx.work.WorkInfo>> {
+        return workManager.getWorkInfosForUniqueWorkFlow("manual_sync_override")
+    }
+
+
     // ── SyncWorker — Standard Auto Sync (Every 15 mins) ───────────────────
     // Note: WorkManager minimum interval is strictly 15 minutes by OS design.
 

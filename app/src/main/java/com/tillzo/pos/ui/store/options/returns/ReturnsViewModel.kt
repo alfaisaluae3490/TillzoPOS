@@ -11,6 +11,7 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
 import com.tillzo.pos.data.local.dao.InventoryDao
+import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import com.tillzo.pos.data.local.dao.ProductBatchDao
 import com.tillzo.pos.data.local.dao.WastageDao
 import com.tillzo.pos.data.local.entity.WastageEntity
@@ -24,7 +25,8 @@ class ReturnsViewModel @Inject constructor(
     private val saleRepository: SaleRepository,
     private val inventoryDao: InventoryDao,
     private val productBatchDao: ProductBatchDao,
-    private val wastageDao: WastageDao
+    private val wastageDao: WastageDao,
+    private val appSetupPrefs: AppSetupPrefs
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
@@ -61,7 +63,7 @@ class ReturnsViewModel @Inject constructor(
         val originalSale = _foundInvoice.value ?: return
         viewModelScope.launch(Dispatchers.IO) {
             val returnInvoiceId = UUID.randomUUID().toString()
-            val cashierId = "user_1" // TODO: Fetch from actual AuthRepository user session
+            val cashierId = appSetupPrefs.userEmail.ifBlank { "cashier" }
             
             // Negate the amounts to represent a deduction in revenue
             val returnSale = Sale(

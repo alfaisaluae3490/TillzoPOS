@@ -33,6 +33,7 @@ data class KhataEventEntity(
             "system_row_id" to system_row_id,
             "customer_id" to customer_id,
             "pos_id" to pos_terminal_id,
+            "event_type" to event_type,
             "type" to event_type,
             "amount" to amount,
             "reference_sale_id" to (reference_sale_id ?: ""),

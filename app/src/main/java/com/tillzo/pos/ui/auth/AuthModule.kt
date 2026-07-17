@@ -1,5 +1,7 @@
 package com.tillzo.pos.ui.auth
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.Composable
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -22,7 +24,11 @@ fun AuthNavHost(
 ) {
     NavHost(
         navController = navController,
-        startDestination = "pin_unlock" // Or logic to check if OAuth login needed
+        startDestination = "pin_unlock", // Or logic to check if OAuth login needed
+        enterTransition = { EnterTransition.None },
+        exitTransition = { ExitTransition.None },
+        popEnterTransition = { EnterTransition.None },
+        popExitTransition = { ExitTransition.None }
     ) {
         composable("login") {
             LoginScreen(

@@ -1,5 +1,7 @@
 package com.tillzo.pos.ui.pos
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.Composable
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -16,7 +18,14 @@ import com.tillzo.pos.ui.pos.options.checkout.CheckoutScreen
 fun PosNavHost() {
     val navController = rememberNavController()
 
-    NavHost(navController = navController, startDestination = "casio_screen") {
+    NavHost(
+        navController = navController,
+        startDestination = "casio_screen",
+        enterTransition = { EnterTransition.None },
+        exitTransition = { ExitTransition.None },
+        popEnterTransition = { EnterTransition.None },
+        popExitTransition = { ExitTransition.None }
+    ) {
         
         // M4.1 Casio UI
         composable("casio_screen") {

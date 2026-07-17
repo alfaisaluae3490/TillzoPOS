@@ -25,6 +25,9 @@ interface ProductBatchDao {
     @Query("SELECT * FROM product_batches WHERE batchId = :batchId LIMIT 1")
     suspend fun getBatchById(batchId: String): ProductBatchEntity?
 
+    @Query("SELECT * FROM product_batches WHERE productId = :productId AND batchNumber = :batchNumber AND isDeleted = 0 LIMIT 1")
+    suspend fun getBatchByNumber(productId: String, batchNumber: String): ProductBatchEntity?
+
     @Query("SELECT * FROM product_batches WHERE syncStatus = 'pending' AND isDeleted = 0")
     suspend fun getPendingBatches(): List<ProductBatchEntity>
 
@@ -36,6 +39,9 @@ interface ProductBatchDao {
 
     @Query("UPDATE product_batches SET isDeleted = 1, deletedAt = :timestamp, syncStatus = 'pending' WHERE batchId = :id")
     suspend fun softDelete(id: String, timestamp: Long)
+
+    @Query("UPDATE product_batches SET isDeleted = 1, deletedAt = :timestamp, syncStatus = 'pending' WHERE productId = :productId AND isDeleted = 0")
+    suspend fun softDeleteAllForProduct(productId: String, timestamp: Long)
 
     @Query("UPDATE product_batches SET stockQty = :qty, updatedAt = :time, syncStatus = 'pending' WHERE batchId = :batchId")
     suspend fun updateBatchStock(batchId: String, qty: Double, time: Long)

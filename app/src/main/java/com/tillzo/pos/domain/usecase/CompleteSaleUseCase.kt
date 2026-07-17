@@ -113,8 +113,12 @@ class CompleteSaleUseCase @Inject constructor(
             openSession?.let { session ->
                 tillSessionDao.addSaleToSession(
                     sessionId = session.sessionId,
-                    amount = cashAmount,          // only cash component tracked in till
-                    cashIn = cashAmount
+                    totalAmount = total,
+                    cashIn = cashAmount,
+                    cardIn = cardAmount,
+                    walletIn = walletAmount,
+                    udhaarIn = udhaarAmount,
+                    paymentMethod = paymentMethod
                 )
             }
         } catch (e: Exception) {

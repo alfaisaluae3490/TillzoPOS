@@ -14,6 +14,7 @@ data class InventoryEntity(
     override val pos_terminal_id: String,
 
     val item_name: String,
+    val item_number: Int = 0,
     val category: String,
     val barcode_id: String,
     val unit: String, // "KG", "ML", "PC", "GM"
@@ -48,10 +49,12 @@ data class InventoryEntity(
     fun toSyncMap(): Map<String, Any> {
         return mapOf(
             "system_row_id" to system_row_id,
+            "item_number" to item_number,
             "barcode_id" to barcode_id,
             "name" to item_name,
             "category" to category,
             "unit" to unit,
+            "selling_price" to price_per_unit,
             "price" to price_per_unit,
             "stock_qty" to current_stock,
             "low_threshold" to low_stock_threshold,
