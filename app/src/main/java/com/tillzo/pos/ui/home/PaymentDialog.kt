@@ -1,5 +1,6 @@
 package com.tillzo.pos.ui.home
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -40,6 +41,7 @@ fun PaymentDialog(
     cartTotal: Double,
     cartItems: List<CartItem>,
     viewModel: PosViewModel,
+    currencySymbol: String = "Rs",
     onDismiss: () -> Unit
 ) {
     val paymentBreakdown by viewModel.paymentBreakdown.collectAsStateWithLifecycle()
@@ -108,6 +110,31 @@ fun PaymentDialog(
                     viewModel.onPaymentAmountChanged(PaymentMethod.CASH, v.toDoubleOrNull() ?: 0.0)
                 }
             )
+
+            // Quick Tender Bill Buttons
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                val denominations = listOf(10.0, 20.0, 50.0, 100.0, 500.0, 1000.0)
+                denominations.forEach { amount ->
+                    OutlinedButton(
+                        onClick = {
+                            val current = cashText.toDoubleOrNull() ?: 0.0
+                            val newAmount = current + amount
+                            cashText = if (newAmount == newAmount.toLong().toDouble()) "%.0f".format(newAmount) else "%.2f".format(newAmount)
+                            viewModel.onPaymentAmountChanged(PaymentMethod.CASH, newAmount)
+                        },
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                        modifier = Modifier.weight(1f).height(36.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentBlue),
+                        border = BorderStroke(1.dp, AccentBlue.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text("+$currencySymbol %.0f".format(amount), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
 
             if (cashChange > 0) {
                 Text(
@@ -277,7 +304,7 @@ fun PaymentDialog(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text("Remaining:", color = color, fontSize = 14.sp)
-                    Text("Rs %.2f".format(remaining), color = color, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text("$currencySymbol %.2f".format(remaining), color = color, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.height(8.dp))
             }

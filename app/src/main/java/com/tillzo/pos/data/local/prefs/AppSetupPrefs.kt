@@ -41,6 +41,10 @@ class AppSetupPrefs @Inject constructor(
         const val KEY_IS_PIN_ENABLED     = "is_pin_enabled"
         const val KEY_GRN_FOLDER_ID      = "grn_folder_id"
         const val KEY_GRN_FOLDER_NAME    = "grn_folder_name"
+        const val KEY_PRINTER_MAC       = "printer_mac"
+        const val KEY_PRINTER_IP        = "printer_ip"
+        const val KEY_CURRENCY_SYMBOL   = "currency_symbol"
+        const val KEY_ADMIN_PASSCODE    = "admin_passcode"
     }
 
     // ── Read ──────────────────────────────────────────────────────────────
@@ -68,6 +72,28 @@ class AppSetupPrefs @Inject constructor(
     var grnFolderName: String
         get() = prefs.getString(KEY_GRN_FOLDER_NAME, "") ?: ""
         set(value) = prefs.edit().putString(KEY_GRN_FOLDER_NAME, value).apply()
+
+    // ── Printer Configuration ─────────────────────────────────────────────────
+
+    var printerMac: String
+        get() = prefs.getString(KEY_PRINTER_MAC, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_PRINTER_MAC, value).apply()
+
+    var printerIp: String
+        get() = prefs.getString(KEY_PRINTER_IP, "192.168.1.100") ?: "192.168.1.100"
+        set(value) = prefs.edit().putString(KEY_PRINTER_IP, value).apply()
+
+    // ── Currency Configuration ───────────────────────────────────────────────
+
+    var currencySymbol: String
+        get() = prefs.getString(KEY_CURRENCY_SYMBOL, "Rs") ?: "Rs"
+        set(value) = prefs.edit().putString(KEY_CURRENCY_SYMBOL, value).apply()
+
+    // ── Admin Passcode ────────────────────────────────────────────────────────
+
+    var adminPasscode: String
+        get() = prefs.getString(KEY_ADMIN_PASSCODE, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_ADMIN_PASSCODE, value).apply()
 
     fun saveGrnFolder(folderId: String, name: String) {
         prefs.edit()

@@ -7,7 +7,7 @@ import com.google.zxing.WriterException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import com.tillzo.pos.data.local.entity.BarcodeFieldConfigEntity
+import com.tillzo.pos.data.local.prefs.BarcodeFieldConfig
 
 object BarcodeGeneratorUtil {
 
@@ -90,7 +90,7 @@ object BarcodeGeneratorUtil {
      * Generates a dynamic GS1 string based on the user's custom fields order and enable status.
      */
     fun buildDynamicGs1String(
-        fields: List<BarcodeFieldConfigEntity>,
+        fields: List<BarcodeFieldConfig>,
         gtin: String,
         expiryYYMMDD: String,
         batch: String,

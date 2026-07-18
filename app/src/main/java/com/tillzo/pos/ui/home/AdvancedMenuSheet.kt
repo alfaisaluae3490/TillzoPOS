@@ -52,7 +52,8 @@ fun AdvancedMenuSheet(
     onNavigateToVendors: () -> Unit = {},
     onNavigateToStockAdjustment: () -> Unit = {},
     onNavigateToTill: () -> Unit = {},
-    onNavigateToStockAlerts: () -> Unit = {}
+    onNavigateToStockAlerts: () -> Unit = {},
+    onNavigateToHardwareDiagnostics: () -> Unit = {}
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -161,6 +162,13 @@ fun AdvancedMenuSheet(
                 description = "P&L, user management, reports",
                 accentColor = AccentBlue,
                 onClick = { onDismiss(); onNavigateToAdmin() }
+            )
+            MenuItemRow(
+                icon = Icons.Default.Build,
+                label = "Hardware Diagnostics",
+                description = "Test printer, scanner & system health",
+                accentColor = AccentBlue,
+                onClick = { onDismiss(); onNavigateToHardwareDiagnostics() }
             )
             MenuItemRow(
                 icon = Icons.Default.Settings,

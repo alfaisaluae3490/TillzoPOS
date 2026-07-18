@@ -31,6 +31,8 @@ fun HistoryScreen(
     val sales by viewModel.sales.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val printStatus by viewModel.printStatus.collectAsState()
+    val isLoadingMore by viewModel.isLoadingMore.collectAsState()
+    val hasMore by viewModel.hasMore.collectAsState()
 
     LaunchedEffect(printStatus) {
         if (printStatus != null) {
@@ -169,6 +171,22 @@ fun HistoryScreen(
                                 Spacer(modifier = Modifier.height(8.dp))
                                 IconButton(onClick = { viewModel.printDuplicateReceipt(sale) }) {
                                     Icon(Icons.Default.Print, contentDescription = "Print Duplicate", tint = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                        }
+                    }
+                }
+                if (hasMore || isLoadingMore) {
+                    item {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isLoadingMore) {
+                                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                            } else {
+                                TextButton(onClick = { viewModel.loadMore() }) {
+                                    Text("Load More")
                                 }
                             }
                         }

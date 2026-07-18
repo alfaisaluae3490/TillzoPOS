@@ -58,6 +58,9 @@ interface ProductBatchDao {
     @Query("SELECT * FROM product_batches WHERE productId = :productId AND isActive = 1 AND isDeleted = 0 ORDER BY createdAt ASC LIMIT 1")
     suspend fun getOldestActiveBatch(productId: String): ProductBatchEntity?
 
+    @Query("SELECT * FROM product_batches WHERE productId = :productId AND isActive = 1 AND isDeleted = 0 ORDER BY createdAt DESC LIMIT 1")
+    suspend fun getNewestActiveBatch(productId: String): ProductBatchEntity?
+
     // Deactivate a batch (called when its stockQty reaches 0)
     @Query("UPDATE product_batches SET isActive = 0, updatedAt = :time, syncStatus = 'pending' WHERE batchId = :batchId")
     suspend fun deactivateBatch(batchId: String, time: Long)

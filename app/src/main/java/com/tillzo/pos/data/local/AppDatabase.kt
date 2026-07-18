@@ -41,10 +41,10 @@ import com.tillzo.pos.data.local.entity.ProductUnitEntity
 import com.tillzo.pos.data.local.dao.TillSessionDao
 import com.tillzo.pos.data.local.entity.TillSessionEntity
 import com.tillzo.pos.data.local.dao.WastageDao
+import com.tillzo.pos.data.local.dao.LogDao
+import com.tillzo.pos.data.local.entity.AppLogEntity
 import com.tillzo.pos.data.local.entity.WastageEntity
-import com.tillzo.pos.data.local.dao.BarcodeConfigDao
-import com.tillzo.pos.data.local.entity.BarcodeGeneralConfigEntity
-import com.tillzo.pos.data.local.entity.BarcodeFieldConfigEntity
+
 
 /**
  * Minimal entity for M1 — non-empty entities list required by Room.
@@ -97,10 +97,9 @@ data class SyncLogEntity(
         TillSessionEntity::class,          // M-Till — Shift / Cash Drawer
         WastageEntity::class,              // E1 — Wastage / Damage Logging
         com.tillzo.pos.data.local.entity.ItemGtinEntity::class, // GTIN Support
-        BarcodeGeneralConfigEntity::class,
-        BarcodeFieldConfigEntity::class
+        AppLogEntity::class                // CL — Rolling Logging System
     ],
-    version = 23,
+    version = 25,
     exportSchema = false  // Set to true + provide schemaLocation when releasing to production
 )
 @TypeConverters(RoomConverters::class)
@@ -126,7 +125,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun productUnitDao(): ProductUnitDao
     abstract fun tillSessionDao(): TillSessionDao // M-Till — Shift management
     abstract fun wastageDao(): WastageDao          // E1 — Wastage / Damage Logging
-    abstract fun barcodeConfigDao(): BarcodeConfigDao
+    abstract fun logDao(): LogDao                  // CL — Rolling Logging System
 
     companion object {
         const val DATABASE_NAME = "tillzo_pos_db"
@@ -740,6 +739,43 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_23_24 = object : Migration(23, 24) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // Drop barcode config tables (moved to SharedPreferences)
+                database.execSQL("DROP TABLE IF EXISTS BarcodeGeneralConfigs")
+                database.execSQL("DROP TABLE IF EXISTS BarcodeFieldConfigs")
+
+                // Rebuild vendors table with simplified single-user schema
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS vendors_new (
+                        vendorId TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        phone TEXT NOT NULL,
+                        whatsapp TEXT NOT NULL DEFAULT '',
+                        email TEXT NOT NULL DEFAULT '',
+                        address TEXT NOT NULL DEFAULT '',
+                        city TEXT NOT NULL DEFAULT '',
+                        creditLimit REAL NOT NULL DEFAULT 0.0,
+                        isActive INTEGER NOT NULL DEFAULT 1,
+                        isDeleted INTEGER NOT NULL DEFAULT 0,
+                        syncStatus TEXT NOT NULL DEFAULT 'pending',
+                        createdAt INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL,
+                        PRIMARY KEY(vendorId)
+                    )
+                """.trimIndent())
+
+                database.execSQL("""
+                    INSERT INTO vendors_new (vendorId, name, phone, whatsapp, email, address, city, creditLimit, isActive, isDeleted, syncStatus, createdAt, updatedAt)
+                    SELECT vendorId, name, phone, whatsapp, email, address, COALESCE(city, ''), COALESCE(creditLimit, 0.0),
+                           COALESCE(isActive, 1), isDeleted, syncStatus, createdAt, updatedAt FROM vendors
+                """.trimIndent())
+
+                database.execSQL("DROP TABLE IF EXISTS vendors")
+                database.execSQL("ALTER TABLE vendors_new RENAME TO vendors")
+            }
+        }
+
         val MIGRATION_20_21 = object : Migration(20, 21) {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("""
@@ -812,6 +848,24 @@ abstract class AppDatabase : RoomDatabase() {
                         PRIMARY KEY(`system_row_id`)
                     )
                 """.trimIndent())
+            }
+        }
+
+        // CL — Rolling Logging System (v25): Adds app_logs table
+        val MIGRATION_24_25 = object : Migration(24, 25) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `app_logs` (
+                        `logId` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `timestamp` INTEGER NOT NULL,
+                        `tag` TEXT NOT NULL,
+                        `logLevel` TEXT NOT NULL,
+                        `message` TEXT NOT NULL
+                    )
+                """.trimIndent())
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_app_logs_timestamp` ON `app_logs`(`timestamp`)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_app_logs_tag` ON `app_logs`(`tag`)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_app_logs_logLevel` ON `app_logs`(`logLevel`)")
             }
         }
     }

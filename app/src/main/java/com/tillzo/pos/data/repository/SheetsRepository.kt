@@ -6,6 +6,7 @@ import com.tillzo.pos.domain.sync.AppSettings
 import com.tillzo.pos.domain.sync.DeltaResult
 import com.tillzo.pos.domain.sync.SyncPayload
 import com.tillzo.pos.domain.sync.SyncResult
+import com.tillzo.pos.utils.AppLogger
 import java.util.Calendar
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -21,7 +22,8 @@ import javax.inject.Singleton
 @Singleton
 class SheetsRepository @Inject constructor(
     private val dataSource: SheetsRemoteDataSource,
-    private val appSetupPrefs: AppSetupPrefs
+    private val appSetupPrefs: AppSetupPrefs,
+    private val appLogger: AppLogger
 ) {
     private val spreadsheetId: String get() = appSetupPrefs.spreadsheetId
 
@@ -49,6 +51,7 @@ class SheetsRepository @Inject constructor(
             "GRN_Headers", "GRN_Items",
             "Vendors", "Product_Batches",
             "Product_Units",
+            "Till_Sessions",
             "BarcodeGeneralConfigs", "BarcodeFieldConfigs",
             "Settings", "Sync_Log", "Dashboard", "SYS_DB_DO_NOT_TOUCH"
         ).mapIndexed { idx, title ->
@@ -89,6 +92,7 @@ class SheetsRepository @Inject constructor(
 
     suspend fun uploadBatch(payload: SyncPayload): SyncResult {
         val range = tabForTable(payload.tableName)
+        appLogger.logInfo("SYNC_PROCESS", "Uploading batch: ${payload.tableName} (${payload.rows.size} rows)")
         
         val columnsList = when (payload.tableName) {
             "Sales" -> com.tillzo.pos.utils.SheetColumns.SALES
@@ -99,8 +103,7 @@ class SheetsRepository @Inject constructor(
             "Categories" -> com.tillzo.pos.utils.SheetColumns.CATEGORIES
             "Users", "Users_Permissions" -> com.tillzo.pos.utils.SheetColumns.USERS
             "Product_Units" -> com.tillzo.pos.utils.SheetColumns.PRODUCT_UNITS
-            "BarcodeGeneralConfigs" -> com.tillzo.pos.utils.SheetColumns.BARCODE_GENERAL_CONFIGS
-            "BarcodeFieldConfigs" -> com.tillzo.pos.utils.SheetColumns.BARCODE_FIELD_CONFIGS
+            "Till_Sessions" -> com.tillzo.pos.utils.SheetColumns.TILL_SESSIONS
             else -> null
         }
 
@@ -112,29 +115,39 @@ class SheetsRepository @Inject constructor(
             payload.rows.map { it.values.toList() }
         }
 
-        return if (dataSource.appendRows(range, rows))
+        val result = dataSource.appendRows(range, rows)
+        return if (result.success) {
+            appLogger.logInfo("SYNC_PROCESS", "Upload success: ${payload.tableName} (${rows.size} rows)")
             SyncResult.Success(rows.size)
-        else
-            SyncResult.ServerError(-1, "Append failed")
+        } else {
+            appLogger.logError("SYNC_PROCESS", "Upload failed: ${payload.tableName}, http_code=${result.httpCode}, error=${result.errorMessage}")
+            SyncResult.ServerError(result.httpCode, result.errorMessage)
+        }
     }
 
     suspend fun uploadBatch(tableName: String, rows: List<List<Any>>): SyncResult {
         val range = tabForTable(tableName)
-        return if (dataSource.appendRows(range, rows))
+        appLogger.logInfo("SYNC_PROCESS", "Uploading batch: $tableName (${rows.size} rows)")
+        val result = dataSource.appendRows(range, rows)
+        return if (result.success) {
+            appLogger.logInfo("SYNC_PROCESS", "Upload success: $tableName (${rows.size} rows)")
             SyncResult.Success(rows.size)
-        else
-            SyncResult.ServerError(-1, "Append failed")
+        } else {
+            appLogger.logError("SYNC_PROCESS", "Upload failed: $tableName, http_code=${result.httpCode}, error=${result.errorMessage}")
+            SyncResult.ServerError(result.httpCode, result.errorMessage)
+        }
     }
 
     suspend fun fetchDelta(lastTimestamp: Long): DeltaResult {
         val allRows = mutableListOf<Map<String, Any>>()
         val tabs    = listOf(currentSalesTab(), "Inventory", "Customers",
                              "Khata_Events", "Expenses", "Returns", "Users_Permissions",
-                             "Categories", "Product_Units", "Vendors", "Product_Batches",
+                             "Categories", "Product_Units", "Till_Sessions",
+                             "Vendors", "Product_Batches",
                              "BarcodeGeneralConfigs", "BarcodeFieldConfigs")
 
         for (tab in tabs) {
-            val raw = dataSource.readRange("$tab!A:Z")
+            val raw = dataSource.readRange("$tab!A:ZZ")
             if (raw.size < 2) continue
 
             val headers = raw[0]
@@ -195,7 +208,7 @@ class SheetsRepository @Inject constructor(
                 "values" to values
             )))
         } else {
-            dataSource.appendRows("Settings!A:B", values)
+            dataSource.appendRows("Settings!A:B", values).success
         }
     }
 
@@ -234,8 +247,7 @@ class SheetsRepository @Inject constructor(
         "Vendors" to com.tillzo.pos.utils.SheetColumns.VENDORS,
         "Product_Batches" to com.tillzo.pos.utils.SheetColumns.PRODUCT_BATCHES,
         "Product_Units" to com.tillzo.pos.utils.SheetColumns.PRODUCT_UNITS,
-        "BarcodeGeneralConfigs" to com.tillzo.pos.utils.SheetColumns.BARCODE_GENERAL_CONFIGS,
-        "BarcodeFieldConfigs" to com.tillzo.pos.utils.SheetColumns.BARCODE_FIELD_CONFIGS,
+        "Till_Sessions" to com.tillzo.pos.utils.SheetColumns.TILL_SESSIONS,
         "Settings" to listOf("setting_key","setting_value"),
         "Sync_Log" to listOf("sync_uuid","pos_id","status","timestamp","error_msg"),
         "SYS_DB_DO_NOT_TOUCH" to listOf("schema_version","last_verified","integrity_check")
@@ -283,9 +295,10 @@ class SheetsRepository @Inject constructor(
      * @return Set of system_row_id strings already present in the Sheet
      */
     @Suppress("UNCHECKED_CAST")
-    suspend fun getExistingUuids(tableName: String): Set<String> {
+    suspend fun getExistingUuids(tableName: String, columnLetter: String = "A"): Set<String> {
         val tab     = tabForTable(tableName)
-        val rows    = dataSource.readRange("$tab!A:A")   // system_row_id is always column A
+        val col     = columnLetter.ifEmpty { "A" }
+        val rows    = dataSource.readRange("$tab!$col:$col")
         if (rows.size < 2) return emptySet()
         // Skip header row
         return rows.drop(1).mapNotNull { it.firstOrNull() }.toHashSet()

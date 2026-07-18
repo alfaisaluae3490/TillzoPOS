@@ -1,10 +1,6 @@
 package com.tillzo.pos.ui.inventory.module_b
 
-import android.content.Intent
-import android.net.Uri
 import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -31,8 +27,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tillzo.pos.data.local.entity.VendorEntity
-import java.text.SimpleDateFormat
-import java.util.*
 
 // ── Screen ─────────────────────────────────────────────────────────────────────
 
@@ -199,8 +193,6 @@ private fun VendorCard(vendor: VendorEntity, onEdit: () -> Unit, onDelete: () ->
                 if (vendor.address.isNotEmpty())
                     Text(vendor.address, color = Color.White.copy(alpha=0.35f), fontSize = 12.sp,
                         maxLines = 1)
-                if (vendor.contractFileUrl.isNotEmpty())
-                    Text("📎 Contract attached", color = Color(0xFF4CAF50).copy(alpha=0.7f), fontSize = 11.sp)
             }
             Row {
                 IconButton(onClick = onEdit) {
@@ -233,89 +225,8 @@ private fun VendorFormDialog(
     var email by remember(existing) { mutableStateOf(existing?.email ?: "") }
     var address by remember(existing) { mutableStateOf(existing?.address ?: "") }
     var isActive by remember(existing) { mutableStateOf(existing?.isActive ?: true) }
-
-    // Geographic
     var city by remember(existing) { mutableStateOf(existing?.city ?: "") }
-    var province by remember(existing) { mutableStateOf(existing?.province ?: "") }
-    var country by remember(existing) { mutableStateOf(existing?.country ?: "") }
-    var billingAddress by remember(existing) { mutableStateOf(existing?.billingAddress ?: "") }
-    var ownerName by remember(existing) { mutableStateOf(existing?.ownerName ?: "") }
-
-    // Financial / Tax
-    var bankAccountTitle by remember(existing) { mutableStateOf(existing?.bankAccountTitle ?: "") }
-    var bankName by remember(existing) { mutableStateOf(existing?.bankName ?: "") }
-    var bankAccountNumber by remember(existing) { mutableStateOf(existing?.bankAccountNumber ?: "") }
-    var bankIban by remember(existing) { mutableStateOf(existing?.bankIban ?: "") }
-    var bankSwiftCode by remember(existing) { mutableStateOf(existing?.bankSwiftCode ?: "") }
-    var bankBranch by remember(existing) { mutableStateOf(existing?.bankBranch ?: "") }
-    var paymentTerms by remember(existing) { mutableStateOf(existing?.paymentTerms ?: "") }
-    var preferredCurrency by remember(existing) { mutableStateOf(existing?.preferredCurrency ?: "") }
     var creditLimit by remember(existing) { mutableStateOf(existing?.creditLimit?.toString() ?: "0.0") }
-    var registrationNumber by remember(existing) { mutableStateOf(existing?.registrationNumber ?: "") }
-    var ntnNumber by remember(existing) { mutableStateOf(existing?.ntnNumber ?: "") }
-    var cnicNumber by remember(existing) { mutableStateOf(existing?.cnicNumber ?: "") }
-    var trnNumber by remember(existing) { mutableStateOf(existing?.trnNumber ?: "") }
-    var tradeLicenseNumber by remember(existing) { mutableStateOf(existing?.tradeLicenseNumber ?: "") }
-    var tradeLicenseExpiryDate by remember(existing) { mutableStateOf(existing?.tradeLicenseExpiryDate ?: "") }
-
-    // Primary Manager
-    var primaryManagerName by remember(existing) { mutableStateOf(existing?.primaryManagerName ?: "") }
-    var primaryManagerPhone by remember(existing) { mutableStateOf(existing?.primaryManagerPhone ?: "") }
-    var primaryManagerEmail by remember(existing) { mutableStateOf(existing?.primaryManagerEmail ?: "") }
-
-    // Tech Support
-    var techSupportName by remember(existing) { mutableStateOf(existing?.techSupportName ?: "") }
-    var techSupportPhone by remember(existing) { mutableStateOf(existing?.techSupportPhone ?: "") }
-    var techSupportEmail by remember(existing) { mutableStateOf(existing?.techSupportEmail ?: "") }
-
-    // Billing Contact
-    var billingContactName by remember(existing) { mutableStateOf(existing?.billingContactName ?: "") }
-    var billingContactPhone by remember(existing) { mutableStateOf(existing?.billingContactPhone ?: "") }
-    var billingContactEmail by remember(existing) { mutableStateOf(existing?.billingContactEmail ?: "") }
-
-    // Escalation L1
-    var escalationL1Name by remember(existing) { mutableStateOf(existing?.escalationL1Name ?: "") }
-    var escalationL1Phone by remember(existing) { mutableStateOf(existing?.escalationL1Phone ?: "") }
-    var escalationL1Email by remember(existing) { mutableStateOf(existing?.escalationL1Email ?: "") }
-
-    // Escalation L2
-    var escalationL2Name by remember(existing) { mutableStateOf(existing?.escalationL2Name ?: "") }
-    var escalationL2Phone by remember(existing) { mutableStateOf(existing?.escalationL2Phone ?: "") }
-    var escalationL2Email by remember(existing) { mutableStateOf(existing?.escalationL2Email ?: "") }
-
-    // Escalation L3
-    var escalationL3Name by remember(existing) { mutableStateOf(existing?.escalationL3Name ?: "") }
-    var escalationL3Phone by remember(existing) { mutableStateOf(existing?.escalationL3Phone ?: "") }
-    var escalationL3Email by remember(existing) { mutableStateOf(existing?.escalationL3Email ?: "") }
-
-    // SLA & Warranty
-    var contractStartDate by remember(existing) { mutableStateOf(existing?.contractStartDate ?: "") }
-    var contractExpiryDate by remember(existing) { mutableStateOf(existing?.contractExpiryDate ?: "") }
-    var slaResponseTimes by remember(existing) { mutableStateOf(existing?.slaResponseTimes ?: "") }
-    var warrantyTerms by remember(existing) { mutableStateOf(existing?.warrantyTerms ?: "") }
-    var complianceCertificates by remember(existing) { mutableStateOf(existing?.complianceCertificates ?: "") }
-
-    // File attachment state
-    var attachedFileName by remember { mutableStateOf("") }
-    var selectedFileUri by remember { mutableStateOf<Uri?>(null) }
-
-    // File picker launcher
-    val filePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            selectedFileUri = uri
-            // Extract filename from URI
-            val cursor = context.contentResolver.query(uri, null, null, null, null)
-            cursor?.use {
-                if (it.moveToFirst()) {
-                    val nameIndex = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                    if (nameIndex >= 0) attachedFileName = it.getString(nameIndex)
-                }
-            } ?: run { attachedFileName = "selected_file" }
-            cursor?.close()
-        }
-    }
 
     // Handle save state changes
     LaunchedEffect(saveState) {
@@ -332,19 +243,7 @@ private fun VendorFormDialog(
         }
     }
 
-    // Collapsible section states
     var basicExpanded by remember { mutableStateOf(true) }
-    var geoExpanded by remember { mutableStateOf(false) }
-    var financialExpanded by remember { mutableStateOf(false) }
-    var taxExpanded by remember { mutableStateOf(false) }
-    var primaryContactExpanded by remember { mutableStateOf(false) }
-    var techSupportExpanded by remember { mutableStateOf(false) }
-    var billingContactExpanded by remember { mutableStateOf(false) }
-    var escalationL1Expanded by remember { mutableStateOf(false) }
-    var escalationL2Expanded by remember { mutableStateOf(false) }
-    var escalationL3Expanded by remember { mutableStateOf(false) }
-    var slaExpanded by remember { mutableStateOf(false) }
-    var docsExpanded by remember { mutableStateOf(false) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -376,7 +275,7 @@ private fun VendorFormDialog(
                     )
                 }
 
-                // Scrollable form content with accordion sections
+                // Scrollable form content
                 Column(
                     modifier = Modifier
                         .weight(1f)
@@ -384,7 +283,7 @@ private fun VendorFormDialog(
                         .padding(horizontal = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    // ── Section 1: Basic Info ──────────────────────────────────
+                    // ── Basic Info ──────────────────────────────────
                     AccordionSection(
                         title = "Basic Info",
                         icon = Icons.Default.Person,
@@ -409,6 +308,13 @@ private fun VendorFormDialog(
                         OutlinedTextField(value = address, onValueChange = { address = it },
                             label = { Text("Address") }, modifier = Modifier.fillMaxWidth(),
                             minLines = 2, colors = vendorFormFieldColors())
+                        OutlinedTextField(value = city, onValueChange = { city = it },
+                            label = { Text("City") }, modifier = Modifier.fillMaxWidth(),
+                            colors = vendorFormFieldColors())
+                        OutlinedTextField(value = creditLimit, onValueChange = { creditLimit = it },
+                            label = { Text("Credit Limit") }, modifier = Modifier.fillMaxWidth(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            colors = vendorFormFieldColors())
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -428,295 +334,14 @@ private fun VendorFormDialog(
                         }
                     }
 
-                    // ── Section 2: Geographic ──────────────────────────────────
-                    AccordionSection(
-                        title = "Geographic Details",
-                        icon = Icons.Default.LocationOn,
-                        expanded = geoExpanded,
-                        onToggle = { geoExpanded = !geoExpanded }
-                    ) {
-                        OutlinedTextField(value = city, onValueChange = { city = it },
-                            label = { Text("City") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = province, onValueChange = { province = it },
-                            label = { Text("Province / State") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = country, onValueChange = { country = it },
-                            label = { Text("Country") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = billingAddress, onValueChange = { billingAddress = it },
-                            label = { Text("Billing Address") }, modifier = Modifier.fillMaxWidth(),
-                            minLines = 2, colors = vendorFormFieldColors())
-                        OutlinedTextField(value = ownerName, onValueChange = { ownerName = it },
-                            label = { Text("Owner Name") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                    }
-
-                    // ── Section 3: Financial Details ───────────────────────────
-                    AccordionSection(
-                        title = "Financial Details",
-                        icon = Icons.Default.AccountBalance,
-                        expanded = financialExpanded,
-                        onToggle = { financialExpanded = !financialExpanded }
-                    ) {
-                        OutlinedTextField(value = bankAccountTitle, onValueChange = { bankAccountTitle = it },
-                            label = { Text("Bank Account Title") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = bankName, onValueChange = { bankName = it },
-                            label = { Text("Bank Name") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = bankAccountNumber, onValueChange = { bankAccountNumber = it },
-                            label = { Text("Bank Account Number") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = bankIban, onValueChange = { bankIban = it },
-                            label = { Text("IBAN") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = bankSwiftCode, onValueChange = { bankSwiftCode = it },
-                            label = { Text("SWIFT Code") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = bankBranch, onValueChange = { bankBranch = it },
-                            label = { Text("Bank Branch") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = paymentTerms, onValueChange = { paymentTerms = it },
-                            label = { Text("Payment Terms") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = preferredCurrency, onValueChange = { preferredCurrency = it },
-                            label = { Text("Preferred Currency") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = creditLimit, onValueChange = { creditLimit = it },
-                            label = { Text("Credit Limit") }, modifier = Modifier.fillMaxWidth(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            colors = vendorFormFieldColors())
-                    }
-
-                    // ── Section 4: Tax & Registration ──────────────────────────
-                    AccordionSection(
-                        title = "Tax & Registration",
-                        icon = Icons.Default.Description,
-                        expanded = taxExpanded,
-                        onToggle = { taxExpanded = !taxExpanded }
-                    ) {
-                        OutlinedTextField(value = registrationNumber, onValueChange = { registrationNumber = it },
-                            label = { Text("Registration Number") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = ntnNumber, onValueChange = { ntnNumber = it },
-                            label = { Text("NTN Number") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = cnicNumber, onValueChange = { cnicNumber = it },
-                            label = { Text("CNIC Number") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = trnNumber, onValueChange = { trnNumber = it },
-                            label = { Text("TRN Number") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = tradeLicenseNumber, onValueChange = { tradeLicenseNumber = it },
-                            label = { Text("Trade License Number") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = tradeLicenseExpiryDate, onValueChange = { tradeLicenseExpiryDate = it },
-                            label = { Text("Trade License Expiry Date") }, modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("YYYY-MM-DD", color = Color.White.copy(alpha = 0.3f)) },
-                            colors = vendorFormFieldColors())
-                    }
-
-                    // ── Section 5: Primary Contact ─────────────────────────────
-                    AccordionSection(
-                        title = "Primary Manager",
-                        icon = Icons.Default.PersonOutline,
-                        expanded = primaryContactExpanded,
-                        onToggle = { primaryContactExpanded = !primaryContactExpanded }
-                    ) {
-                        OutlinedTextField(value = primaryManagerName, onValueChange = { primaryManagerName = it },
-                            label = { Text("Name") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = primaryManagerPhone, onValueChange = { primaryManagerPhone = it },
-                            label = { Text("Phone") }, modifier = Modifier.fillMaxWidth(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = primaryManagerEmail, onValueChange = { primaryManagerEmail = it },
-                            label = { Text("Email") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                    }
-
-                    // ── Section 6: Tech Support ────────────────────────────────
-                    AccordionSection(
-                        title = "Tech Support",
-                        icon = Icons.Default.SupportAgent,
-                        expanded = techSupportExpanded,
-                        onToggle = { techSupportExpanded = !techSupportExpanded }
-                    ) {
-                        OutlinedTextField(value = techSupportName, onValueChange = { techSupportName = it },
-                            label = { Text("Name") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = techSupportPhone, onValueChange = { techSupportPhone = it },
-                            label = { Text("Phone") }, modifier = Modifier.fillMaxWidth(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = techSupportEmail, onValueChange = { techSupportEmail = it },
-                            label = { Text("Email") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                    }
-
-                    // ── Section 7: Billing Contact ─────────────────────────────
-                    AccordionSection(
-                        title = "Billing Contact",
-                        icon = Icons.Default.Receipt,
-                        expanded = billingContactExpanded,
-                        onToggle = { billingContactExpanded = !billingContactExpanded }
-                    ) {
-                        OutlinedTextField(value = billingContactName, onValueChange = { billingContactName = it },
-                            label = { Text("Name") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = billingContactPhone, onValueChange = { billingContactPhone = it },
-                            label = { Text("Phone") }, modifier = Modifier.fillMaxWidth(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = billingContactEmail, onValueChange = { billingContactEmail = it },
-                            label = { Text("Email") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                    }
-
-                    // ── Section 8: Escalation L1 ───────────────────────────────
-                    AccordionSection(
-                        title = "Escalation L1",
-                        icon = Icons.Default.Notifications,
-                        expanded = escalationL1Expanded,
-                        onToggle = { escalationL1Expanded = !escalationL1Expanded }
-                    ) {
-                        OutlinedTextField(value = escalationL1Name, onValueChange = { escalationL1Name = it },
-                            label = { Text("Name") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = escalationL1Phone, onValueChange = { escalationL1Phone = it },
-                            label = { Text("Phone") }, modifier = Modifier.fillMaxWidth(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = escalationL1Email, onValueChange = { escalationL1Email = it },
-                            label = { Text("Email") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                    }
-
-                    // ── Section 9: Escalation L2 ───────────────────────────────
-                    AccordionSection(
-                        title = "Escalation L2",
-                        icon = Icons.Default.Notifications,
-                        expanded = escalationL2Expanded,
-                        onToggle = { escalationL2Expanded = !escalationL2Expanded }
-                    ) {
-                        OutlinedTextField(value = escalationL2Name, onValueChange = { escalationL2Name = it },
-                            label = { Text("Name") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = escalationL2Phone, onValueChange = { escalationL2Phone = it },
-                            label = { Text("Phone") }, modifier = Modifier.fillMaxWidth(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = escalationL2Email, onValueChange = { escalationL2Email = it },
-                            label = { Text("Email") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                    }
-
-                    // ── Section 10: Escalation L3 ──────────────────────────────
-                    AccordionSection(
-                        title = "Escalation L3",
-                        icon = Icons.Default.Notifications,
-                        expanded = escalationL3Expanded,
-                        onToggle = { escalationL3Expanded = !escalationL3Expanded }
-                    ) {
-                        OutlinedTextField(value = escalationL3Name, onValueChange = { escalationL3Name = it },
-                            label = { Text("Name") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = escalationL3Phone, onValueChange = { escalationL3Phone = it },
-                            label = { Text("Phone") }, modifier = Modifier.fillMaxWidth(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = escalationL3Email, onValueChange = { escalationL3Email = it },
-                            label = { Text("Email") }, modifier = Modifier.fillMaxWidth(),
-                            colors = vendorFormFieldColors())
-                    }
-
-                    // ── Section 11: SLA & Warranty ─────────────────────────────
-                    AccordionSection(
-                        title = "SLA & Warranty",
-                        icon = Icons.Default.Verified,
-                        expanded = slaExpanded,
-                        onToggle = { slaExpanded = !slaExpanded }
-                    ) {
-                        OutlinedTextField(value = contractStartDate, onValueChange = { contractStartDate = it },
-                            label = { Text("Contract Start Date") }, modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("YYYY-MM-DD", color = Color.White.copy(alpha = 0.3f)) },
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = contractExpiryDate, onValueChange = { contractExpiryDate = it },
-                            label = { Text("Contract Expiry Date") }, modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("YYYY-MM-DD", color = Color.White.copy(alpha = 0.3f)) },
-                            colors = vendorFormFieldColors())
-                        OutlinedTextField(value = slaResponseTimes, onValueChange = { slaResponseTimes = it },
-                            label = { Text("SLA Response Times") }, modifier = Modifier.fillMaxWidth(),
-                            minLines = 2, colors = vendorFormFieldColors())
-                        OutlinedTextField(value = warrantyTerms, onValueChange = { warrantyTerms = it },
-                            label = { Text("Warranty Terms") }, modifier = Modifier.fillMaxWidth(),
-                            minLines = 2, colors = vendorFormFieldColors())
-                        OutlinedTextField(value = complianceCertificates, onValueChange = { complianceCertificates = it },
-                            label = { Text("Compliance Certificates") }, modifier = Modifier.fillMaxWidth(),
-                            minLines = 2, colors = vendorFormFieldColors())
-                    }
-
-                    // ── Section 12: Documents ──────────────────────────────────
-                    AccordionSection(
-                        title = "Documents",
-                        icon = Icons.Default.AttachFile,
-                        expanded = docsExpanded,
-                        onToggle = { docsExpanded = !docsExpanded }
-                    ) {
-                        // File picker button
-                        Button(
-                            onClick = { filePickerLauncher.launch("*/*") },
+                    if (saveState is SaveState.Saving) {
+                        Spacer(Modifier.height(8.dp))
+                        LinearProgressIndicator(
                             modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E88E5)),
-                            enabled = saveState !is SaveState.Saving
-                        ) {
-                            Icon(Icons.Default.UploadFile, null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text(if (attachedFileName.isNotEmpty()) "Change File" else "Attach Contract / Document")
-                        }
-
-                        // Show selected filename
-                        if (attachedFileName.isNotEmpty()) {
-                            Spacer(Modifier.height(4.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.InsertDriveFile, null,
-                                    tint = Color(0xFF4CAF50), modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text(attachedFileName,
-                                    color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
-                            }
-                        }
-
-                        // Show existing attachment / view button
-                        if (!existing?.contractFileUrl.isNullOrEmpty()) {
-                            Spacer(Modifier.height(8.dp))
-                            OutlinedButton(
-                                onClick = {
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(existing!!.contractFileUrl))
-                                    context.startActivity(intent)
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    contentColor = Color(0xFF4CAF50)
-                                )
-                            ) {
-                                Icon(Icons.Default.OpenInNew, null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text("View Attachment")
-                            }
-                        }
-
-                        // Saving progress indicator
-                        if (saveState is SaveState.Saving) {
-                            Spacer(Modifier.height(8.dp))
-                            LinearProgressIndicator(
-                                modifier = Modifier.fillMaxWidth(),
-                                color = Color(0xFF1E88E5)
-                            )
-                            Text("Saving vendor...",
-                                color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
-                        }
+                            color = Color(0xFF1E88E5)
+                        )
+                        Text("Saving vendor...",
+                            color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
                     }
                 } // end scrollable content
 
@@ -737,45 +362,10 @@ private fun VendorFormDialog(
                             if (name.isNotBlank() && phone.isNotBlank()) {
                                 viewModel.save(
                                     existing = existing,
-                                    isActive = isActive,
                                     name = name, phone = phone,
                                     whatsapp = whatsapp, email = email, address = address,
-                                    city = city, province = province, country = country,
-                                    billingAddress = billingAddress, ownerName = ownerName,
-                                    bankAccountTitle = bankAccountTitle, bankName = bankName,
-                                    bankAccountNumber = bankAccountNumber, bankIban = bankIban,
-                                    bankSwiftCode = bankSwiftCode, bankBranch = bankBranch,
-                                    paymentTerms = paymentTerms, preferredCurrency = preferredCurrency,
-                                    creditLimit = creditLimit.toDoubleOrNull() ?: 0.0,
-                                    registrationNumber = registrationNumber, ntnNumber = ntnNumber,
-                                    cnicNumber = cnicNumber, trnNumber = trnNumber,
-                                    tradeLicenseNumber = tradeLicenseNumber,
-                                    tradeLicenseExpiryDate = tradeLicenseExpiryDate,
-                                    primaryManagerName = primaryManagerName,
-                                    primaryManagerPhone = primaryManagerPhone,
-                                    primaryManagerEmail = primaryManagerEmail,
-                                    techSupportName = techSupportName,
-                                    techSupportPhone = techSupportPhone,
-                                    techSupportEmail = techSupportEmail,
-                                    billingContactName = billingContactName,
-                                    billingContactPhone = billingContactPhone,
-                                    billingContactEmail = billingContactEmail,
-                                    escalationL1Name = escalationL1Name,
-                                    escalationL1Phone = escalationL1Phone,
-                                    escalationL1Email = escalationL1Email,
-                                    escalationL2Name = escalationL2Name,
-                                    escalationL2Phone = escalationL2Phone,
-                                    escalationL2Email = escalationL2Email,
-                                    escalationL3Name = escalationL3Name,
-                                    escalationL3Phone = escalationL3Phone,
-                                    escalationL3Email = escalationL3Email,
-                                    contractStartDate = contractStartDate,
-                                    contractExpiryDate = contractExpiryDate,
-                                    slaResponseTimes = slaResponseTimes,
-                                    warrantyTerms = warrantyTerms,
-                                    complianceCertificates = complianceCertificates,
-                                    fileUri = selectedFileUri,
-                                    context = context
+                                    city = city, creditLimit = creditLimit.toDoubleOrNull() ?: 0.0,
+                                    isActive = isActive
                                 )
                             }
                         },

@@ -141,10 +141,16 @@ class SheetsRemoteDataSource @Inject constructor(
 
     // ── Append Rows ──────────────────────────────────────────────────────────
 
-    suspend fun appendRows(range: String, rows: List<List<Any>>): Boolean =
+    data class AppendResult(
+        val success: Boolean,
+        val httpCode: Int = 0,
+        val errorMessage: String = ""
+    )
+
+    suspend fun appendRows(range: String, rows: List<List<Any>>): AppendResult =
         withContext(Dispatchers.IO) {
             // Guard: spreadsheetId empty = user not signed in yet
-            if (spreadsheetId.isEmpty()) return@withContext false
+            if (spreadsheetId.isEmpty()) return@withContext AppendResult(false, 0, "Spreadsheet ID not set")
             try {
                 val resp = api.appendValues(
                     spreadsheetId,
@@ -155,8 +161,15 @@ class SheetsRemoteDataSource @Inject constructor(
                         "values"         to rows
                     )
                 )
-                resp.isSuccessful
-            } catch (e: Exception) { false }
+                if (resp.isSuccessful) {
+                    AppendResult(true)
+                } else {
+                    val errorBody = resp.errorBody()?.string() ?: ""
+                    AppendResult(false, resp.code(), errorBody)
+                }
+            } catch (e: Exception) {
+                AppendResult(false, 0, "Exception: ${e.message ?: "Unknown"}")
+            }
         }
 
     // ── Read Range ───────────────────────────────────────────────────────────

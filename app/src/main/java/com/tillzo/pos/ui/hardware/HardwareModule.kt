@@ -3,11 +3,16 @@ package com.tillzo.pos.ui.hardware
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import com.tillzo.pos.ui.hardware.printer.PrinterSettingsScreen
 import com.tillzo.pos.ui.hardware.scanner.BarcodeScannerScreen
+import com.tillzo.pos.utils.printer.TsplPrinter
 
 /**
  * M5 Hardware Module Master Wiring
@@ -31,7 +36,8 @@ fun HardwareNavHost() {
         composable("printer_settings") {
             PrinterSettingsScreen(
                 onNavigateBack = { navController.popBackStack() },
-                onNavigateToScannerTesting = { navController.navigate("scanner_testing") }
+                onNavigateToScannerTesting = { navController.navigate("scanner_testing") },
+                onNavigateToDiagnostics = { navController.navigate("hardware_diagnostics") }
             )
         }
 
@@ -43,6 +49,17 @@ fun HardwareNavHost() {
                     navController.popBackStack()
                 },
                 onDismiss = { navController.popBackStack() }
+            )
+        }
+
+        // Hardware Diagnostic Screen
+        composable("hardware_diagnostics") {
+            val context = LocalContext.current
+            val prefs = remember { AppSetupPrefs(context) }
+            HardwareDiagnosticScreen(
+                onBack = { navController.popBackStack() },
+                tsplPrinter = TsplPrinter(),
+                appSetupPrefs = prefs
             )
         }
     }

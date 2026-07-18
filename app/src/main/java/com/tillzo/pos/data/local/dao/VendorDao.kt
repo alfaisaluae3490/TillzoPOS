@@ -35,8 +35,7 @@ interface VendorDao {
     @Query("UPDATE vendors SET syncStatus = 'synced' WHERE vendorId IN (:vendorIds)")
     suspend fun markMultipleSynced(vendorIds: List<String>)
 
-    @Query("UPDATE vendors SET contractFileId = :fileId, contractFileUrl = :fileUrl, syncStatus = 'pending', updatedAt = :updatedAt WHERE vendorId = :vendorId")
-    suspend fun updateContractFile(vendorId: String, fileId: String, fileUrl: String, updatedAt: Long = System.currentTimeMillis())
+
 
     @Query("UPDATE vendors SET isDeleted = 1, syncStatus = 'pending', updatedAt = :timestamp WHERE vendorId = :vendorId")
     suspend fun softDeleteVendor(vendorId: String, timestamp: Long = System.currentTimeMillis())

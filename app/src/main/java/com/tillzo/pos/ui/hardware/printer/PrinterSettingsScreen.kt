@@ -14,6 +14,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 fun PrinterSettingsScreen(
     onNavigateBack: () -> Unit,
     onNavigateToScannerTesting: () -> Unit,
+    onNavigateToDiagnostics: () -> Unit = {},
     viewModel: PrinterSettingsViewModel = hiltViewModel()
 ) {
     val ipAddress by viewModel.ipAddress.collectAsState()
@@ -71,6 +72,15 @@ fun PrinterSettingsScreen(
                     Text("Test Network Connection")
                 }
             }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        OutlinedButton(
+            onClick = onNavigateToDiagnostics,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Hardware Diagnostics")
         }
 
         Spacer(modifier = Modifier.weight(1f))

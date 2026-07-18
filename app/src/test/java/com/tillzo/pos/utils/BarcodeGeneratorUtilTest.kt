@@ -1,6 +1,6 @@
 package com.tillzo.pos.utils
 
-import com.tillzo.pos.data.local.entity.BarcodeFieldConfigEntity
+import com.tillzo.pos.data.local.prefs.BarcodeFieldConfig
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -20,10 +20,10 @@ class BarcodeGeneratorUtilTest {
     @Test
     fun testBuildDynamicGs1String_DefaultConfig() {
         val fields = listOf(
-            BarcodeFieldConfigEntity(fieldId = "GTIN", fieldName = "GTIN", aiCode = "01", isEnabled = true, sequenceOrder = 0, useFnc1Separator = false),
-            BarcodeFieldConfigEntity(fieldId = "EXPIRY", fieldName = "Expiry Date", aiCode = "17", isEnabled = true, sequenceOrder = 1, useFnc1Separator = false),
-            BarcodeFieldConfigEntity(fieldId = "BATCH", fieldName = "Batch/Lot Number", aiCode = "10", isEnabled = true, sequenceOrder = 2, useFnc1Separator = true),
-            BarcodeFieldConfigEntity(fieldId = "SN", fieldName = "Serial Number", aiCode = "21", isEnabled = true, sequenceOrder = 3, useFnc1Separator = false)
+            BarcodeFieldConfig(fieldId = "GTIN", fieldName = "GTIN", aiCode = "01", isEnabled = true, sequenceOrder = 0, useFnc1Separator = false),
+            BarcodeFieldConfig(fieldId = "EXPIRY", fieldName = "Expiry Date", aiCode = "17", isEnabled = true, sequenceOrder = 1, useFnc1Separator = false),
+            BarcodeFieldConfig(fieldId = "BATCH", fieldName = "Batch/Lot Number", aiCode = "10", isEnabled = true, sequenceOrder = 2, useFnc1Separator = true),
+            BarcodeFieldConfig(fieldId = "SN", fieldName = "Serial Number", aiCode = "21", isEnabled = true, sequenceOrder = 3, useFnc1Separator = false)
         )
 
         val result = BarcodeGeneratorUtil.buildDynamicGs1String(
@@ -47,10 +47,10 @@ class BarcodeGeneratorUtilTest {
     @Test
     fun testBuildDynamicGs1String_ReorderedAndDisabled() {
         val fields = listOf(
-            BarcodeFieldConfigEntity(fieldId = "BATCH", fieldName = "Batch/Lot Number", aiCode = "10", isEnabled = true, sequenceOrder = 0, useFnc1Separator = true),
-            BarcodeFieldConfigEntity(fieldId = "GTIN", fieldName = "GTIN", aiCode = "01", isEnabled = true, sequenceOrder = 1, useFnc1Separator = false),
-            BarcodeFieldConfigEntity(fieldId = "EXPIRY", fieldName = "Expiry Date", aiCode = "17", isEnabled = false, sequenceOrder = 2, useFnc1Separator = false),
-            BarcodeFieldConfigEntity(fieldId = "SN", fieldName = "Serial Number", aiCode = "21", isEnabled = true, sequenceOrder = 3, useFnc1Separator = false)
+            BarcodeFieldConfig(fieldId = "BATCH", fieldName = "Batch/Lot Number", aiCode = "10", isEnabled = true, sequenceOrder = 0, useFnc1Separator = true),
+            BarcodeFieldConfig(fieldId = "GTIN", fieldName = "GTIN", aiCode = "01", isEnabled = true, sequenceOrder = 1, useFnc1Separator = false),
+            BarcodeFieldConfig(fieldId = "EXPIRY", fieldName = "Expiry Date", aiCode = "17", isEnabled = false, sequenceOrder = 2, useFnc1Separator = false),
+            BarcodeFieldConfig(fieldId = "SN", fieldName = "Serial Number", aiCode = "21", isEnabled = true, sequenceOrder = 3, useFnc1Separator = false)
         )
 
         val result = BarcodeGeneratorUtil.buildDynamicGs1String(
@@ -75,7 +75,7 @@ class BarcodeGeneratorUtilTest {
     @Test
     fun testBuildDynamicGs1String_PrefixSuffixPositions() {
         val fields = listOf(
-            BarcodeFieldConfigEntity(fieldId = "GTIN", fieldName = "GTIN", aiCode = "01", isEnabled = true, sequenceOrder = 0, useFnc1Separator = false)
+            BarcodeFieldConfig(fieldId = "GTIN", fieldName = "GTIN", aiCode = "01", isEnabled = true, sequenceOrder = 0, useFnc1Separator = false)
         )
 
         // Prefix position > 0, Suffix enabled at last position

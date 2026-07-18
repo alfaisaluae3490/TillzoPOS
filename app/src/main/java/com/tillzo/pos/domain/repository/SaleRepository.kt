@@ -5,7 +5,9 @@ import kotlinx.coroutines.flow.Flow
 
 interface SaleRepository {
     fun getAllSales(): Flow<List<Sale>>
+    fun getSalesPaged(limit: Int, offset: Int): Flow<List<Sale>>
     fun getSalesInRange(start: Long, end: Long): Flow<List<Sale>>
+    fun getSalesInRangePaged(start: Long, end: Long, limit: Int, offset: Int): Flow<List<Sale>>
     suspend fun getSaleById(systemRowId: String): Sale?
     suspend fun getSaleByInvoiceId(invoiceId: String): Sale?
     

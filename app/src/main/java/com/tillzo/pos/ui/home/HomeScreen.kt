@@ -51,6 +51,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import com.tillzo.pos.data.local.entity.InventoryEntity
+import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import com.tillzo.pos.ui.inventory.options.alerts.LowStockViewModel
 import com.tillzo.pos.ui.theme.*
 import com.tillzo.pos.ui.hardware.scanner.InlineCameraBox
@@ -94,10 +95,12 @@ fun HomeScreen(
     val cartTotal by viewModel.cartTotal.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
+    val currencySymbol = viewModel.currencySymbol
     val quickGridItems by viewModel.quickGridItems.collectAsStateWithLifecycle()
     val lowStockItems by lowStockViewModel.lowStockItems.collectAsStateWithLifecycle()
     val saleResult by viewModel.saleResult.collectAsStateWithLifecycle()
     val currentTillSession by tillViewModel.currentSession.collectAsStateWithLifecycle()
+    val hasPendingSync by viewModel.hasPendingSync.collectAsStateWithLifecycle()
 
     var showPaymentDialog by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
@@ -111,6 +114,7 @@ fun HomeScreen(
     var showUnpinConfirm by remember { mutableStateOf(false) }
     var pinTarget by remember { mutableStateOf<InventoryEntity?>(null) }
     var unpinTarget by remember { mutableStateOf<InventoryEntity?>(null) }
+    var showDiscountDialog by remember { mutableStateOf(false) }
     val inlineScannerViewModel: InlineScannerViewModel = hiltViewModel()
     val isCameraActive by inlineScannerViewModel.isCameraActive.collectAsStateWithLifecycle()
 
@@ -215,12 +219,13 @@ fun HomeScreen(
                     )
                 },
                 actions = {
-                    // Sync status dot
+                    // Sync status dot — Green = synced, Red = pending updates
+                    val syncColor = if (hasPendingSync) ErrorRed else SuccessGreen
                     Box(
                         modifier = Modifier
                             .size(10.dp)
                             .clip(CircleShape)
-                            .background(SuccessGreen)
+                            .background(syncColor)
                     )
                     Spacer(Modifier.width(12.dp))
                     IconButton(onClick = onNavigateToInventory) {
@@ -355,7 +360,7 @@ fun HomeScreen(
                                     Text(text = item.item_name, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                                     Text(text = item.sku.ifBlank { item.barcode_id }, color = TextSecondary, fontSize = 12.sp)
                                 }
-                                Text(text = "Rs ${item.price_per_unit.toInt()}", color = AccentBlueLight, fontSize = 13.sp)
+                                Text(text = "$currencySymbol ${item.price_per_unit.toInt()}", color = AccentBlueLight, fontSize = 13.sp)
                                 Spacer(Modifier.width(8.dp))
                                 Box(
                                     modifier = Modifier
@@ -392,6 +397,7 @@ fun HomeScreen(
                     items(quickGridItems, key = { it.system_row_id }) { item ->
                         QuickGridTile(
                             item = item,
+                            currencySymbol = currencySymbol,
                             onTapped = {
                                 if (item.unit in listOf("KG", "GM", "ML")) {
                                     decimalQtyItem = item
@@ -431,6 +437,7 @@ fun HomeScreen(
                             items(cartItems, key = { it.itemId }) { cartItem ->
                                 CartRow(
                                     item = cartItem,
+                                    currencySymbol = currencySymbol,
                                     onQtyDecrease = {
                                         val minQty = if (cartItem.unit in listOf("KG", "GM", "ML", "L", "Litre", "LITRE", "LTR")) 0.1 else 1.0
                                         val newQty = (cartItem.quantity - (if (cartItem.unit in listOf("KG", "GM", "ML", "L", "Litre", "LITRE", "LTR")) 0.1 else 1.0)).coerceAtLeast(minQty)
@@ -453,13 +460,39 @@ fun HomeScreen(
                         Spacer(Modifier.height(8.dp))
 
                         // Totals
-                        CartSummaryRow("Subtotal", "Rs %.2f".format(cartSubtotal))
-                        if (cartTax > 0) CartSummaryRow("Tax", "Rs %.2f".format(cartTax))
+                        CartSummaryRow("Subtotal", "$currencySymbol %.2f".format(cartSubtotal))
+                        if (cartTax > 0) CartSummaryRow("Tax", "$currencySymbol %.2f".format(cartTax))
                         if (cartDiscount > 0) CartSummaryRow("Discount", "- Rs %.2f".format(cartDiscount), color = SuccessGreen)
                         HorizontalDivider(color = SurfaceVariant, modifier = Modifier.padding(vertical = 6.dp))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("TOTAL", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                            Text("Rs %.2f".format(cartTotal), color = AccentBlue, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                            Text("$currencySymbol %.2f".format(cartTotal), color = AccentBlue, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                        }
+
+                        Spacer(Modifier.height(6.dp))
+
+                        // Discount Apply Row
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (cartDiscount > 0) {
+                                Text("Discount: - $currencySymbol %.2f".format(cartDiscount), color = SuccessGreen, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                TextButton(onClick = { viewModel.setDiscount(0.0) }) {
+                                    Text("Remove", color = ErrorRed, fontSize = 12.sp)
+                                }
+                            } else {
+                                OutlinedButton(
+                                    onClick = { showDiscountDialog = true },
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentBlue),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                ) {
+                                    Icon(Icons.Default.LocalOffer, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Discount", fontSize = 12.sp)
+                                }
+                            }
                         }
 
                         Spacer(Modifier.height(10.dp))
@@ -496,6 +529,7 @@ fun HomeScreen(
             cartTotal = cartTotal,
             cartItems = cartItems,
             viewModel = viewModel,
+            currencySymbol = currencySymbol,
             onDismiss = { showPaymentDialog = false }
         )
     }
@@ -549,6 +583,19 @@ fun HomeScreen(
                 showCartDecimalQtyDialog = false
                 cartDecimalQtyTarget = null
             }
+        )
+    }
+
+    // Discount Dialog
+    if (showDiscountDialog) {
+        DiscountDialog(
+            currentDiscount = cartDiscount,
+            currencySymbol = currencySymbol,
+            onConfirm = { amount ->
+                viewModel.setDiscount(amount)
+                showDiscountDialog = false
+            },
+            onDismiss = { showDiscountDialog = false }
         )
     }
 
@@ -667,7 +714,7 @@ fun PosSearchBar(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun QuickGridTile(item: InventoryEntity, onTapped: () -> Unit, onLongClick: () -> Unit = {}) {
+private fun QuickGridTile(item: InventoryEntity, currencySymbol: String = "Rs", onTapped: () -> Unit, onLongClick: () -> Unit = {}) {
     Column(
         modifier = Modifier
             .clip(RoundedCornerShape(10.dp))
@@ -690,7 +737,7 @@ private fun QuickGridTile(item: InventoryEntity, onTapped: () -> Unit, onLongCli
             overflow = TextOverflow.Ellipsis
         )
         Text(
-            text = "Rs ${item.price_per_unit.toInt()}/${item.unit}",
+            text = "$currencySymbol ${item.price_per_unit.toInt()}/${item.unit}",
             color = AccentBlueLight,
             fontSize = 10.sp,
             textAlign = TextAlign.Center
@@ -703,6 +750,7 @@ private fun QuickGridTile(item: InventoryEntity, onTapped: () -> Unit, onLongCli
 @Composable
 private fun CartRow(
     item: com.tillzo.pos.domain.model.CartItem,
+    currencySymbol: String = "Rs",
     onQtyDecrease: () -> Unit,
     onQtyIncrease: () -> Unit,
     onRemove: () -> Unit,
@@ -717,7 +765,7 @@ private fun CartRow(
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(item.name, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("Rs ${item.pricePerUnit.toInt()} / ${item.unit}", color = TextSecondary, fontSize = 11.sp)
+            Text("$currencySymbol ${item.pricePerUnit.toInt()} / ${item.unit}", color = TextSecondary, fontSize = 11.sp)
         }
         Spacer(Modifier.width(8.dp))
         // Qty Controls
@@ -736,7 +784,7 @@ private fun CartRow(
         }
         Spacer(Modifier.width(8.dp))
         Text(
-            "Rs %.0f".format(item.total),
+            "$currencySymbol %.0f".format(item.total),
             color = AccentBlueLight,
             fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold,
@@ -829,29 +877,144 @@ private fun AdminPinDialog(
     onVerified: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
+    val prefs = remember { AppSetupPrefs(context) }
+    val storedPin = remember { prefs.adminPasscode }
+
     var pinInput by remember { mutableStateOf("") }
     var showError by remember { mutableStateOf(false) }
+    var isRegistration by remember { mutableStateOf(storedPin.isEmpty()) }
+    var confirmPin by remember { mutableStateOf("") }
+    var showConfirmField by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = SurfaceDark,
-        title = { Text("Admin PIN Required", color = TextPrimary) },
+        title = {
+            Text(
+                if (isRegistration) "Set Admin PIN" else "Admin PIN Required",
+                color = TextPrimary
+            )
+        },
         text = {
             Column {
-                if (showError) {
-                    Text("Incorrect PIN", color = ErrorRed, fontSize = 12.sp)
+                if (isRegistration) {
+                    Text("No admin PIN is set. Please create a 4-digit PIN.", color = TextSecondary, fontSize = 13.sp)
                     Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = pinInput,
+                        onValueChange = {
+                            if (it.length <= 4) { pinInput = it; showError = false }
+                        },
+                        label = { Text("New 4-digit PIN", color = TextSecondary) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = AccentBlue
+                        )
+                    )
+                    if (showConfirmField) {
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = confirmPin,
+                            onValueChange = {
+                                if (it.length <= 4) { confirmPin = it; showError = false }
+                            },
+                            label = { Text("Confirm PIN", color = TextSecondary) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary,
+                                focusedBorderColor = AccentBlue
+                            )
+                        )
+                    }
+                    if (showError) {
+                        Text(if (pinInput != confirmPin) "PINs do not match" else "PIN must be 4 digits", color = ErrorRed, fontSize = 12.sp)
+                    }
+                } else {
+                    if (showError) {
+                        Text("Incorrect PIN", color = ErrorRed, fontSize = 12.sp)
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    OutlinedTextField(
+                        value = pinInput,
+                        onValueChange = {
+                            if (it.length <= 4) { pinInput = it; showError = false }
+                        },
+                        label = { Text("Enter 4-digit PIN", color = TextSecondary) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = AccentBlue
+                        )
+                    )
                 }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                if (isRegistration) {
+                    if (pinInput.length == 4 && !showConfirmField) {
+                        showConfirmField = true
+                    } else if (pinInput.length == 4 && pinInput == confirmPin) {
+                        prefs.adminPasscode = pinInput
+                        onVerified()
+                    } else {
+                        showError = true
+                    }
+                } else {
+                    if (pinInput == storedPin) {
+                        showError = false
+                        onVerified()
+                    } else {
+                        showError = true
+                    }
+                }
+            }) {
+                Text(
+                    if (isRegistration && !showConfirmField) "Next" else "Confirm",
+                    color = AccentBlue
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = TextSecondary)
+            }
+        }
+    )
+}
+
+// ── Discount Dialog ─────────────────────────────────────────────────────────
+
+@Composable
+private fun DiscountDialog(
+    currentDiscount: Double,
+    currencySymbol: String = "Rs",
+    onConfirm: (Double) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var input by remember { mutableStateOf(if (currentDiscount > 0) "%.2f".format(currentDiscount) else "") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SurfaceDark,
+        title = { Text(if (currentDiscount > 0) "Edit Discount" else "Apply Discount", color = TextPrimary) },
+        text = {
+            Column {
+                Text("Enter discount amount", color = TextSecondary, fontSize = 13.sp)
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
-                    value = pinInput,
-                    onValueChange = {
-                        if (it.length <= 4) {
-                            pinInput = it
-                            showError = false
-                        }
-                    },
-                    label = { Text("Enter 4-digit PIN", color = TextSecondary) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    value = input,
+                    onValueChange = { input = it },
+                    label = { Text("Amount ($currencySymbol)", color = TextSecondary) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = TextPrimary,
@@ -862,15 +1025,8 @@ private fun AdminPinDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                if (pinInput == "1234") {
-                    showError = false
-                    onVerified()
-                } else {
-                    showError = true
-                }
-            }) {
-                Text("Confirm", color = AccentBlue)
+            TextButton(onClick = { onConfirm(input.toDoubleOrNull() ?: 0.0) }) {
+                Text("Apply", color = AccentBlue)
             }
         },
         dismissButton = {

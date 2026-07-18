@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -53,6 +54,7 @@ import com.tillzo.pos.data.remote.PosSheetInfo
 fun SettingsScreen(
     onBack: () -> Unit,
     onNavigateToBilling: () -> Unit,
+    onNavigateToSystemLogs: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -303,6 +305,13 @@ fun SettingsScreen(
                 title = "Version",
                 subtitle = "Tillzo POS 1.0.0 (Build 1) - Protected by RootBeer",
                 onClick = { }
+            )
+
+            SettingsCard(
+                icon = Icons.Default.FilterList,
+                title = "System Logs",
+                subtitle = "View and export app logs (rolling 48-hour buffer)",
+                onClick = onNavigateToSystemLogs
             )
         }
     }

@@ -29,7 +29,10 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.tillzo.pos.data.local.entity.SaleEntity
+import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import com.tillzo.pos.ui.theme.*
+import com.tillzo.pos.utils.printer.EscPosPrinter
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -58,6 +61,11 @@ fun ReceiptScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var whatsappNumber by remember { mutableStateOf("") }
     var showWhatsappInput by remember { mutableStateOf(false) }
+
+    val appSetupPrefs = remember { AppSetupPrefs(context) }
+    val currencySymbol = appSetupPrefs.currencySymbol
+    val scope = rememberCoroutineScope()
+    val escPosPrinter = remember { EscPosPrinter() }
 
     val sale = (saleResult as? SaleResult.Success)?.sale
 
@@ -134,7 +142,7 @@ fun ReceiptScreen(
                             Text(item.name, color = TextPrimary, fontSize = 12.sp, modifier = Modifier.weight(1f), maxLines = 1)
                             val qtyStr = if (item.unit in listOf("KG", "GM", "ML")) "%.3f ${item.unit}".format(item.quantity) else "${item.quantity.toInt()} ${item.unit}"
                             Text(qtyStr, color = TextPrimary, fontSize = 12.sp, modifier = Modifier.width(60.dp), textAlign = TextAlign.Center)
-                            Text("Rs %.0f".format(item.total), color = TextPrimary, fontSize = 12.sp, modifier = Modifier.width(64.dp), textAlign = TextAlign.End)
+                            Text("$currencySymbol %.0f".format(item.total), color = TextPrimary, fontSize = 12.sp, modifier = Modifier.width(64.dp), textAlign = TextAlign.End)
                         }
                     }
 
@@ -142,25 +150,25 @@ fun ReceiptScreen(
 
                     // Totals
                     if (sale != null) {
-                        ReceiptInfoRow("Subtotal:", "Rs %.2f".format(sale.subtotal))
-                        if (sale.tax > 0) ReceiptInfoRow("Tax:", "Rs %.2f".format(sale.tax))
+                        ReceiptInfoRow("Subtotal:", "$currencySymbol %.2f".format(sale.subtotal))
+                        if (sale.tax > 0) ReceiptInfoRow("Tax:", "$currencySymbol %.2f".format(sale.tax))
                         if (sale.discount > 0) ReceiptInfoRow("Discount:", "- Rs %.2f".format(sale.discount))
                         ReceiptDivider()
                         Row(Modifier.fillMaxWidth()) {
                             Text("TOTAL:", color = TextPrimary, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, modifier = Modifier.weight(1f))
-                            Text("Rs %.2f".format(sale.total), color = AccentBlue, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+                            Text("$currencySymbol %.2f".format(sale.total), color = AccentBlue, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
                         }
                         Spacer(Modifier.height(6.dp))
 
                         // Payment breakdown
-                        if (sale.cash_amount > 0) ReceiptInfoRow("Cash Paid:", "Rs %.2f".format(sale.cash_amount))
-                        if (sale.card_amount > 0) ReceiptInfoRow("Card:", "Rs %.2f".format(sale.card_amount))
-                        if (sale.wallet_amount > 0) ReceiptInfoRow("Wallet:", "Rs %.2f".format(sale.wallet_amount))
-                        if (sale.udhaar_amount > 0) ReceiptInfoRow("Udhaar:", "Rs %.2f".format(sale.udhaar_amount))
+                        if (sale.cash_amount > 0) ReceiptInfoRow("Cash Paid:", "$currencySymbol %.2f".format(sale.cash_amount))
+                        if (sale.card_amount > 0) ReceiptInfoRow("Card:", "$currencySymbol %.2f".format(sale.card_amount))
+                        if (sale.wallet_amount > 0) ReceiptInfoRow("Wallet:", "$currencySymbol %.2f".format(sale.wallet_amount))
+                        if (sale.udhaar_amount > 0) ReceiptInfoRow("Udhaar:", "$currencySymbol %.2f".format(sale.udhaar_amount))
 
                         val cashChange = sale.cash_amount - sale.total
                         if (cashChange > 0) {
-                            ReceiptInfoRow("Change:", "Rs %.2f".format(cashChange), valueColor = SuccessGreen)
+                            ReceiptInfoRow("Change:", "$currencySymbol %.2f".format(cashChange), valueColor = SuccessGreen)
                         }
                     }
 
@@ -222,6 +230,7 @@ fun ReceiptScreen(
                         if (number.isBlank()) {
                             showWhatsappInput = true
                         } else {
+                            viewModel.logClick("UI_CLICK", "WhatsApp share receipt: $invoiceId")
                             sendWhatsApp(context, number, buildReceiptText(sale, invoiceId))
                         }
                     },
@@ -237,7 +246,10 @@ fun ReceiptScreen(
                 // Send if number was entered
                 if (showWhatsappInput && whatsappNumber.isNotBlank()) {
                     Button(
-                        onClick = { sendWhatsApp(context, whatsappNumber, buildReceiptText(sale, invoiceId)) },
+                        onClick = {
+                            viewModel.logClick("UI_CLICK", "WhatsApp send receipt: $invoiceId to $whatsappNumber")
+                            sendWhatsApp(context, whatsappNumber, buildReceiptText(sale, invoiceId))
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366)),
                         shape = RoundedCornerShape(12.dp)
@@ -247,8 +259,25 @@ fun ReceiptScreen(
                 // Print
                 OutlinedButton(
                     onClick = {
-                        // Delegates to existing BT printer module (M5)
-                        // For now show a snackbar (printer integration is in M5)
+                        viewModel.logClick("UI_CLICK", "Print receipt: $invoiceId")
+                        val mac = appSetupPrefs.printerMac
+                        if (mac.isBlank()) {
+                            scope.launch {
+                                snackbarHostState.showSnackbar(
+                                    "No printer configured. Set MAC in Printer Settings."
+                                )
+                            }
+                        } else {
+                            scope.launch {
+                                snackbarHostState.showSnackbar("Printing...")
+                                val receiptText = buildReceiptText(sale, invoiceId)
+                                val success = escPosPrinter.printViaBluetooth(mac, receiptText)
+                                snackbarHostState.showSnackbar(
+                                    if (success) "Receipt sent to printer"
+                                    else "Print failed. Check printer connection."
+                                )
+                            }
+                        }
                     },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)

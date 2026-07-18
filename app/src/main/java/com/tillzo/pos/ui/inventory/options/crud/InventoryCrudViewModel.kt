@@ -16,13 +16,14 @@ import com.tillzo.pos.data.local.entity.ProductUnitEntity
 import com.tillzo.pos.data.local.dao.ProductBatchDao
 import com.tillzo.pos.data.local.entity.ProductBatchEntity
 import com.tillzo.pos.data.local.dao.InventoryDao
+import com.tillzo.pos.data.local.prefs.AppSetupPrefs
+import com.tillzo.pos.data.local.prefs.BarcodePrefs
+import com.tillzo.pos.data.local.prefs.BarcodeGeneralConfig
+import com.tillzo.pos.data.local.prefs.BarcodeFieldConfig
 import dagger.hilt.android.lifecycle.HiltViewModel
 import android.content.Context
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
-import com.tillzo.pos.data.local.dao.BarcodeConfigDao
-import com.tillzo.pos.data.local.entity.BarcodeGeneralConfigEntity
-import com.tillzo.pos.data.local.entity.BarcodeFieldConfigEntity
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -47,174 +48,54 @@ class InventoryCrudViewModel @Inject constructor(
     private val productBatchDao: ProductBatchDao,
     private val inventoryDao: InventoryDao,
     @ApplicationContext private val context: Context,
-    private val barcodeConfigDao: BarcodeConfigDao
+    private val appSetupPrefs: AppSetupPrefs
 ) : ViewModel() {
 
     val productUnits: StateFlow<List<ProductUnitEntity>> = productUnitDao
         .getAllUnits()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-    val barcodeGeneralConfig: StateFlow<BarcodeGeneralConfigEntity?> = barcodeConfigDao.getGeneralConfigFlow()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    val barcodePrefs: BarcodePrefs = BarcodePrefs(context)
+    val barcodeGeneralConfig: StateFlow<BarcodeGeneralConfig> = barcodePrefs.generalConfigFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), BarcodeGeneralConfig())
 
-    val barcodeFieldsConfig: StateFlow<List<BarcodeFieldConfigEntity>> = barcodeConfigDao.getActiveFieldsFlow()
+    val barcodeFieldsConfig: StateFlow<List<BarcodeFieldConfig>> = barcodePrefs.fieldsConfigFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    init {
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            initializeBarcodeSettingsIfNeeded()
-        }
+    fun saveBarcodeGeneralConfig(config: BarcodeGeneralConfig) {
+        barcodePrefs.saveGeneralConfig(config)
     }
 
-    private suspend fun initializeBarcodeSettingsIfNeeded() {
-        val existingGeneral = barcodeConfigDao.getGeneralConfig()
-        if (existingGeneral == null) {
-            val sharedPrefs = context.getSharedPreferences("barcode_layout_prefs", android.content.Context.MODE_PRIVATE)
-            val hasPrefs = sharedPrefs.contains("company_name") || sharedPrefs.contains("offset_title_x")
-            
-            val generalConfig = if (hasPrefs) {
-                BarcodeGeneralConfigEntity(
-                    companyName = sharedPrefs.getString("company_name", "Tillzo POS") ?: "Tillzo POS",
-                    companyLogoPath = sharedPrefs.getString("company_logo_path", "") ?: "",
-                    usePrefix = sharedPrefs.getBoolean("use_prefix", true),
-                    customPrefix = sharedPrefs.getString("custom_prefix", "]d2") ?: "]d2",
-                    prefixPosition = sharedPrefs.getString("prefix_position", "0")?.toIntOrNull() ?: 0,
-                    customSuffix = sharedPrefs.getString("custom_suffix", "") ?: "",
-                    useSuffix = sharedPrefs.getBoolean("use_suffix", false),
-                    suffixPosition = sharedPrefs.getString("suffix_position", "0")?.toIntOrNull() ?: 0,
-                    useSeparator = sharedPrefs.getBoolean("use_separator", true),
-                    titleTextSize = sharedPrefs.getFloat("title_text_size", 6f),
-                    isTitleBold = sharedPrefs.getBoolean("is_title_bold", true),
-                    barcodeSize = sharedPrefs.getFloat("barcode_size", 48f),
-                    currencySymbol = sharedPrefs.getString("currency_symbol", "Rs") ?: "Rs",
-                    labelWidth = sharedPrefs.getString("label_width", "144")?.toIntOrNull() ?: 144,
-                    labelHeight = sharedPrefs.getString("label_height", "72")?.toIntOrNull() ?: 72,
-                    titleX = sharedPrefs.getFloat("offset_title_x", 4f),
-                    titleY = sharedPrefs.getFloat("offset_title_y", 16f),
-                    priceX = sharedPrefs.getFloat("offset_price_x", 4f),
-                    priceY = sharedPrefs.getFloat("offset_price_y", 24f),
-                    skuX = sharedPrefs.getFloat("offset_sku_x", 4f),
-                    skuY = sharedPrefs.getFloat("offset_sku_y", 32f),
-                    gtinX = sharedPrefs.getFloat("offset_gtin_x", 4f),
-                    gtinY = sharedPrefs.getFloat("offset_gtin_y", 40f),
-                    lotX = sharedPrefs.getFloat("offset_lot_x", 4f),
-                    lotY = sharedPrefs.getFloat("offset_lot_y", 48f),
-                    expX = sharedPrefs.getFloat("offset_exp_x", 4f),
-                    expY = sharedPrefs.getFloat("offset_exp_y", 56f),
-                    snX = sharedPrefs.getFloat("offset_sn_x", 4f),
-                    snY = sharedPrefs.getFloat("offset_sn_y", 66f),
-                    barcodeX = sharedPrefs.getFloat("offset_barcode_x_pos", 92f),
-                    barcodeY = sharedPrefs.getFloat("offset_barcode_y", 12f),
-                    companyNameSize = sharedPrefs.getFloat("company_name_size", 5f),
-                    companyLogoSize = sharedPrefs.getFloat("company_logo_size", 8f),
-                    companyNameX = sharedPrefs.getFloat("offset_company_name_x", 16f),
-                    companyNameY = sharedPrefs.getFloat("offset_company_name_y", 8f),
-                    companyLogoX = sharedPrefs.getFloat("offset_company_logo_x", 4f),
-                    companyLogoY = sharedPrefs.getFloat("offset_company_logo_y", 4f),
-                    showCompanyName = sharedPrefs.getBoolean("show_company_name", true),
-                    showCompanyLogo = sharedPrefs.getBoolean("show_company_logo", true)
-                )
-            } else {
-                BarcodeGeneralConfigEntity()
-            }
-            barcodeConfigDao.insertGeneralConfig(generalConfig)
-        }
-
-        val existingFields = barcodeConfigDao.getAllFields()
-        if (existingFields.isEmpty()) {
-            val defaultFields = listOf(
-                BarcodeFieldConfigEntity(fieldId = "GTIN", fieldName = "GTIN", aiCode = "01", isEnabled = true, sequenceOrder = 0, useFnc1Separator = false),
-                BarcodeFieldConfigEntity(fieldId = "EXPIRY", fieldName = "Expiry Date", aiCode = "17", isEnabled = true, sequenceOrder = 1, useFnc1Separator = false),
-                BarcodeFieldConfigEntity(fieldId = "BATCH", fieldName = "Batch/Lot Number", aiCode = "10", isEnabled = true, sequenceOrder = 2, useFnc1Separator = true),
-                BarcodeFieldConfigEntity(fieldId = "SN", fieldName = "Serial Number", aiCode = "21", isEnabled = true, sequenceOrder = 3, useFnc1Separator = false),
-                BarcodeFieldConfigEntity(fieldId = "SKU", fieldName = "SKU Number", aiCode = "240", isEnabled = false, sequenceOrder = 4, useFnc1Separator = false)
-            )
-            barcodeConfigDao.insertFields(defaultFields)
-        }
-    }
-
-    fun saveBarcodeGeneralConfig(config: BarcodeGeneralConfigEntity) {
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val updated = config.copy(
-                sync_status = "pending",
-                updated_at = System.currentTimeMillis()
-            )
-            barcodeConfigDao.insertGeneralConfig(updated)
-        }
-    }
-
-    fun updateBarcodeField(field: BarcodeFieldConfigEntity) {
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val updated = field.copy(
-                sync_status = "pending",
-                updated_at = System.currentTimeMillis()
-            )
-            barcodeConfigDao.updateField(updated)
-        }
+    fun updateBarcodeField(field: BarcodeFieldConfig) {
+        barcodePrefs.updateField(field)
     }
 
     fun addCustomBarcodeField(fieldName: String, aiCode: String, useFnc1: Boolean, defaultValue: String) {
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val existing = barcodeConfigDao.getAllFields()
-            val maxOrder = existing.maxOfOrNull { it.sequenceOrder } ?: -1
-            val newField = BarcodeFieldConfigEntity(
-                fieldId = java.util.UUID.randomUUID().toString(),
-                fieldName = fieldName,
-                aiCode = aiCode,
-                isEnabled = true,
-                sequenceOrder = maxOrder + 1,
-                useFnc1Separator = useFnc1,
-                customValue = defaultValue,
-                sync_status = "pending",
-                updated_at = System.currentTimeMillis()
-            )
-            barcodeConfigDao.insertField(newField)
-        }
+        val fields = barcodePrefs.getFieldsConfig()
+        val maxOrder = fields.maxOfOrNull { it.sequenceOrder } ?: -1
+        val newField = BarcodeFieldConfig(
+            fieldId = java.util.UUID.randomUUID().toString(),
+            fieldName = fieldName,
+            aiCode = aiCode,
+            isEnabled = true,
+            sequenceOrder = maxOrder + 1,
+            useFnc1Separator = useFnc1,
+            customValue = defaultValue
+        )
+        barcodePrefs.addField(newField)
     }
 
-    fun deleteBarcodeField(field: BarcodeFieldConfigEntity) {
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            if (field.fieldId in listOf("GTIN", "EXPIRY", "BATCH", "SN", "SKU")) return@launch
-            val deleted = field.copy(
-                is_deleted = true,
-                deleted_at = System.currentTimeMillis(),
-                sync_status = "pending",
-                updated_at = System.currentTimeMillis()
-            )
-            barcodeConfigDao.updateField(deleted)
-        }
+    fun deleteBarcodeField(field: BarcodeFieldConfig) {
+        if (field.fieldId in listOf("GTIN", "EXPIRY", "BATCH", "SN", "SKU")) return
+        barcodePrefs.deleteField(field.fieldId)
     }
 
-    fun moveFieldUp(field: BarcodeFieldConfigEntity) {
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val fields = barcodeConfigDao.getActiveFields().toMutableList()
-            val index = fields.indexOfFirst { it.fieldId == field.fieldId }
-            if (index > 0) {
-                val current = fields[index]
-                val previous = fields[index - 1]
-                
-                fields[index] = current.copy(sequenceOrder = previous.sequenceOrder, sync_status = "pending", updated_at = System.currentTimeMillis())
-                fields[index - 1] = previous.copy(sequenceOrder = current.sequenceOrder, sync_status = "pending", updated_at = System.currentTimeMillis())
-                
-                barcodeConfigDao.insertFields(fields)
-            }
-        }
+    fun moveFieldUp(field: BarcodeFieldConfig) {
+        barcodePrefs.moveFieldUp(field.fieldId)
     }
 
-    fun moveFieldDown(field: BarcodeFieldConfigEntity) {
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val fields = barcodeConfigDao.getActiveFields().toMutableList()
-            val index = fields.indexOfFirst { it.fieldId == field.fieldId }
-            if (index >= 0 && index < fields.size - 1) {
-                val current = fields[index]
-                val next = fields[index + 1]
-                
-                fields[index] = current.copy(sequenceOrder = next.sequenceOrder, sync_status = "pending", updated_at = System.currentTimeMillis())
-                fields[index + 1] = next.copy(sequenceOrder = current.sequenceOrder, sync_status = "pending", updated_at = System.currentTimeMillis())
-                
-                barcodeConfigDao.insertFields(fields)
-            }
-        }
+    fun moveFieldDown(field: BarcodeFieldConfig) {
+        barcodePrefs.moveFieldDown(field.fieldId)
     }
 
     // CATEGORY MANAGEMENT

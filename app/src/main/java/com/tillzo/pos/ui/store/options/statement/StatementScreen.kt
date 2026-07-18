@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import java.text.SimpleDateFormat
@@ -29,6 +30,7 @@ fun StatementScreen(
     viewModel: StatementViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
+    val currencySymbol = remember { AppSetupPrefs(context).currencySymbol }
     val customer by viewModel.customer.collectAsState()
     val events by viewModel.events.collectAsState()
     val baqaya by viewModel.baqaya.collectAsState()
@@ -127,7 +129,7 @@ fun StatementScreen(
                                 }
                             }
                             Text(
-                                "Rs ${Math.abs(event.amount)}", 
+                                "$currencySymbol ${Math.abs(event.amount)}", 
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )

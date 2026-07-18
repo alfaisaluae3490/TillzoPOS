@@ -45,7 +45,7 @@ class CategoryUpsertUseCase @Inject constructor(
             }
 
             // 1. Fetch current remote categories to build id → row index map
-            val remoteRows = dataSource.readRange("$TABLE_NAME!A:Z")
+            val remoteRows = dataSource.readRange("$TABLE_NAME!A:ZZ")
             val idToRowMap = mutableMapOf<String, Int>()
             if (remoteRows.isNotEmpty()) {
                 val headers = remoteRows[0]

@@ -1,5 +1,7 @@
 package com.tillzo.pos.domain.usecase.inventory
 
+import com.tillzo.pos.data.local.dao.ProductBatchDao
+import com.tillzo.pos.data.local.entity.ProductBatchEntity
 import com.tillzo.pos.data.local.entity.StockAdjustmentEntity
 import com.tillzo.pos.domain.repository.InventoryRepository
 import com.tillzo.pos.domain.repository.StockAdjustmentRepository
@@ -7,7 +9,8 @@ import javax.inject.Inject
 
 class ManualStockAdjustmentUseCase @Inject constructor(
     private val inventoryRepository: InventoryRepository,
-    private val stockAdjustmentRepository: StockAdjustmentRepository
+    private val stockAdjustmentRepository: StockAdjustmentRepository,
+    private val productBatchDao: ProductBatchDao
 ) {
     suspend operator fun invoke(
         systemRowId: String,
@@ -17,14 +20,24 @@ class ManualStockAdjustmentUseCase @Inject constructor(
     ) {
         val product = inventoryRepository.getItemById(systemRowId) ?: return
 
-        val newStock = product.current_stock + quantityChange
-        val updatedProduct = product.copy(
-            current_stock = newStock,
-            updated_at = System.currentTimeMillis(),
-            sync_status = "pending"
-        )
+        val now = System.currentTimeMillis()
+        val existingBatch = productBatchDao.getNewestActiveBatch(systemRowId)
 
-        inventoryRepository.updateItem(updatedProduct)
+        if (existingBatch != null) {
+            val newQty = existingBatch.stockQty + quantityChange
+            productBatchDao.updateBatchStock(existingBatch.batchId, newQty, now)
+        } else {
+            val newBatch = ProductBatchEntity(
+                productId = systemRowId,
+                batchNumber = "ADJ-BATCH",
+                stockQty = quantityChange,
+                createdAt = now,
+                updatedAt = now
+            )
+            productBatchDao.insertBatch(newBatch)
+        }
+
+        inventoryRepository.recalculateTotalStock(systemRowId)
 
         val adjustment = StockAdjustmentEntity(
             productId = systemRowId,

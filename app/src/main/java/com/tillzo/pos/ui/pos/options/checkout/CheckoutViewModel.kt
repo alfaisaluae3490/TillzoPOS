@@ -6,6 +6,7 @@ import com.tillzo.pos.domain.model.CartItem
 import com.tillzo.pos.domain.model.PaymentDetails
 import com.tillzo.pos.domain.model.Sale
 import com.tillzo.pos.domain.repository.SaleRepository
+import com.tillzo.pos.utils.AppLogger
 import com.tillzo.pos.utils.ReceiptGenerator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,7 +22,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 @HiltViewModel
 class CheckoutViewModel @Inject constructor(
     private val saleRepository: SaleRepository,
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val appLogger: AppLogger
 ) : ViewModel() {
 
     private val _totalDue = MutableStateFlow(0.0)
@@ -66,7 +68,10 @@ class CheckoutViewModel @Inject constructor(
         val udhaar = _udhaarInput.value.toDoubleOrNull() ?: 0.0
 
         val totalPaid = cash + card + wallet + udhaar
-        if (totalPaid < _totalDue.value) return // Basic validation
+        if (totalPaid < _totalDue.value) {
+            appLogger.logWarn("UI_CLICK", "Checkout failed: total paid ($totalPaid) < due (${_totalDue.value})")
+            return // Basic validation
+        }
 
         val paymentMethod = if (cash > 0 && card == 0.0 && wallet == 0.0 && udhaar == 0.0) "Cash" else "Split"
 
@@ -80,16 +85,19 @@ class CheckoutViewModel @Inject constructor(
             paymentSplit = PaymentDetails(cash, card, wallet, udhaar)
         )
 
+        appLogger.logInfo("UI_CLICK", "Checkout complete: method=$paymentMethod, total=${_totalDue.value}, print=$printEnabled, whatsapp=${whatsappNumber.isNotBlank()}")
+
         viewModelScope.launch {
             saleRepository.processCheckout(sale)
             
             // M4.7 Hardware Print Toggle (Mock triggering ESC/POS command here)
             if (printEnabled) {
-                println("ESC/POS: Printing Receipt for ${sale.invoiceId}")
+                appLogger.logInfo("UI_CLICK", "Print receipt triggered for ${sale.invoiceId}")
             }
             
             // M4.8 WhatsApp Receipt Intent
             if (whatsappNumber.isNotBlank()) {
+                appLogger.logInfo("UI_CLICK", "WhatsApp receipt sent to $whatsappNumber")
                 ReceiptGenerator.sendWhatsAppReceipt(context, whatsappNumber, sale)
             }
             

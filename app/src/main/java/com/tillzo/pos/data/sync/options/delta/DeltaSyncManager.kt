@@ -106,8 +106,20 @@ class DeltaSyncManager @Inject constructor(
         val settings = syncInterface.getSettings()
         val remoteTimestamp = settings.lastUpdatedTimestamp
 
-        if (localTimestamp > 0L && remoteTimestamp == 0L) {
-            Log.d(TAG, "Remote timestamp=0 — Settings tab not yet populated. Skipping.")
+        if (remoteTimestamp == 0L) {
+            if (localTimestamp > 0L) {
+                Log.d(TAG, "Remote timestamp=0 — Settings tab not yet populated. Skipping.")
+                return
+            }
+            // First run with zero remote — set cursor to 0 so subsequent polls detect changes
+            Log.d(TAG, "First run with remote=0 — saving cursor and allowing subsequent checks")
+            appDatabase.syncLogDao().upsertSyncLog(
+                SyncLogEntity(
+                    table_name     = DELTA_CURSOR_KEY,
+                    lastSyncedAt   = 0L,
+                    lastSyncStatus = "synced"
+                )
+            )
             return
         }
 
@@ -295,50 +307,7 @@ class DeltaSyncManager @Inject constructor(
                                 email = row["email"] as? String ?: "",
                                 address = row["address"] as? String ?: "",
                                 city = row["city"] as? String ?: "",
-                                province = row["province"] as? String ?: "",
-                                country = row["country"] as? String ?: "",
-                                billingAddress = row["billing_address"] as? String ?: row["billingAddress"] as? String ?: "",
-                                ownerName = row["owner_name"] as? String ?: row["ownerName"] as? String ?: "",
-                                bankAccountTitle = row["bank_account_title"] as? String ?: row["bankAccountTitle"] as? String ?: "",
-                                bankName = row["bank_name"] as? String ?: row["bankName"] as? String ?: "",
-                                bankAccountNumber = row["bank_account_number"] as? String ?: row["bankAccountNumber"] as? String ?: "",
-                                bankIban = row["bank_iban"] as? String ?: row["bankIban"] as? String ?: "",
-                                bankSwiftCode = row["bank_swift_code"] as? String ?: row["bankSwiftCode"] as? String ?: "",
-                                bankBranch = row["bank_branch"] as? String ?: row["bankBranch"] as? String ?: "",
-                                paymentTerms = row["payment_terms"] as? String ?: row["paymentTerms"] as? String ?: "",
-                                preferredCurrency = row["preferred_currency"] as? String ?: row["preferredCurrency"] as? String ?: "",
                                 creditLimit = (row["credit_limit"] as? String)?.toDoubleOrNull() ?: (row["creditLimit"] as? String)?.toDoubleOrNull() ?: 0.0,
-                                registrationNumber = row["registration_number"] as? String ?: row["registrationNumber"] as? String ?: "",
-                                ntnNumber = row["ntn_number"] as? String ?: row["ntnNumber"] as? String ?: "",
-                                cnicNumber = row["cnic_number"] as? String ?: row["cnicNumber"] as? String ?: "",
-                                trnNumber = row["trn_number"] as? String ?: row["trnNumber"] as? String ?: "",
-                                tradeLicenseNumber = row["trade_license_number"] as? String ?: row["tradeLicenseNumber"] as? String ?: "",
-                                tradeLicenseExpiryDate = row["trade_license_expiry_date"] as? String ?: row["tradeLicenseExpiryDate"] as? String ?: "",
-                                primaryManagerName = row["primary_manager_name"] as? String ?: row["primaryManagerName"] as? String ?: "",
-                                primaryManagerPhone = row["primary_manager_phone"] as? String ?: row["primaryManagerPhone"] as? String ?: "",
-                                primaryManagerEmail = row["primary_manager_email"] as? String ?: row["primaryManagerEmail"] as? String ?: "",
-                                techSupportName = row["tech_support_name"] as? String ?: row["techSupportName"] as? String ?: "",
-                                techSupportPhone = row["tech_support_phone"] as? String ?: row["techSupportPhone"] as? String ?: "",
-                                techSupportEmail = row["tech_support_email"] as? String ?: row["techSupportEmail"] as? String ?: "",
-                                billingContactName = row["billing_contact_name"] as? String ?: row["billingContactName"] as? String ?: "",
-                                billingContactPhone = row["billing_contact_phone"] as? String ?: row["billingContactPhone"] as? String ?: "",
-                                billingContactEmail = row["billing_contact_email"] as? String ?: row["billingContactEmail"] as? String ?: "",
-                                escalationL1Name = row["escalation_l1_name"] as? String ?: row["escalationL1Name"] as? String ?: "",
-                                escalationL1Phone = row["escalation_l1_phone"] as? String ?: row["escalationL1Phone"] as? String ?: "",
-                                escalationL1Email = row["escalation_l1_email"] as? String ?: row["escalationL1Email"] as? String ?: "",
-                                escalationL2Name = row["escalation_l2_name"] as? String ?: row["escalationL2Name"] as? String ?: "",
-                                escalationL2Phone = row["escalation_l2_phone"] as? String ?: row["escalationL2Phone"] as? String ?: "",
-                                escalationL2Email = row["escalation_l2_email"] as? String ?: row["escalationL2Email"] as? String ?: "",
-                                escalationL3Name = row["escalation_l3_name"] as? String ?: row["escalationL3Name"] as? String ?: "",
-                                escalationL3Phone = row["escalation_l3_phone"] as? String ?: row["escalationL3Phone"] as? String ?: "",
-                                escalationL3Email = row["escalation_l3_email"] as? String ?: row["escalationL3Email"] as? String ?: "",
-                                contractStartDate = row["contract_start_date"] as? String ?: row["contractStartDate"] as? String ?: "",
-                                contractExpiryDate = row["contract_expiry_date"] as? String ?: row["contractExpiryDate"] as? String ?: "",
-                                slaResponseTimes = row["sla_response_times"] as? String ?: row["slaResponseTimes"] as? String ?: "",
-                                warrantyTerms = row["warranty_terms"] as? String ?: row["warrantyTerms"] as? String ?: "",
-                                complianceCertificates = row["compliance_certificates"] as? String ?: row["complianceCertificates"] as? String ?: "",
-                                contractFileId = row["contract_file_id"] as? String ?: row["contractFileId"] as? String ?: "",
-                                contractFileUrl = row["contract_file_url"] as? String ?: row["contractFileUrl"] as? String ?: "",
                                 isDeleted = (row["is_deleted"] as? String)?.toIntOrNull() == 1 || (row["isDeleted"] as? String)?.toIntOrNull() == 1 || (row["isDeleted"] as? String)?.toBoolean() ?: false,
                                 syncStatus = "synced",
                                 createdAt = (row["created_at"] as? String)?.toLongOrNull() ?: (row["createdAt"] as? String)?.toLongOrNull() ?: System.currentTimeMillis(),
@@ -400,79 +369,8 @@ class DeltaSyncManager @Inject constructor(
                         }
                         sales.forEach { appDatabase.saleDao().insertSale(it) }
                     }
-                    tabName == "BarcodeGeneralConfigs" -> {
-                        val configs = tabRows.map { row ->
-                            com.tillzo.pos.data.local.entity.BarcodeGeneralConfigEntity(
-                                system_row_id = row["system_row_id"] as? String ?: java.util.UUID.randomUUID().toString(),
-                                sync_status = "synced",
-                                created_at = (row["created_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis(),
-                                updated_at = (row["updated_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis(),
-                                pos_terminal_id = row["pos_terminal_id"] as? String ?: "terminal_1",
-                                is_deleted = (row["is_deleted"] as? String)?.toIntOrNull() == 1 || (row["is_deleted"] as? String)?.toBoolean() ?: false,
-                                deleted_at = (row["deleted_at"] as? String)?.toLongOrNull(),
-                                labelWidth = (row["labelWidth"] as? String)?.toIntOrNull() ?: 144,
-                                labelHeight = (row["labelHeight"] as? String)?.toIntOrNull() ?: 72,
-                                titleTextSize = (row["titleTextSize"] as? String)?.toFloatOrNull() ?: 6f,
-                                isTitleBold = (row["isTitleBold"] as? String)?.toIntOrNull() == 1 || (row["isTitleBold"] as? String)?.toBoolean() ?: true,
-                                barcodeSize = (row["barcodeSize"] as? String)?.toFloatOrNull() ?: 48f,
-                                currencySymbol = row["currencySymbol"] as? String ?: "PKR",
-                                companyName = row["companyName"] as? String ?: "Tillzo POS",
-                                companyLogoPath = row["companyLogoPath"] as? String ?: "",
-                                showCompanyName = (row["showCompanyName"] as? String)?.toIntOrNull() == 1 || (row["showCompanyName"] as? String)?.toBoolean() ?: true,
-                                showCompanyLogo = (row["showCompanyLogo"] as? String)?.toIntOrNull() == 1 || (row["showCompanyLogo"] as? String)?.toBoolean() ?: true,
-                                titleX = (row["titleX"] as? String)?.toFloatOrNull() ?: 4f,
-                                titleY = (row["titleY"] as? String)?.toFloatOrNull() ?: 16f,
-                                priceX = (row["priceX"] as? String)?.toFloatOrNull() ?: 4f,
-                                priceY = (row["priceY"] as? String)?.toFloatOrNull() ?: 24f,
-                                skuX = (row["skuX"] as? String)?.toFloatOrNull() ?: 4f,
-                                skuY = (row["skuY"] as? String)?.toFloatOrNull() ?: 32f,
-                                gtinX = (row["gtinX"] as? String)?.toFloatOrNull() ?: 4f,
-                                gtinY = (row["gtinY"] as? String)?.toFloatOrNull() ?: 40f,
-                                lotX = (row["lotX"] as? String)?.toFloatOrNull() ?: 4f,
-                                lotY = (row["lotY"] as? String)?.toFloatOrNull() ?: 48f,
-                                expX = (row["expX"] as? String)?.toFloatOrNull() ?: 4f,
-                                expY = (row["expY"] as? String)?.toFloatOrNull() ?: 56f,
-                                snX = (row["snX"] as? String)?.toFloatOrNull() ?: 4f,
-                                snY = (row["snY"] as? String)?.toFloatOrNull() ?: 66f,
-                                barcodeX = (row["barcodeX"] as? String)?.toFloatOrNull() ?: 92f,
-                                barcodeY = (row["barcodeY"] as? String)?.toFloatOrNull() ?: 12f,
-                                companyNameSize = (row["companyNameSize"] as? String)?.toFloatOrNull() ?: 5f,
-                                companyLogoSize = (row["companyLogoSize"] as? String)?.toFloatOrNull() ?: 8f,
-                                companyNameX = (row["companyNameX"] as? String)?.toFloatOrNull() ?: 16f,
-                                companyNameY = (row["companyNameY"] as? String)?.toFloatOrNull() ?: 8f,
-                                companyLogoX = (row["companyLogoX"] as? String)?.toFloatOrNull() ?: 4f,
-                                companyLogoY = (row["companyLogoY"] as? String)?.toFloatOrNull() ?: 4f,
-                                usePrefix = (row["usePrefix"] as? String)?.toIntOrNull() == 1 || (row["usePrefix"] as? String)?.toBoolean() ?: true,
-                                customPrefix = row["customPrefix"] as? String ?: "]d2",
-                                prefixPosition = (row["prefixPosition"] as? String)?.toIntOrNull() ?: 0,
-                                useSuffix = (row["useSuffix"] as? String)?.toIntOrNull() == 1 || (row["useSuffix"] as? String)?.toBoolean() ?: false,
-                                customSuffix = row["customSuffix"] as? String ?: "",
-                                suffixPosition = (row["suffixPosition"] as? String)?.toIntOrNull() ?: 0,
-                                useSeparator = (row["useSeparator"] as? String)?.toIntOrNull() == 1 || (row["useSeparator"] as? String)?.toBoolean() ?: true
-                            )
-                        }
-                        configs.firstOrNull()?.let { appDatabase.barcodeConfigDao().insertGeneralConfig(it) }
-                    }
-                    tabName == "BarcodeFieldConfigs" -> {
-                        val fields = tabRows.map { row ->
-                            com.tillzo.pos.data.local.entity.BarcodeFieldConfigEntity(
-                                system_row_id = row["system_row_id"] as? String ?: java.util.UUID.randomUUID().toString(),
-                                sync_status = "synced",
-                                created_at = (row["created_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis(),
-                                updated_at = (row["updated_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis(),
-                                pos_terminal_id = row["pos_terminal_id"] as? String ?: "terminal_1",
-                                is_deleted = (row["is_deleted"] as? String)?.toIntOrNull() == 1 || (row["is_deleted"] as? String)?.toBoolean() ?: false,
-                                deleted_at = (row["deleted_at"] as? String)?.toLongOrNull(),
-                                fieldId = row["fieldId"] as? String ?: "",
-                                fieldName = row["fieldName"] as? String ?: "",
-                                aiCode = row["aiCode"] as? String ?: "",
-                                isEnabled = (row["isEnabled"] as? String)?.toIntOrNull() == 1 || (row["isEnabled"] as? String)?.toBoolean() ?: true,
-                                sequenceOrder = (row["sequenceOrder"] as? String)?.toIntOrNull() ?: 0,
-                                useFnc1Separator = (row["useFnc1Separator"] as? String)?.toIntOrNull() == 1 || (row["useFnc1Separator"] as? String)?.toBoolean() ?: false,
-                                customValue = row["customValue"] as? String ?: ""
-                            )
-                        }
-                        appDatabase.barcodeConfigDao().insertFields(fields)
+                    tabName == "BarcodeGeneralConfigs" || tabName == "BarcodeFieldConfigs" -> {
+                        // Barcode config migrated to SharedPreferences — skip delta sync
                     }
                     tabName == "Users_Permissions" -> {
                         val users = tabRows.map { row ->

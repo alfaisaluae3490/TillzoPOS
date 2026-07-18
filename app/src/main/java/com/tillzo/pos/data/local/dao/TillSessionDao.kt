@@ -49,6 +49,26 @@ interface TillSessionDao {
 
     @Query("""
         UPDATE till_sessions
+        SET status = 'RECONCILED',
+            closingCash = :physicalCashCount,
+            netCash = :physicalCashCount - expectedCash,
+            closedAt = :closedAt,
+            syncStatus = 'pending',
+            updatedAt = :now
+        WHERE sessionId = :sessionId AND status = 'OPEN'
+    """)
+    suspend fun reconcileSession(
+        sessionId: String,
+        physicalCashCount: Double,
+        closedAt: Long,
+        now: Long = System.currentTimeMillis()
+    )
+
+    @Query("SELECT COUNT(*) FROM till_sessions WHERE syncStatus = 'pending'")
+    suspend fun getPendingSyncCount(): Int
+
+    @Query("""
+        UPDATE till_sessions
         SET totalCashSales = totalCashSales + :cashIn,
             totalCardSales = totalCardSales + :cardIn,
             totalWalletSales = totalWalletSales + :walletIn,

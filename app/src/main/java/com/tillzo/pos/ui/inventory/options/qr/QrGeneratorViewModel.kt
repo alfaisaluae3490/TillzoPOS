@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
+import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import com.tillzo.pos.utils.printer.TsplPrinter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -18,7 +19,8 @@ import javax.inject.Inject
 
 @HiltViewModel
 class QrGeneratorViewModel @Inject constructor(
-    private val tsplPrinter: TsplPrinter
+    private val tsplPrinter: TsplPrinter,
+    private val appSetupPrefs: AppSetupPrefs
 ) : ViewModel() {
 
     private val _qrBitmap = MutableStateFlow<Bitmap?>(null)
@@ -57,9 +59,7 @@ class QrGeneratorViewModel @Inject constructor(
         viewModelScope.launch {
             _printStatus.value = "Printing..."
             try {
-                // Assume MAC is set in preferences, or use a default test MAC
-                // In production, fetch this from AppSetupPrefs
-                val printerMac = "00:00:00:00:00:00" 
+                val printerMac = appSetupPrefs.printerMac
 
                 val success = tsplPrinter.printBarcodeLabel(printerMac, "Item ID:", barcodeId)
                 if (success) {

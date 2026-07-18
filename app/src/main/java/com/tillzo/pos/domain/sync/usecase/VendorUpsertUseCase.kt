@@ -42,7 +42,7 @@ class VendorUpsertUseCase @Inject constructor(
             }
 
             // 1. Fetch remote vendor rows and build vendor_id → row index map
-            val remoteRows = dataSource.readRange("$TABLE_NAME!A:Z")
+            val remoteRows = dataSource.readRange("$TABLE_NAME!A:ZZ")
             val idToRowMap = mutableMapOf<String, Int>()
             if (remoteRows.isNotEmpty()) {
                 val headers = remoteRows[0]
@@ -67,7 +67,7 @@ class VendorUpsertUseCase @Inject constructor(
                 if (idToRowMap.containsKey(vendor.vendorId)) {
                     val rowIndex = idToRowMap[vendor.vendorId]!!
                     itemsToUpdate.add(mapOf(
-                        "range" to "$TABLE_NAME!A$rowIndex:BD$rowIndex",
+                        "range" to "$TABLE_NAME!A$rowIndex:M$rowIndex",
                         "majorDimension" to "ROWS",
                         "values" to listOf(values)
                     ))
@@ -92,11 +92,11 @@ class VendorUpsertUseCase @Inject constructor(
             if (itemsToAppend.isNotEmpty()) {
                 val newRows = itemsToAppend.map { it.toSheetRowValues() }
                 val result = sheetsRepository.uploadBatch(TABLE_NAME, newRows)
-                if (result != null) {
+                if (result is com.tillzo.pos.domain.sync.SyncResult.Success) {
                     vendorDao.markMultipleSynced(itemsToAppend.map { it.vendorId })
                     Log.d(TAG, "Appended ${itemsToAppend.size} new vendors")
                 } else {
-                    Log.w(TAG, "Failed to append new vendors")
+                    Log.w(TAG, "Failed to append new vendors: $result")
                     anyFailure = true
                 }
             }
@@ -143,20 +143,7 @@ class VendorUpsertUseCase @Inject constructor(
      */
     private fun VendorEntity.toSheetRowValues(): List<Any> = listOf(
         vendorId, name, phone, whatsapp, email, address,
-        city, province, country, billingAddress, ownerName,
-        bankAccountTitle, bankName, bankAccountNumber, bankIban,
-        bankSwiftCode, bankBranch, paymentTerms, preferredCurrency,
-        creditLimit, registrationNumber, ntnNumber, cnicNumber,
-        trnNumber, tradeLicenseNumber, tradeLicenseExpiryDate,
-        primaryManagerName, primaryManagerPhone, primaryManagerEmail,
-        techSupportName, techSupportPhone, techSupportEmail,
-        billingContactName, billingContactPhone, billingContactEmail,
-        escalationL1Name, escalationL1Phone, escalationL1Email,
-        escalationL2Name, escalationL2Phone, escalationL2Email,
-        escalationL3Name, escalationL3Phone, escalationL3Email,
-        contractStartDate, contractExpiryDate, slaResponseTimes,
-        warrantyTerms, complianceCertificates, contractFileId,
-        contractFileUrl,
+        city, creditLimit,
         if (isActive) 1 else 0,
         if (isDeleted) 1 else 0, "synced", createdAt, updatedAt
     )

@@ -40,6 +40,8 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.compose.ui.platform.LocalContext
+import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import com.tillzo.pos.ui.inventory.options.alerts.LowStockViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -61,6 +63,10 @@ fun InventoryCrudScreen(
     val lowCount by alertViewModel.lowStockCount.collectAsState()
     val outCount by alertViewModel.outOfStockCount.collectAsState()
     val expiringCount by alertViewModel.expiringCount.collectAsState()
+
+    val context = LocalContext.current
+    val prefs = remember { AppSetupPrefs(context) }
+    val currencySymbol = prefs.currencySymbol
 
     var showFormDialog by remember { mutableStateOf(false) }
     var selectedItemForBatches by remember { mutableStateOf<InventoryEntity?>(null) }
@@ -208,6 +214,7 @@ fun InventoryCrudScreen(
                 items(items, key = { it.system_row_id }) { item ->
                     InventoryItemCard(
                         item = item,
+                        currencySymbol = currencySymbol,
                         onClick = {
                             viewModel.selectItem(item)
                             showFormDialog = true
@@ -278,6 +285,7 @@ fun InventoryCrudScreen(
 @Composable
 fun InventoryItemCard(
     item: InventoryEntity,
+    currencySymbol: String = "Rs",
     onClick: () -> Unit,
     onDelete: () -> Unit,
     onPrintQr: () -> Unit,
@@ -318,7 +326,7 @@ fun InventoryItemCard(
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Badge(containerColor = MaterialTheme.colorScheme.secondaryContainer) {
-                        Text("Rs ${item.price_per_unit} / ${item.unit}", color = MaterialTheme.colorScheme.onSecondaryContainer)
+                        Text("$currencySymbol ${item.price_per_unit} / ${item.unit}", color = MaterialTheme.colorScheme.onSecondaryContainer)
                     }
                     Badge(containerColor = MaterialTheme.colorScheme.tertiaryContainer) {
                         Text("Stock: ${item.current_stock}", color = MaterialTheme.colorScheme.onTertiaryContainer)

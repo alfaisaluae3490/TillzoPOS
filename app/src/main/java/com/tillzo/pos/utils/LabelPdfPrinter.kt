@@ -9,7 +9,7 @@ import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import java.io.File
 import java.io.FileOutputStream
-import com.tillzo.pos.data.local.entity.BarcodeFieldConfigEntity
+import com.tillzo.pos.data.local.prefs.BarcodeFieldConfig
 
 object LabelPdfPrinter {
 
@@ -65,7 +65,7 @@ object LabelPdfPrinter {
         companyLogoY: Float = 4f,
         showCompanyName: Boolean = true,
         showCompanyLogo: Boolean = true,
-        fields: List<BarcodeFieldConfigEntity> = emptyList(),
+        fields: List<BarcodeFieldConfig> = emptyList(),
         onProgress: ((currentPage: Int, totalPages: Int) -> Unit)? = null
     ): File? {
         val pdfDocument = PdfDocument()

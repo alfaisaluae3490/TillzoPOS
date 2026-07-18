@@ -23,8 +23,20 @@ class SaleRepositoryImpl @Inject constructor(
         }
     }
 
+    override fun getSalesPaged(limit: Int, offset: Int): Flow<List<Sale>> {
+        return saleDao.getSalesPaged(limit, offset).map { list ->
+            list.map { it.toDomainModel() }
+        }
+    }
+
     override fun getSalesInRange(start: Long, end: Long): Flow<List<Sale>> {
         return saleDao.getSalesInRange(start, end).map { list ->
+            list.map { it.toDomainModel() }
+        }
+    }
+
+    override fun getSalesInRangePaged(start: Long, end: Long, limit: Int, offset: Int): Flow<List<Sale>> {
+        return saleDao.getSalesInRangePaged(start, end, limit, offset).map { list ->
             list.map { it.toDomainModel() }
         }
     }

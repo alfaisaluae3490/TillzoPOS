@@ -34,8 +34,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import com.tillzo.pos.data.local.entity.BarcodeFieldConfigEntity
-import com.tillzo.pos.data.local.entity.BarcodeGeneralConfigEntity
+import com.tillzo.pos.data.local.prefs.BarcodeFieldConfig
+import com.tillzo.pos.data.local.prefs.BarcodeGeneralConfig
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,7 +64,7 @@ fun BarcodePrintSettingsScreen(
     val primaryGtin = if (customGtinVal.isNotBlank()) customGtinVal else "0000000"
 
     // DB config states
-    val generalConfigState by viewModel.barcodeGeneralConfig.collectAsState()
+    val generalConfigState: BarcodeGeneralConfig by viewModel.barcodeGeneralConfig.collectAsState()
     val fieldsState by viewModel.barcodeFieldsConfig.collectAsState()
     var hasInitialized by remember { mutableStateOf(false) }
 
@@ -86,7 +86,8 @@ fun BarcodePrintSettingsScreen(
     var titleTextSize by remember { mutableStateOf(6f) }
     var isTitleBold by remember { mutableStateOf(true) }
     var barcodeSize by remember { mutableStateOf(48f) }
-    var currencySymbol by remember { mutableStateOf("Rs") }
+    val appSetupPrefs = remember { com.tillzo.pos.data.local.prefs.AppSetupPrefs(context) }
+    var currencySymbol by remember { mutableStateOf(appSetupPrefs.currencySymbol) }
 
     // Label dimensions (points)
     var labelWidth by remember { mutableStateOf("144") }
@@ -123,8 +124,8 @@ fun BarcodePrintSettingsScreen(
     var showCompanyLogo by remember { mutableStateOf(true) }
 
     LaunchedEffect(generalConfigState) {
-        val config = generalConfigState
-        if (config != null && !hasInitialized) {
+        if (!hasInitialized) {
+            val config = generalConfigState
             companyName = config.companyName
             companyLogoPath = config.companyLogoPath
             usePrefix = config.usePrefix
@@ -238,8 +239,8 @@ fun BarcodePrintSettingsScreen(
         barcodeX, barcodeY, companyNameSize, companyLogoSize, companyNameX, companyNameY,
         companyLogoX, companyLogoY, showCompanyName, showCompanyLogo
     ) {
-        if (hasInitialized && generalConfigState != null) {
-            val updatedConfig = generalConfigState!!.copy(
+        if (hasInitialized) {
+            val updatedConfig = generalConfigState.copy(
                 companyName = companyName,
                 companyLogoPath = companyLogoPath,
                 usePrefix = usePrefix,
@@ -1194,7 +1195,7 @@ private fun LabelPreviewContent(
     customSuffix: String,
     useSuffix: Boolean,
     suffixPosition: String,
-    fields: List<BarcodeFieldConfigEntity> = emptyList(),
+    fields: List<BarcodeFieldConfig> = emptyList(),
     labelWidth: String,
     labelHeight: String
 ) {

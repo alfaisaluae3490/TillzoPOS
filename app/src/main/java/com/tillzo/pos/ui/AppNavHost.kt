@@ -23,6 +23,7 @@ import com.tillzo.pos.ui.store.StoreModule
 import com.tillzo.pos.ui.settings.SettingsModule
 import com.tillzo.pos.ui.security.RootBlockedScreen
 import com.tillzo.pos.ui.till.TillOpenScreen
+import com.tillzo.pos.ui.hardware.HardwareDiagnosticScreen
 import com.tillzo.pos.ui.inventory.options.alerts.StockAlertsScreen
 import com.tillzo.pos.ui.inventory.options.wastage.WastageLogScreen
 import com.scottyab.rootbeer.RootBeer
@@ -151,6 +152,7 @@ fun AppNavHost(
                     onNavigateToTill = { onMenuDismiss(); navController.navigate("till_open") },
                     onNavigateToWastage = { onMenuDismiss(); navController.navigate("wastage_log") },
                     onNavigateToStockAlerts = { onMenuDismiss(); navController.navigate("stock_alerts") },
+                    onNavigateToHardwareDiagnostics = { onMenuDismiss(); navController.navigate("hardware_diagnostics") },
                     onNavigateToSync = {
                         homeViewModel.forceSync()
                         onMenuDismiss()
@@ -341,6 +343,16 @@ fun AppNavHost(
             StockAlertsScreen(
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToInventory = { navController.navigate("inventory") }
+            )
+        }
+
+        // Hardware Diagnostics Screen
+        composable("hardware_diagnostics") {
+            val context = LocalContext.current
+            HardwareDiagnosticScreen(
+                onBack = { navController.popBackStack() },
+                tsplPrinter = com.tillzo.pos.utils.printer.TsplPrinter(),
+                appSetupPrefs = remember { AppSetupPrefs(context) }
             )
         }
     }

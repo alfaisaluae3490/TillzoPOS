@@ -7,6 +7,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.tillzo.pos.ui.settings.options.billing.BillingScreen
+import com.tillzo.pos.ui.settings.options.logviewer.SystemLogsScreen
 import com.tillzo.pos.ui.settings.options.privacy.SettingsScreen
 
 /**
@@ -31,12 +32,19 @@ fun SettingsModule(
         composable("settings_main") {
             SettingsScreen(
                 onBack = onNavigateBack,
-                onNavigateToBilling = { settingsNavController.navigate("billing_screen") }
+                onNavigateToBilling = { settingsNavController.navigate("billing_screen") },
+                onNavigateToSystemLogs = { settingsNavController.navigate("system_logs") }
             )
         }
 
         composable("billing_screen") {
             BillingScreen(
+                onBack = { settingsNavController.popBackStack() }
+            )
+        }
+
+        composable("system_logs") {
+            SystemLogsScreen(
                 onBack = { settingsNavController.popBackStack() }
             )
         }

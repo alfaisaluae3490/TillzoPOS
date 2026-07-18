@@ -2,14 +2,18 @@ package com.tillzo.pos.domain.usecase
 
 import android.content.Context
 import android.util.Log
+import androidx.room.withTransaction
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.google.gson.Gson
+import com.tillzo.pos.data.local.AppDatabase
 import com.tillzo.pos.data.local.dao.CustomerDao
+import com.tillzo.pos.data.local.dao.InventoryDao
 import com.tillzo.pos.data.local.dao.KhataEventDao
+import com.tillzo.pos.data.local.dao.ProductBatchDao
 import com.tillzo.pos.data.local.dao.SaleDao
 import com.tillzo.pos.data.local.dao.TillSessionDao
 import com.tillzo.pos.data.local.entity.CustomerEntity
@@ -25,25 +29,15 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.UUID
 import javax.inject.Inject
 
-/**
- * M4 CompleteSaleUseCase
- *
- * Steps:
- *   1. Build SaleEntity from cart + payment data
- *   2. Insert SaleEntity to Room (OFFLINE FIRST, syncStatus = "pending")
- *   3. If udhaar component → insert KhataEventEntity to Room
- *   4. Trigger OneTimeWorkRequest so sync happens ASAP
- *   5. Return the saved SaleEntity (for receipt display)
- *
- * Architecture Law: NEVER checks stock (Blind Selling rule).
- * Architecture Law: NEVER marks syncStatus = "synced" here — only SyncWorker + HTTP 200 does.
- */
 class CompleteSaleUseCase @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val appDatabase: AppDatabase,
     private val saleDao: SaleDao,
     private val khataEventDao: KhataEventDao,
     private val customerDao: CustomerDao,
     private val tillSessionDao: TillSessionDao,
+    private val inventoryDao: InventoryDao,
+    private val productBatchDao: ProductBatchDao,
     private val appSetupPrefs: AppSetupPrefs,
     private val gson: Gson
 ) {
@@ -98,17 +92,19 @@ class CompleteSaleUseCase @Inject constructor(
             wallet_amount = walletAmount,
             udhaar_amount = udhaarAmount,
             customer_id = selectedCustomerId,
-            payment_split_json = if (paymentMethod == "SPLIT") gson.toJson(paymentDetails) else null,
+            payment_split_json = if (paymentMethod == "SPLIT") gson.toJson(paymentDetails) else "{}",
             reference_id = null
         )
 
-        // Step 2: Save to Room FIRST (offline-first rule)
-        saleDao.insertSale(saleEntity)
-        Log.d(TAG, "Sale saved to Room: $invoiceUuid")
+        // Step 2: Save to Room and deduct stock in a single atomic transaction
+        appDatabase.withTransaction {
+            saleDao.insertSale(saleEntity)
+            deductStockForCartItems(cartItems, now)
+        }
+        Log.d(TAG, "Sale saved and stock deducted: $invoiceUuid")
 
         // Step 2b: Record sale in active till session (non-fatal — no open session is OK)
         try {
-            val posId = posId
             val openSession = tillSessionDao.getOpenSession(posId)
             openSession?.let { session ->
                 tillSessionDao.addSaleToSession(
@@ -150,9 +146,46 @@ class CompleteSaleUseCase @Inject constructor(
     }
 
     /**
-     * Creates a new customer record in Room and returns their ID.
-     * Used for the "Add New Customer" flow in the Udhaar payment section.
+     * Deducts sold quantities from local inventory immediately.
+     * FIFO for batch-managed products. Floors stock at 0.
+     * Marks affected inventory records as sync_status = 'pending'.
      */
+    private suspend fun deductStockForCartItems(cartItems: List<CartItem>, now: Long) {
+        for (item in cartItems) {
+            try {
+                val product = inventoryDao.getItemById(item.itemId) ?: continue
+                val qtySold = item.quantity
+                val newStock = maxOf(0.0, product.current_stock - qtySold)
+                inventoryDao.updateStockAndSyncStatus(product.system_row_id, newStock, now)
+
+                Log.d(TAG, "Stock deducted: ${item.itemId} → ${product.current_stock} - $qtySold = $newStock")
+
+                // FIFO batch deduction if product has batches
+                if (product.hasBatches) {
+                    var remaining = qtySold
+                    while (remaining > 0.0) {
+                        val oldestBatch = productBatchDao.getOldestActiveBatch(item.itemId) ?: break
+                        val deductFromBatch = minOf(remaining, oldestBatch.stockQty)
+                        val newBatchQty = oldestBatch.stockQty - deductFromBatch
+                        if (newBatchQty <= 0.0) {
+                            productBatchDao.deactivateBatch(oldestBatch.batchId, now)
+                        } else {
+                            productBatchDao.updateBatchStock(oldestBatch.batchId, newBatchQty, now)
+                        }
+                        remaining -= deductFromBatch
+                    }
+
+                    // Recalculate totalStock from all active batches
+                    val allBatches = productBatchDao.getAllBatchesForProduct(item.itemId)
+                    val total = allBatches.filter { it.isActive && !it.isDeleted }.sumOf { it.stockQty }
+                    inventoryDao.updateTotalStock(item.itemId, total, now)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Stock deduction failed for ${item.itemId}: ${e.message}")
+            }
+        }
+    }
+
     suspend fun createNewCustomer(
         name: String,
         phone: String,

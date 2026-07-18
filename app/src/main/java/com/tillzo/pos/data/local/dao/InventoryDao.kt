@@ -80,6 +80,9 @@ interface InventoryDao {
 
     @Query("UPDATE Inventory SET current_stock = :newStock WHERE system_row_id = :id")
     suspend fun updateStock(id: String, newStock: Double)
+
+    @Query("UPDATE Inventory SET current_stock = :newStock, sync_status = 'pending', updated_at = :now WHERE system_row_id = :id")
+    suspend fun updateStockAndSyncStatus(id: String, newStock: Double, now: Long = System.currentTimeMillis())
     // Also needed by ExpiryCheckWorker (suspend, list-form)
     @Query("SELECT * FROM Inventory WHERE is_deleted = 0 AND current_stock > 0 AND expiry_date != '' AND expiry_date < :today")
     suspend fun getExpiredItemsList(today: String): List<InventoryEntity>

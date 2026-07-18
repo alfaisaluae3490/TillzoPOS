@@ -1,6 +1,7 @@
 package com.tillzo.pos.data.remote
 
 import android.content.Context
+import com.tillzo.pos.BuildConfig
 import com.tillzo.pos.data.sync.options.token.OAuthTokenManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.runBlocking
@@ -94,8 +95,8 @@ class SheetsApiClient @Inject constructor(
                 .authenticator(tokenAuthenticator)
                 .addInterceptor(
                     HttpLoggingInterceptor().apply {
-                        level = HttpLoggingInterceptor.Level.BODY
-                        // Note: set to NONE in release via ProGuard or BuildConfig check
+                        level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY
+                                else HttpLoggingInterceptor.Level.NONE
                     }
                 )
                 .build()

@@ -34,9 +34,6 @@ object Constants {
     /** Delta sync polling interval: check for remote updates every 60s. */
     const val DELTA_SYNC_INTERVAL_MS = 60_000L
 
-    /** Maximum rows per monthly Sales tab before forced early sharding. */
-    const val MAX_ROWS_PER_SHARD = 18_000
-
     /** Hidden DB tab name — never visible to users. */
     const val SYS_DB_TAB_NAME = "SYS_DB_DO_NOT_TOUCH"
 
@@ -45,12 +42,6 @@ object Constants {
 
     /** WorkManager tag for idle-constrained sync workers. */
     const val WORK_TAG_SYNC_IDLE = "sync_idle"
-
-    /** WorkManager unique work name for monthly sharding. */
-    const val WORK_NAME_SHARDING = "monthly_sharding"
-
-    /** WorkManager unique work name for disaster recovery backup. */
-    const val WORK_NAME_DISASTER = "disaster_recovery"
 }
 
 /**
@@ -185,20 +176,7 @@ object SheetColumns {
     val GRN_ITEMS = listOf("grn_item_id", "grn_id", "po_item_id", "product_id", "product_name", "barcode_id", "sku", "received_qty", "unit_cost_price", "total_cost", "unit", "batch_number", "manufacturing_date", "expiry_date", "inventory_action", "is_new_item", "sync_status", "created_at", "updated_at")
     val VENDORS = listOf(
         "vendor_id", "name", "phone", "whatsapp", "email", "address",
-        "city", "province", "country", "billing_address", "owner_name",
-        "bank_account_title", "bank_name", "bank_account_number", "bank_iban",
-        "bank_swift_code", "bank_branch", "payment_terms", "preferred_currency",
-        "credit_limit", "registration_number", "ntn_number", "cnic_number",
-        "trn_number", "trade_license_number", "trade_license_expiry_date",
-        "primary_manager_name", "primary_manager_phone", "primary_manager_email",
-        "tech_support_name", "tech_support_phone", "tech_support_email",
-        "billing_contact_name", "billing_contact_phone", "billing_contact_email",
-        "escalation_l1_name", "escalation_l1_phone", "escalation_l1_email",
-        "escalation_l2_name", "escalation_l2_phone", "escalation_l2_email",
-        "escalation_l3_name", "escalation_l3_phone", "escalation_l3_email",
-        "contract_start_date", "contract_expiry_date", "sla_response_times",
-        "warranty_terms", "compliance_certificates", "contract_file_id",
-        "contract_file_url",
+        "city", "credit_limit",
         "is_active",
         "is_deleted", "sync_status", "created_at", "updated_at"
     )
@@ -213,17 +191,12 @@ object SheetColumns {
         "updatedAt"
     )
 
-    val BARCODE_GENERAL_CONFIGS = listOf(
-        "system_row_id", "sync_status", "created_at", "updated_at", "pos_terminal_id", "is_deleted", "deleted_at",
-        "labelWidth", "labelHeight", "titleTextSize", "isTitleBold", "barcodeSize", "currencySymbol", "companyName",
-        "companyLogoPath", "showCompanyName", "showCompanyLogo", "titleX", "titleY", "priceX", "priceY", "skuX",
-        "skuY", "gtinX", "gtinY", "lotX", "lotY", "expX", "expY", "snX", "snY", "barcodeX", "barcodeY",
-        "companyNameSize", "companyLogoSize", "companyNameX", "companyNameY", "companyLogoX", "companyLogoY",
-        "usePrefix", "customPrefix", "prefixPosition", "useSuffix", "customSuffix", "suffixPosition", "useSeparator"
-    )
-
-    val BARCODE_FIELD_CONFIGS = listOf(
-        "system_row_id", "sync_status", "created_at", "updated_at", "pos_terminal_id", "is_deleted", "deleted_at",
-        "fieldId", "fieldName", "aiCode", "isEnabled", "sequenceOrder", "useFnc1Separator", "customValue"
+    val TILL_SESSIONS = listOf(
+        "session_id", "cashier_id", "cashier_name", "pos_terminal_id",
+        "opening_cash", "closing_cash", "expected_cash", "total_cash_sales",
+        "total_card_sales", "total_wallet_sales", "total_udhaar_sales",
+        "total_sales_count", "total_refunds", "net_cash", "status",
+        "notes", "shift_date", "opened_at", "closed_at", "sync_status",
+        "created_at", "updated_at"
     )
 }

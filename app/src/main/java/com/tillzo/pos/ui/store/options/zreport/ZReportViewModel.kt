@@ -7,6 +7,7 @@ import com.tillzo.pos.data.local.dao.TillSessionDao
 import com.tillzo.pos.data.local.entity.TillSessionEntity
 import com.tillzo.pos.domain.repository.SaleRepository
 import com.tillzo.pos.domain.repository.StoreRepository
+import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import com.tillzo.pos.utils.printer.TsplPrinter
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
@@ -22,7 +23,8 @@ class ZReportViewModel @Inject constructor(
     private val storeRepository: StoreRepository,
     private val syncLogDao: SyncLogDao,
     private val tillSessionDao: TillSessionDao,
-    private val tsplPrinter: TsplPrinter
+    private val tsplPrinter: TsplPrinter,
+    private val appSetupPrefs: AppSetupPrefs
 ) : ViewModel() {
 
     private val _totalSalesToday = MutableStateFlow(0.0)
@@ -95,8 +97,8 @@ class ZReportViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            // Simulate reading sync logic (M2 artifact)
-            _pendingSyncCount.value = 0 // In real impl: syncLogDao.getPendingRowCountsSum() 
+            val tillPending = tillSessionDao.getPendingSyncCount()
+            _pendingSyncCount.value = tillPending
         }
 
         // Populate payment breakdown from active till session
@@ -112,20 +114,19 @@ class ZReportViewModel @Inject constructor(
         }
     }
 
-    fun executeDayClose() {
+    fun executeDayClose(physicalCashCount: Double) {
         if (_pendingSyncCount.value > 0) {
             _reportStatus.value = "Error: Cannot close day. ${_pendingSyncCount.value} items pending sync."
             return
         }
 
         viewModelScope.launch {
-            // Close the active till session in the database
             val session = activeSession.value
             if (session != null) {
-                tillSessionDao.closeSession(
+                val variance = physicalCashCount - session.expectedCash
+                tillSessionDao.reconcileSession(
                     sessionId = session.sessionId,
-                    closingCash = session.expectedCash,
-                    netCash = 0.0,
+                    physicalCashCount = physicalCashCount,
                     closedAt = System.currentTimeMillis()
                 )
             }
@@ -146,12 +147,18 @@ class ZReportViewModel @Inject constructor(
                     append("Gross Sales:  Rs ${String.format("%.2f", _totalSalesToday.value)}\n")
                     append("Expenses:     Rs ${String.format("%.2f", _totalExpensesToday.value)}\n")
                     append("--------------------------------\n")
+                    append("Expected Cash: Rs ${String.format("%.2f", session?.expectedCash ?: 0.0)}\n")
+                    append("Physical Cash: Rs ${String.format("%.2f", physicalCashCount)}\n")
+                    val variance = physicalCashCount - (session?.expectedCash ?: 0.0)
+                    val varianceLabel = if (variance >= 0) "OVERAGE" else "SHORTAGE"
+                    append("Variance ($varianceLabel): Rs ${String.format("%.2f", variance)}\n")
+                    append("================================\n")
                     append("NET IN DRAWER: Rs ${String.format("%.2f", _netCashDrawer.value)}\n")
                     append("================================\n")
                     append("    DAY CLOSED COMPLETELY    \n")
                 }
                 
-                tsplPrinter.printBarcodeLabel("00:00:00:00:00:00", "Z-Report", zReportContent)
+                tsplPrinter.printBarcodeLabel(appSetupPrefs.printerMac, "Z-Report", zReportContent)
             } catch (e: Exception) {
                 _reportStatus.value = "Closed, but Print Failed: ${e.message}"
             }

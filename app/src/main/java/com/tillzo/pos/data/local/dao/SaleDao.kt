@@ -10,11 +10,17 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface SaleDao {
-    @Query("SELECT * FROM Sales WHERE is_deleted = 0")
+    @Query("SELECT * FROM Sales WHERE is_deleted = 0 ORDER BY timestamp DESC")
     fun getAllSales(): Flow<List<SaleEntity>>
 
-    @Query("SELECT * FROM Sales WHERE timestamp BETWEEN :start AND :end AND is_deleted = 0")
+    @Query("SELECT * FROM Sales WHERE is_deleted = 0 ORDER BY timestamp DESC LIMIT :limit OFFSET :offset")
+    fun getSalesPaged(limit: Int, offset: Int): Flow<List<SaleEntity>>
+
+    @Query("SELECT * FROM Sales WHERE timestamp BETWEEN :start AND :end AND is_deleted = 0 ORDER BY timestamp DESC")
     fun getSalesInRange(start: Long, end: Long): Flow<List<SaleEntity>>
+
+    @Query("SELECT * FROM Sales WHERE timestamp BETWEEN :start AND :end AND is_deleted = 0 ORDER BY timestamp DESC LIMIT :limit OFFSET :offset")
+    fun getSalesInRangePaged(start: Long, end: Long, limit: Int, offset: Int): Flow<List<SaleEntity>>
 
     @Query("SELECT * FROM Sales WHERE system_row_id = :systemRowId AND is_deleted = 0")
     suspend fun getSaleById(systemRowId: String): SaleEntity?

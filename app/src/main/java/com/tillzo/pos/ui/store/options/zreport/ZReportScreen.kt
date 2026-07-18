@@ -247,16 +247,45 @@ fun ZReportScreen(
     }
 
     if (showConfirmDialog) {
+        var dayClosePhysicalCount by remember { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = { showConfirmDialog = false },
             title = { Text("Confirm Day Close") },
-            text = { Text("Closing the day will generate a Z-Report slip. Ensure all physical cash matches the Expected Cash (Rs ${String.format("%.2f", netDrawer)}). This action cannot be undone.") },
+            text = {
+                Column {
+                    Text("Count the cash in your drawer and enter the total below.")
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = dayClosePhysicalCount,
+                        onValueChange = { dayClosePhysicalCount = it },
+                        label = { Text("Physical Cash Count (Rs.)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    dayClosePhysicalCount.toDoubleOrNull()?.let { counted ->
+                        val variance = counted - netDrawer
+                        Text(
+                            "Expected: Rs ${String.format("%.2f", netDrawer)}",
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            "Variance: ${if (variance >= 0) "+" else ""}${String.format("%.2f", variance)}",
+                            color = if (variance >= 0) Color(0xFF4CAF50) else Color(0xFFF44336),
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text("This action cannot be undone.", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                }
+            },
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.executeDayClose()
+                        viewModel.executeDayClose(dayClosePhysicalCount.toDoubleOrNull() ?: netDrawer)
                         showConfirmDialog = false
                     },
+                    enabled = dayClosePhysicalCount.isNotBlank(),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
                     Text("Confirm & Close")

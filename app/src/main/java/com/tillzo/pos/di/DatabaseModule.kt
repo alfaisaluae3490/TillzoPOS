@@ -19,7 +19,7 @@ import com.tillzo.pos.data.local.dao.GrnDao
 import com.tillzo.pos.data.local.dao.ProductUnitDao
 import com.tillzo.pos.data.local.dao.TillSessionDao
 import com.tillzo.pos.data.local.dao.WastageDao
-import com.tillzo.pos.data.local.dao.BarcodeConfigDao
+import com.tillzo.pos.data.local.dao.LogDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -74,7 +74,9 @@ object DatabaseModule {
                 AppDatabase.MIGRATION_19_20,
                 AppDatabase.MIGRATION_20_21,
                 AppDatabase.MIGRATION_21_22,
-                AppDatabase.MIGRATION_22_23
+                AppDatabase.MIGRATION_22_23,
+                AppDatabase.MIGRATION_23_24,
+                AppDatabase.MIGRATION_24_25
             )
             // fallbackToDestructiveMigration() ← dev-only safety net, commented out in favor of real migration
             .build()
@@ -154,5 +156,5 @@ object DatabaseModule {
 
     @Provides
     @Singleton
-    fun provideBarcodeConfigDao(db: AppDatabase): BarcodeConfigDao = db.barcodeConfigDao()
+    fun provideLogDao(db: AppDatabase): LogDao = db.logDao()
 }

@@ -5,12 +5,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tillzo.pos.data.local.dao.CustomerDao
 import com.tillzo.pos.data.local.dao.InventoryDao
+import com.tillzo.pos.data.local.dao.SaleDao
+import com.tillzo.pos.data.local.dao.TillSessionDao
 import com.tillzo.pos.data.local.entity.CustomerEntity
 import com.tillzo.pos.data.local.entity.InventoryEntity
 import com.tillzo.pos.data.local.entity.SaleEntity
 import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import com.tillzo.pos.domain.model.CartItem
 import com.tillzo.pos.domain.usecase.CompleteSaleUseCase
+import com.tillzo.pos.utils.AppLogger
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -25,6 +28,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -71,7 +75,10 @@ class PosViewModel @Inject constructor(
     private val completeSaleUseCase: CompleteSaleUseCase,
     private val inventoryDao: InventoryDao,
     private val customerDao: CustomerDao,
-    private val appSetupPrefs: AppSetupPrefs
+    private val saleDao: SaleDao,
+    private val tillSessionDao: TillSessionDao,
+    private val appSetupPrefs: AppSetupPrefs,
+    private val appLogger: AppLogger
 ) : ViewModel() {
 
     companion object {
@@ -116,6 +123,9 @@ class PosViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
+    // ── Currency Symbol ───────────────────────────────────────────────────────
+    val currencySymbol: String = appSetupPrefs.currencySymbol
+
     // Quick-Access Grid: admin-pinned items, ordered by pinnedOrder
     val quickGridItems: StateFlow<List<InventoryEntity>> = inventoryDao.getPinnedItems()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -149,6 +159,40 @@ class PosViewModel @Inject constructor(
     private val _selectedCustomer = MutableStateFlow<CustomerEntity?>(null)
     val selectedCustomer: StateFlow<CustomerEntity?> = _selectedCustomer.asStateFlow()
 
+    // ── Sync State ────────────────────────────────────────────────────────────
+
+    private val _hasPendingSync = MutableStateFlow(false)
+    val hasPendingSync: StateFlow<Boolean> = _hasPendingSync.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            val pendingSales = saleDao.getPendingSyncSales()
+            val pendingSessions = tillSessionDao.getPendingSessions()
+            _hasPendingSync.value = pendingSales.isNotEmpty() || pendingSessions.isNotEmpty()
+        }
+        viewModelScope.launch {
+            kotlinx.coroutines.flow.combine(
+                saleDao.getAllSales().map { sales -> sales.any { it.sync_status == "pending" } },
+                tillSessionDao.getAllSessions().map { sessions -> sessions.any { it.syncStatus == "pending" } }
+            ) { salesPending, sessionsPending ->
+                salesPending || sessionsPending
+            }.collect { pending ->
+                _hasPendingSync.value = pending
+            }
+        }
+    }
+
+    // ── Stock Warning State ───────────────────────────────────────────────────
+
+    data class StockWarning(
+        val itemName: String,
+        val available: Double,
+        val requested: Double
+    )
+
+    private val _stockWarning = MutableStateFlow<StockWarning?>(null)
+    val stockWarning: StateFlow<StockWarning?> = _stockWarning.asStateFlow()
+
     // ── Sale Completion State ─────────────────────────────────────────────────
 
     private val _saleResult = MutableStateFlow<SaleResult?>(null)
@@ -166,6 +210,21 @@ class PosViewModel @Inject constructor(
     fun addToCart(product: InventoryEntity, qty: Double = 1.0) {
         val currentCart = _cartItems.value.toMutableList()
         val existingIndex = currentCart.indexOfFirst { it.itemId == product.system_row_id }
+        val currentQtyInCart = if (existingIndex >= 0) currentCart[existingIndex].quantity else 0.0
+        val totalRequested = currentQtyInCart + qty
+
+        // Check stock availability
+        if (totalRequested > product.current_stock) {
+            _stockWarning.value = StockWarning(
+                itemName = product.item_name,
+                available = product.current_stock,
+                requested = totalRequested
+            )
+            appLogger.logWarn("UI_CLICK", "Stock warning for ${product.item_name}: requested $totalRequested, available ${product.current_stock}")
+            return
+        }
+        _stockWarning.value = null
+
         if (existingIndex >= 0) {
             val existing = currentCart[existingIndex]
             val newQty = existing.quantity + qty
@@ -188,6 +247,7 @@ class PosViewModel @Inject constructor(
         }
         _cartItems.value = currentCart
         _searchQuery.value = ""
+        appLogger.logInfo("UI_CLICK", "Added to cart: ${product.item_name} x $qty")
     }
 
     // ── Quick Grid Pinning ────────────────────────────────────────────────────
@@ -209,15 +269,29 @@ class PosViewModel @Inject constructor(
             removeFromCart(itemId)
             return
         }
-        _cartItems.value = _cartItems.value.map { item ->
-            if (item.itemId == itemId) {
-                item.copy(quantity = newQty, total = newQty * item.pricePerUnit)
-            } else item
+        // Check stock availability from local inventory
+        viewModelScope.launch {
+            val product = inventoryDao.getItemById(itemId)
+            if (product != null && newQty > product.current_stock) {
+                _stockWarning.value = StockWarning(
+                    itemName = product.item_name,
+                    available = product.current_stock,
+                    requested = newQty
+                )
+                return@launch
+            }
+            _stockWarning.value = null
+            _cartItems.value = _cartItems.value.map { item ->
+                if (item.itemId == itemId) {
+                    item.copy(quantity = newQty, total = newQty * item.pricePerUnit)
+                } else item
+            }
         }
     }
 
     fun removeFromCart(itemId: String) {
         _cartItems.value = _cartItems.value.filter { it.itemId != itemId }
+        appLogger.logInfo("UI_CLICK", "Removed from cart: itemId=$itemId")
     }
 
     fun clearCart() {
@@ -226,10 +300,13 @@ class PosViewModel @Inject constructor(
         _paymentBreakdown.value = PaymentBreakdown()
         _selectedCustomer.value = null
         _saleResult.value = null
+        _stockWarning.value = null
+        appLogger.logInfo("UI_CLICK", "Cart cleared")
     }
 
     fun setDiscount(amount: Double) {
         _cartDiscount.value = amount
+        appLogger.logInfo("UI_CLICK", "Discount applied: Rs $amount")
     }
 
     // ── Payment Functions ─────────────────────────────────────────────────────
@@ -278,10 +355,33 @@ class PosViewModel @Inject constructor(
         val items = _cartItems.value
         if (items.isEmpty()) return
 
+        appLogger.logInfo("UI_CLICK", "Cash checkout initiated with ${items.size} items")
+
         viewModelScope.launch {
             _isProcessing.value = true
             _saleResult.value = null
             try {
+                // Verify stock sufficiency for all cart items
+                for (cartItem in items) {
+                    val product = inventoryDao.getItemById(cartItem.itemId)
+                    if (product != null && cartItem.quantity > product.current_stock) {
+                        _stockWarning.value = StockWarning(
+                            itemName = cartItem.name,
+                            available = product.current_stock,
+                            requested = cartItem.quantity
+                        )
+                        _isProcessing.value = false
+                        _saleResult.value = SaleResult.Error(
+                            "Insufficient stock for ${cartItem.name}: " +
+                            "available ${product.current_stock} ${product.unit}, " +
+                            "requested ${cartItem.quantity}"
+                        )
+                        appLogger.logError("UI_CLICK", "Sale failed: insufficient stock for ${cartItem.name}")
+                        return@launch
+                    }
+                }
+                _stockWarning.value = null
+
                 val sub = items.sumOf { it.total }
                 val tax = items.sumOf { item -> item.total * item.taxPercent / 100.0 }
                 val disc = _cartDiscount.value
@@ -303,9 +403,10 @@ class PosViewModel @Inject constructor(
                     cashierId = appSetupPrefs.userEmail.ifBlank { "cashier" }
                 )
                 _saleResult.value = SaleResult.Success(sale)
-                Log.d(TAG, "Sale completed: ${sale.sync_uuid}")
+                appLogger.logInfo("UI_CLICK", "Sale completed: ${sale.sync_uuid}, total=$total, method=${pb.methodString}")
             } catch (e: Exception) {
                 Log.e(TAG, "Sale failed: ${e.message}", e)
+                appLogger.logError("UI_CLICK", "Sale failed: ${e.message}", e)
                 _saleResult.value = SaleResult.Error(e.message ?: "Sale failed")
             } finally {
                 _isProcessing.value = false
@@ -316,5 +417,10 @@ class PosViewModel @Inject constructor(
     fun resetAfterSale() {
         clearCart()
         _saleResult.value = null
+        appLogger.logInfo("UI_CLICK", "New sale started")
+    }
+
+    fun logClick(tag: String, message: String) {
+        appLogger.logInfo(tag, message)
     }
 }

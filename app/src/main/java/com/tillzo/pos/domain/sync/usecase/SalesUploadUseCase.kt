@@ -35,9 +35,10 @@ class SalesUploadUseCase @Inject constructor(
             }
 
             // M2.1 UUID dedupe check — prevents double-writes on retry
+            // Sales sheet uses Column A = invoice_id (= sync_uuid) for dedup
             val existingIds = sheetsRepository.getExistingUuids(tableName)
             val newSales = pendingSales.filter { sale ->
-                sale.system_row_id !in existingIds
+                sale.sync_uuid !in existingIds
             }
 
             if (newSales.isEmpty()) {
@@ -69,9 +70,6 @@ class SalesUploadUseCase @Inject constructor(
                         saleDao.updateSale(updatedSale)
                     }
                     
-                    // Process Pending Deletions
-                    processDeletions(tableName)
-                    
                     true
                 }
                 else -> {
@@ -83,13 +81,5 @@ class SalesUploadUseCase @Inject constructor(
             Log.e(TAG, "Error in SalesUploadUseCase: ${e.message}", e)
             false
         }
-    }
-
-    private suspend fun processDeletions(tableName: String) {
-        val deletedRows = saleDao.getPendingDeletedRows()
-        if (deletedRows.isEmpty()) return
-
-        // Wait to optimize imports by manually doing metadata and idToRowMapping since sales is append only
-        // Normally sales are never deleted.
     }
 }

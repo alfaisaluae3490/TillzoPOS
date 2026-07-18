@@ -53,9 +53,6 @@ class KhataEventUseCase @Inject constructor(
                         khataEventDao.update(updatedEvent)
                     }
                     
-                    // Process Pending Deletions
-                    processDeletions(tableName)
-                    
                     true
                 }
                 else -> {
@@ -67,13 +64,5 @@ class KhataEventUseCase @Inject constructor(
             Log.e(TAG, "Error in KhataEventUseCase: ${e.message}", e)
             false
         }
-    }
-
-    private suspend fun processDeletions(tableName: String) {
-        val deletedRows = khataEventDao.getPendingDeletedRows()
-        if (deletedRows.isEmpty()) return
-
-        // Wait to optimize imports by manually doing metadata and idToRowMapping since Khata is append only
-        // Normally Khata events are never deleted.
     }
 }

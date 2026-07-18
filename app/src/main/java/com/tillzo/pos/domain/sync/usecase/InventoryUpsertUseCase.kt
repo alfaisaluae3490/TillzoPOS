@@ -40,7 +40,7 @@ class InventoryUpsertUseCase @Inject constructor(
             }
 
             // 1. Fetch current remote inventory to build id→row index map
-            val remoteRows = dataSource.readRange("$tableName!A:Z")
+            val remoteRows = dataSource.readRange("$tableName!A:ZZ")
             val idToRowMap = mutableMapOf<String, Int>()
             if (remoteRows.isNotEmpty()) {
                 val headers = remoteRows[0]
@@ -88,10 +88,10 @@ class InventoryUpsertUseCase @Inject constructor(
                         syncMap["damaged_qty"] ?: "",
                         syncMap["is_deleted"] ?: "",
                         syncMap["deleted_at"] ?: "",
-                        syncMap["sync_status"] ?: "synced",
+                        "synced",
                         syncMap["pos_terminal_id"] ?: "",
                         syncMap["created_at"] ?: "",
-                        syncMap["last_updated"] ?: ""
+                        syncMap["updated_at"] ?: ""
                     )
 
                     if (idToRowMap.containsKey(item.system_row_id)) {

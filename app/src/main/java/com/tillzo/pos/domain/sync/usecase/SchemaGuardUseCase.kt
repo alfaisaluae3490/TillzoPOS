@@ -32,8 +32,7 @@ class SchemaGuardUseCase @Inject constructor(
             "Vendors" to SheetColumns.VENDORS,
             "Product_Batches" to SheetColumns.PRODUCT_BATCHES,
             "Product_Units" to SheetColumns.PRODUCT_UNITS,
-            "BarcodeGeneralConfigs" to SheetColumns.BARCODE_GENERAL_CONFIGS,
-            "BarcodeFieldConfigs" to SheetColumns.BARCODE_FIELD_CONFIGS
+            "Till_Sessions" to SheetColumns.TILL_SESSIONS
         )
     }
 
@@ -50,7 +49,7 @@ class SchemaGuardUseCase @Inject constructor(
                 "Expenses", "Returns", "Wastage_Ledger", "Users_Permissions",
                 "Settings", "Sync_Log", "Dashboard", "SYS_DB_DO_NOT_TOUCH",
                 "Purchase_Orders", "PO_Items", "GRN_Headers", "GRN_Items", "Vendors", "Product_Batches", "Product_Units",
-                "BarcodeGeneralConfigs", "BarcodeFieldConfigs"
+                "Till_Sessions"
             )
 
             var schemaValid = true
