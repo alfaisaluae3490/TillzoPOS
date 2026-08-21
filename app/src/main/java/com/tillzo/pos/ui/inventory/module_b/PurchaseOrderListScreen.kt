@@ -36,6 +36,7 @@ private fun formatPoDate(millis: Long): String {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PurchaseOrderListScreen(
+    currencySymbol: String = "$",
     onNavigateBack: () -> Unit,
     onNavigateToCreatePo: () -> Unit,
     onNavigateToPoDetail: (String) -> Unit,
@@ -123,7 +124,7 @@ fun PurchaseOrderListScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(filtered, key = { it.poId }) { po ->
-                        POListCard(po = po, onClick = { onNavigateToPoDetail(po.poId) })
+                        POListCard(po = po, currencySymbol = currencySymbol, onClick = { onNavigateToPoDetail(po.poId) })
                     }
                 }
             }
@@ -132,7 +133,7 @@ fun PurchaseOrderListScreen(
 }
 
 @Composable
-private fun POListCard(po: PurchaseOrderEntity, onClick: () -> Unit) {
+private fun POListCard(po: PurchaseOrderEntity, currencySymbol: String = "$", onClick: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF2A2A2A)),
@@ -152,7 +153,7 @@ private fun POListCard(po: PurchaseOrderEntity, onClick: () -> Unit) {
             Spacer(Modifier.height(4.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
-                    "PKR ${String.format("%,.0f", po.totalAmount)}",
+                    "$currencySymbol ${String.format("%,.0f", po.totalAmount)}",
                     color = Color(0xFF1E88E5),
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 15.sp
@@ -180,7 +181,7 @@ fun POStatusChip(status: String) {
     val (color, label) = when (status) {
         "DRAFT"               -> Pair(Color(0xFF9E9E9E), "Draft")
         "SENT"                -> Pair(Color(0xFF1E88E5), "Sent")
-        "PARTIALLY_RECEIVED"  -> Pair(Color(0xFFFF9800), "Partial GRN")
+        "PARTIALLY_RECEIVED"  -> Pair(Color(0xFFFF9800), "Partial Receipt")
         "RECEIVED"            -> Pair(Color(0xFF4CAF50), "Received")
         "CANCELLED"           -> Pair(Color(0xFFF44336), "Cancelled")
         else                  -> Pair(Color(0xFF9E9E9E), status)

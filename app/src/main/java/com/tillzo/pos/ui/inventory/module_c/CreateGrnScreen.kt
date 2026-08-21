@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -45,6 +46,7 @@ fun CreateGrnScreen(
     val attachedFileName by viewModel.attachedFileName.collectAsState()
 
     val context = LocalContext.current
+    val currencySymbol = remember { AppSetupPrefs(context).currencySymbol.ifBlank { "$" } }
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
@@ -79,7 +81,7 @@ fun CreateGrnScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Receive GRN") },
+                title = { Text("Receive Goods") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
@@ -196,6 +198,8 @@ fun GrnItemAccordion(
     onSellingPriceChange: (Double) -> Unit,
     onBatchSelected: (String, String, String, String) -> Unit = { _, _, _, _ -> }
 ) {
+    val context = LocalContext.current
+    val currencySymbol = remember { AppSetupPrefs(context).currencySymbol.ifBlank { "$" } }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -213,7 +217,7 @@ fun GrnItemAccordion(
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(item.productName, style = MaterialTheme.typography.titleMedium, color = Color.White)
-                    Text("Recv: ${item.receivedQty} ${item.unit} | Cost: Rs ${item.unitCostPrice}", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+                    Text("Recv: ${item.receivedQty} ${item.unit} | Cost: $currencySymbol ${item.unitCostPrice}", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
                 }
                 Icon(
                     imageVector = Icons.Default.ArrowDropDown,
@@ -240,7 +244,7 @@ fun GrnItemAccordion(
                     Spacer(modifier = Modifier.height(12.dp))
                     Text("Inventory Action", color = Color(0xFF1E88E5), style = MaterialTheme.typography.labelLarge)
                     
-                    val actions = listOf("PENDING" to "Review Later", "NEW_PRODUCT" to "Create New Product", "ADD_BATCH" to "Add as New Batch", "UPDATE_BATCH" to "Add to Exst. Batch")
+                    val actions = listOf("PENDING" to "Review Later", "NEW_PRODUCT" to "Create New Product", "ADD_BATCH" to "Add as New Batch", "UPDATE_BATCH" to "Add to Existing Batch")
                     actions.forEach { (action, label) ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             RadioButton(

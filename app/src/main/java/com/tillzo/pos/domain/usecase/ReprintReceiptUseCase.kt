@@ -37,8 +37,10 @@ class ReprintReceiptUseCase @Inject constructor(
     private suspend fun findSaleInSheets(invoiceId: String): List<String>? {
         val salesTab = determineSalesTabForInvoice(invoiceId)
         return try {
-            val rows = sheetsRemoteDataSource.readRange("$salesTab!A:R")
-            rows.firstOrNull { row -> row.size > 9 && row[9] == invoiceId }
+            // FIX (2026-08-06): read full A:Y and match invoice_id (col 0),
+            // was A:R + row[9] (cash_amount) — never matched, reprint failed.
+            val rows = sheetsRemoteDataSource.readRange("$salesTab!A:Y")
+            rows.firstOrNull { row -> row.size > 0 && row[0] == invoiceId }
         } catch (e: Exception) {
             null
         }
@@ -56,24 +58,30 @@ class ReprintReceiptUseCase @Inject constructor(
     }
 
     private fun sheetRowToEntity(row: List<String>): SaleEntity {
+        // FIX (2026-08-06): indices now match SheetColumns.SALES:
+        // 0 invoice_id, 2 timestamp, 3 items_json, 4 subtotal, 5 tax, 6 discount,
+        // 7 total, 8 payment_method, 13 customer_id, 14 payment_split_json,
+        // 15 reference_id, 16 cashier_id, 17 sync_uuid, 21 pos_terminal_id,
+        // 22 system_row_id, 23 created_at, 24 updated_at
         fun get(index: Int): String = row.getOrElse(index) { "" }
         return SaleEntity(
-            system_row_id = get(15).ifBlank { UUID.randomUUID().toString() },
+            system_row_id = get(22).ifBlank { UUID.randomUUID().toString() },
             sync_status = SyncStatus.SYNCED,
-            pos_terminal_id = get(14),
-            sync_uuid = get(0).ifBlank { get(9) },
-            cashier_id = get(8),
+            pos_terminal_id = get(21),
+            sync_uuid = get(0).ifBlank { get(17) },
+            cashier_id = get(16),
             timestamp = get(2).toLongOrNull() ?: System.currentTimeMillis(),
             items_json = get(3),
             subtotal = get(4).toDoubleOrNull() ?: 0.0,
             tax = get(5).toDoubleOrNull() ?: 0.0,
-            discount = get(0).toDoubleOrNull() ?: 0.0,
-            total = get(6).toDoubleOrNull() ?: 0.0,
-            payment_method = get(7),
-            payment_split_json = null,
-            reference_id = null,
-            created_at = get(16).toLongOrNull() ?: System.currentTimeMillis(),
-            updated_at = get(17).toLongOrNull() ?: System.currentTimeMillis()
+            discount = get(6).toDoubleOrNull() ?: 0.0,
+            total = get(7).toDoubleOrNull() ?: 0.0,
+            payment_method = get(8),
+            payment_split_json = get(14).ifBlank { null },
+            customer_id = get(13).ifBlank { null },
+            reference_id = get(15).ifBlank { null },
+            created_at = get(23).toLongOrNull() ?: System.currentTimeMillis(),
+            updated_at = get(24).toLongOrNull() ?: System.currentTimeMillis()
         )
     }
 

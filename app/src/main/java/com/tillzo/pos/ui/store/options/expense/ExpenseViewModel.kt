@@ -62,4 +62,17 @@ class ExpenseViewModel @Inject constructor(
             }
         }
     }
+
+    fun updateExpense(id: String, category: String, amount: Double, description: String) {
+        if (amount <= 0 || category.isBlank() || description.isBlank()) return
+        viewModelScope.launch {
+            storeRepository.updateExpense(id, category, amount, description, System.currentTimeMillis())
+        }
+    }
+
+    fun deleteExpense(id: String) {
+        viewModelScope.launch {
+            storeRepository.softDeleteExpense(id, System.currentTimeMillis())
+        }
+    }
 }

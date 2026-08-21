@@ -76,6 +76,8 @@ fun BatchListBottomSheet(
                                     Text("Cost: ${batch.costPrice} | Selling: ${batch.sellingPrice}")
                                     Text("Expiry: ${batch.expiryDate}")
                                 }
+                                // Add the "Add New Batch" action (FIX 2026-08-06)
+                                Button(onClick = onAddNewBatch) { Text("+ Batch") }
                                 IconButton(onClick = { batchToEdit = batch }) {
                                     Icon(Icons.Default.Edit, contentDescription = "Edit Batch")
                                 }
@@ -112,7 +114,6 @@ fun EditBatchDialog(
     var expiryDate by remember { mutableStateOf(batch.expiryDate) }
     var stockQty by remember { mutableStateOf(batch.stockQty.toString()) }
     var sellingPrice by remember { mutableStateOf(batch.sellingPrice.toString()) }
-
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Color(0xFF2A2A2A),
@@ -149,6 +150,76 @@ fun EditBatchDialog(
                     onSave(batchNumber, mfgDate, expiryDate,
                            stockQty.toDoubleOrNull() ?: batch.stockQty,
                            sellingPrice.toDoubleOrNull() ?: batch.sellingPrice)
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF1E88E5))
+            ) { Text("Save", color = Color.White) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = Color.White.copy(alpha = 0.6f))
+            }
+        }
+    )
+}
+
+// FIX (2026-08-06): AddBatchDialog — new. Powers the "+ Batch" button that
+// previously had no dialog (showAddBatchDialog was an empty stub).
+@Composable
+fun AddBatchDialog(
+    onSave: (batchNumber: String, mfgDate: String, expiryDate: String,
+             stockQty: Double, costPrice: Double, sellingPrice: Double) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var batchNumber by remember { mutableStateOf("") }
+    var mfgDate by remember { mutableStateOf("") }
+    var expiryDate by remember { mutableStateOf("") }
+    var stockQty by remember { mutableStateOf("") }
+    var costPrice by remember { mutableStateOf("") }
+    var sellingPrice by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF2A2A2A),
+        title = { Text("Add New Batch", color = Color.White) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value = batchNumber,
+                    onValueChange = { batchNumber = it },
+                    label = { Text("Batch Number (optional)") },
+                    modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = mfgDate,
+                    onValueChange = { mfgDate = it },
+                    label = { Text("Mfg Date (YYYY-MM-DD)") },
+                    modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = expiryDate,
+                    onValueChange = { expiryDate = it },
+                    label = { Text("Expiry Date (YYYY-MM-DD)") },
+                    modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = stockQty,
+                    onValueChange = { stockQty = it },
+                    label = { Text("Stock Qty *") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = costPrice,
+                    onValueChange = { costPrice = it },
+                    label = { Text("Cost Price") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = sellingPrice,
+                    onValueChange = { sellingPrice = it },
+                    label = { Text("Selling Price") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onSave(batchNumber, mfgDate, expiryDate,
+                           stockQty.toDoubleOrNull() ?: 0.0,
+                           costPrice.toDoubleOrNull() ?: 0.0,
+                           sellingPrice.toDoubleOrNull() ?: 0.0)
                 },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color(0xFF1E88E5))

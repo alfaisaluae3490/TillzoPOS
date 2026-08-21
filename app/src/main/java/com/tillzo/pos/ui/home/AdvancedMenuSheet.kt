@@ -52,6 +52,8 @@ fun AdvancedMenuSheet(
     onNavigateToVendors: () -> Unit = {},
     onNavigateToStockAdjustment: () -> Unit = {},
     onNavigateToTill: () -> Unit = {},
+    onNavigateToTimeClock: () -> Unit = {},
+    onNavigateToVerifyQr: () -> Unit = {},
     onNavigateToStockAlerts: () -> Unit = {},
     onNavigateToHardwareDiagnostics: () -> Unit = {}
 ) {
@@ -87,14 +89,14 @@ fun AdvancedMenuSheet(
             )
             MenuItemRow(
                 icon = Icons.Default.People,
-                label = "CRM / Khata",
-                description = "Customer accounts & udhaar",
+                label = "CRM / Accounts",
+                description = "Customer accounts & credit",
                 onClick = { onDismiss(); onNavigateToCrm() }
             )
             MenuItemRow(
                 icon = Icons.Default.Inventory,
-                label = "Inventory & AI Entry",
-                description = "Manage stock, smart OCR, QR codes",
+                label = "Inventory",
+                description = "Manage products & stock",
                 onClick = { onDismiss(); onNavigateToInventory() }
             )
             MenuItemRow(
@@ -123,8 +125,8 @@ fun AdvancedMenuSheet(
             )
             MenuItemRow(
                 icon = Icons.Default.Receipt,
-                label = "Goods Receive Notes",
-                description = "GRN History & receiving",
+                label = "Goods Receipts",
+                description = "Goods Receipts & receiving",
                 onClick = { onDismiss(); onNavigateToGrnList() }
             )
             MenuItemRow(
@@ -146,11 +148,33 @@ fun AdvancedMenuSheet(
                 onClick = { onDismiss(); onNavigateToZReport() }
             )
             MenuItemRow(
+                icon = Icons.Default.AttachMoney,
+                label = "Expenses",
+                description = "Track daily business spending",
+                onClick = { onDismiss(); onNavigateToExpense() }
+            )
+            MenuItemRow(
                 icon = Icons.Default.AccountBalanceWallet,
-                label = "Open / Close Till",
+                label = "Open / Close Register",
                 description = "Start shift, enter opening cash",
                 accentColor = AccentBlue,
                 onClick = { onDismiss(); onNavigateToTill() }
+            )
+            // FIX (2026-08-06): employee time-tracking
+            MenuItemRow(
+                icon = Icons.Default.Timer,
+                label = "Time Clock",
+                description = "Punch in / out, attendance log",
+                accentColor = AccentBlue,
+                onClick = { onDismiss(); onNavigateToTimeClock() }
+            )
+            // FIX (2026-08-06): receipt QR verification (anti-fraud)
+            MenuItemRow(
+                icon = Icons.Default.QrCodeScanner,
+                label = "Verify Receipt QR",
+                description = "Scan a receipt to validate it",
+                accentColor = AccentBlue,
+                onClick = { onDismiss(); onNavigateToVerifyQr() }
             )
 
             Divider(color = SurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp))

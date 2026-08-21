@@ -52,6 +52,7 @@ class SheetsRepository @Inject constructor(
             "Vendors", "Product_Batches",
             "Product_Units",
             "Till_Sessions",
+            "Stock_Adjustments",
             "BarcodeGeneralConfigs", "BarcodeFieldConfigs",
             "Settings", "Sync_Log", "Dashboard", "SYS_DB_DO_NOT_TOUCH"
         ).mapIndexed { idx, title ->
@@ -140,20 +141,29 @@ class SheetsRepository @Inject constructor(
 
     suspend fun fetchDelta(lastTimestamp: Long): DeltaResult {
         val allRows = mutableListOf<Map<String, Any>>()
-        val tabs    = listOf(currentSalesTab(), "Inventory", "Customers",
-                             "Khata_Events", "Expenses", "Returns", "Users_Permissions",
-                             "Categories", "Product_Units", "Till_Sessions",
-                             "Vendors", "Product_Batches",
-                             "BarcodeGeneralConfigs", "BarcodeFieldConfigs")
+        // Dynamic tabs: Fetch metadata to get all sheet titles starting with "Sales_"
+        val metadata = try { dataSource.getSheetMetadata() } catch (e: Exception) { emptyMap() }
+        val salesTabs = metadata.keys.filter { it.startsWith("Sales_") }.ifEmpty { listOf(currentSalesTab()) }
+        
+        val standardTabs = listOf(
+            "Inventory", "Customers", "Khata_Events", "Expenses", "Returns", "Users_Permissions",
+            "Categories", "Product_Units", "Till_Sessions", "Vendors", "Product_Batches",
+            "Purchase_Orders", "PO_Items", "GRN_Headers", "GRN_Items", "Wastage_Ledger", "Stock_Adjustments",
+            "BarcodeGeneralConfigs", "BarcodeFieldConfigs"
+        )
+        
+        val tabs = salesTabs + standardTabs
 
         for (tab in tabs) {
             val raw = dataSource.readRange("$tab!A:ZZ")
             if (raw.size < 2) continue
 
-            val headers = raw[0]
+            val rawHeaders = raw[0].map { it.toString().trim() }
+            val headers = rawHeaders.map { it.lowercase() }
             val tsIndex = headers.indexOfFirst {
-                it == "updated_at" || it == "updatedAt" || it == "last_updated" ||
-                it == "timestamp" || it == "created_at" || it == "createdAt"
+                it == "updated_at" || it == "updatedat" || it == "last_updated" ||
+                it == "timestamp" || it == "created_at" || it == "createdat" ||
+                it.contains("updated") || it.contains("timestamp")
             }
 
             for (i in 1 until raw.size) {
@@ -162,7 +172,17 @@ class SheetsRepository @Inject constructor(
                     row[tsIndex].toLongOrNull() ?: 0L else 0L
                 if (lastTimestamp == 0L || rowTs > lastTimestamp) {
                     val obj = mutableMapOf<String, Any>("_sheet" to tab)
-                    headers.forEachIndexed { idx, h -> if (idx < row.size) obj[h] = row[idx] }
+                    rawHeaders.forEachIndexed { idx, origH ->
+                        if (idx < row.size) {
+                            val h = origH.lowercase()
+                            obj[h] = row[idx]
+                            // FIX (2026-08-06): preserve ORIGINAL case keys too, so
+                            // delta consumers reading camelCase (unitId, isPinned, totalStock…)
+                            // work despite lowercased headers — fixes Product_Units
+                            // duplicate-flood and Inventory flag loss on restore.
+                            if (h != origH) obj[origH] = row[idx]
+                        }
+                    }
                     allRows.add(obj)
                 }
             }
@@ -214,6 +234,51 @@ class SheetsRepository @Inject constructor(
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
+    /**
+     * Resolves the active Sales tab for the current period.
+     *
+     * FIX (2026-08-05, TillzoTest Bug #1): previously used device's current month
+     * unconditionally (`Sales_Aug_2026`), which 400'd when the sheet only had
+     * `Sales_Jul_2026`. Now: prefer current month if it exists in sheet metadata,
+     * otherwise fall back to the most recent existing `Sales_*` tab, otherwise
+     * create the current-month tab (self-heal).
+     */
+    suspend fun resolveSalesTab(): String {
+        val current = currentSalesTab()
+        return try {
+            val metadata = dataSource.getSheetMetadata()
+            val salesTabs = metadata.keys.filter { it.startsWith("Sales_") }
+            if (salesTabs.contains(current)) {
+                current
+            } else if (salesTabs.isNotEmpty()) {
+                // Fall back to the most recent existing Sales tab
+                salesTabs.maxWithOrNull(compareBy { parseSalesTabMonth(it) }) ?: current
+            } else {
+                // No Sales tab at all — create current month tab
+                val created = dataSource.addSheet(current)
+                appLogger.logInfo("SYNC_PROCESS", "No Sales tab found — created $current (created=$created)")
+                current
+            }
+        } catch (e: Exception) {
+            appLogger.logWarn("SYNC_PROCESS", "resolveSalesTab fallback to $current: ${e.message}")
+            current
+        }
+    }
+
+    private fun parseSalesTabMonth(tab: String): Long {
+        // Tab format: Sales_MMM_YYYY (e.g. Sales_Jul_2026)
+        return try {
+            val parts = tab.removePrefix("Sales_").split("_")
+            if (parts.size == 2) {
+                val months = mapOf(
+                    "Jan" to 1L, "Feb" to 2L, "Mar" to 3L, "Apr" to 4L, "May" to 5L, "Jun" to 6L,
+                    "Jul" to 7L, "Aug" to 8L, "Sep" to 9L, "Oct" to 10L, "Nov" to 11L, "Dec" to 12L
+                )
+                (months[parts[0]] ?: 0L) * 100L + (parts[1].toLongOrNull() ?: 0L)
+            } else 0L
+        } catch (e: Exception) { 0L }
+    }
+
     private fun currentSalesTab(): String {
         val months = arrayOf("Jan","Feb","Mar","Apr","May","Jun",
                              "Jul","Aug","Sep","Oct","Nov","Dec")
@@ -221,8 +286,9 @@ class SheetsRepository @Inject constructor(
         return "Sales_${months[cal.get(Calendar.MONTH)]}_${cal.get(Calendar.YEAR)}"
     }
 
-    private fun tabForTable(tableName: String) = when (tableName) {
-        "Sales" -> currentSalesTab()
+    private suspend fun tabForTable(tableName: String): String = when (tableName) {
+        "Sales" -> resolveSalesTab()
+        "KhataEvents", "Khata_Events" -> "Khata_Events"
         else    -> tableName
     }
 
@@ -233,12 +299,9 @@ class SheetsRepository @Inject constructor(
         "Khata_Events" to com.tillzo.pos.utils.SheetColumns.KHATA_EVENTS,
         "Expenses" to com.tillzo.pos.utils.SheetColumns.EXPENSES,
         "Categories" to com.tillzo.pos.utils.SheetColumns.CATEGORIES,
-        "Returns" to listOf("return_id","system_row_id","original_invoice_id","item_id",
-                            "qty_returned","condition","refund_method","amount",
-                            "last_updated","sync_status","created_at","updated_at","pos_terminal_id"),
-        "Wastage_Ledger" to listOf("wastage_id","system_row_id","item_id","qty","value",
-                                   "reason","date","last_updated","sync_status",
-                                   "created_at","updated_at","pos_terminal_id"),
+        "Returns" to com.tillzo.pos.utils.SheetColumns.RETURNS,
+        "Wastage_Ledger" to com.tillzo.pos.utils.SheetColumns.WASTAGE_LEDGER,
+        "Stock_Adjustments" to com.tillzo.pos.utils.SheetColumns.STOCK_ADJUSTMENTS,
         "Users_Permissions" to com.tillzo.pos.utils.SheetColumns.USERS,
         "Purchase_Orders" to com.tillzo.pos.utils.SheetColumns.PURCHASE_ORDERS,
         "PO_Items" to com.tillzo.pos.utils.SheetColumns.PO_ITEMS,
@@ -248,6 +311,7 @@ class SheetsRepository @Inject constructor(
         "Product_Batches" to com.tillzo.pos.utils.SheetColumns.PRODUCT_BATCHES,
         "Product_Units" to com.tillzo.pos.utils.SheetColumns.PRODUCT_UNITS,
         "Till_Sessions" to com.tillzo.pos.utils.SheetColumns.TILL_SESSIONS,
+        "Time_Clock" to com.tillzo.pos.utils.SheetColumns.TIME_CLOCK,
         "Settings" to listOf("setting_key","setting_value"),
         "Sync_Log" to listOf("sync_uuid","pos_id","status","timestamp","error_msg"),
         "SYS_DB_DO_NOT_TOUCH" to listOf("schema_version","last_verified","integrity_check")
@@ -288,6 +352,18 @@ class SheetsRepository @Inject constructor(
         dataSource.getRowCount(tabName)
 
     /**
+     * M2.9 — Reads all rows (incl. header) from a tab for nightly backup.
+     */
+    suspend fun readTabRows(tabName: String): List<List<Any>> =
+        dataSource.readRange("$tabName!A:ZZ")
+
+    /**
+     * M2.9 — Appends rows to the SAME tab name in the backup spreadsheet.
+     */
+    suspend fun appendToBackup(backupSpreadsheetId: String, tabName: String, rows: List<List<Any>>): Boolean =
+        dataSource.appendRowsToSheet(backupSpreadsheetId, tabName, rows)
+
+    /**
      * UUID dedupe check (M2.1) — reads existing system_row_ids from the Sheet range
      * before uploading, to prevent double-writes on retry.
      *
@@ -316,6 +392,24 @@ class SheetsRepository @Inject constructor(
             return false
         }
         return dataSource.deleteRow(sheetId, sheetRowIndex)
+    }
+
+    /**
+     * FIX (2026-08-06): Updates an existing row in a Sheet tab by matching the
+     * UUID in column A. Used for records whose status changes after their first
+     * upload (till-session close/reconcile, PO/GRN status flips, batch updates).
+     * Returns true if the row was found and updated.
+     */
+    suspend fun updateRowByUuid(tableName: String, uuid: String, values: List<Any>): Boolean {
+        val tab = tabForTable(tableName)
+        val rows = dataSource.readRange("$tab!A:${('A' + (values.size - 1).coerceAtMost(25)).toString()}")
+        if (rows.size < 2) return false
+        val rowIdx = rows.indexOfFirst { it.firstOrNull()?.toString() == uuid }
+        if (rowIdx < 1) return false  // header row is index 0; data starts at 1
+        val range = "$tab!A${rowIdx + 1}"
+        return dataSource.batchWrite(
+            listOf(mapOf("range" to range, "values" to listOf(values)))
+        )
     }
 
     /**

@@ -68,6 +68,7 @@ fun GrnDetailScreen(
     val header by viewModel.header.collectAsState()
     val items by viewModel.items.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
+    val currencySymbol = remember(context) { com.tillzo.pos.data.local.prefs.AppSetupPrefs(context).currencySymbol.ifBlank { "$" } }
 
     Scaffold(
         topBar = {
@@ -140,7 +141,7 @@ fun GrnDetailScreen(
                         Divider(color = Color.White.copy(alpha = 0.08f))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Total Items: ${grn.totalItems}", color = Color.White.copy(alpha = 0.7f))
-                            Text("PKR ${String.format("%,.0f", grn.totalAmount)}",
+                            Text("$currencySymbol ${String.format("%,.0f", grn.totalAmount)}",
                                 color = Color(0xFF1E88E5), fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         }
                         if (grn.attachedFileUrl.isNotEmpty()) {
@@ -172,7 +173,7 @@ fun GrnDetailScreen(
 
             // ── Item Cards ────────────────────────────────────────────────────
             items(items, key = { it.grnItemId }) { item ->
-                GrnItemDetailCard(item = item)
+                GrnItemDetailCard(item = item, currencySymbol = currencySymbol)
             }
         }
     }
@@ -190,7 +191,7 @@ private fun GrnInfoRow(icon: androidx.compose.ui.graphics.vector.ImageVector, la
 }
 
 @Composable
-private fun GrnItemDetailCard(item: GrnItemEntity) {
+private fun GrnItemDetailCard(item: GrnItemEntity, currencySymbol: String = "$") {
     val actionColor = when (item.inventoryAction) {
         "NEW_PRODUCT", "NEW_ITEM" -> Color(0xFF4CAF50)
         "ADD_BATCH" -> Color(0xFF1E88E5)
@@ -228,7 +229,7 @@ private fun GrnItemDetailCard(item: GrnItemEntity) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Received: ${item.receivedQty} ${item.unit}",
                     color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp)
-                Text("PKR ${String.format("%,.0f", item.totalCost)}",
+                Text("$currencySymbol ${String.format("%,.0f", item.totalCost)}",
                     color = Color(0xFF1E88E5), fontSize = 13.sp, fontWeight = FontWeight.Medium)
             }
             if (item.batchNumber.isNotEmpty()) {

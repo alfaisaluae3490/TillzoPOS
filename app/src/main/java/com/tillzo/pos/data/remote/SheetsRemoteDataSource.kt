@@ -135,7 +135,22 @@ class SheetsRemoteDataSource @Inject constructor(
                     spreadsheetId,
                     mapOf("valueInputOption" to "RAW", "data" to valueRanges)
                 )
-                resp.isSuccessful
+                if (!resp.isSuccessful) {
+                    android.util.Log.e(TAG, "batchWrite HTTP ${resp.code()}: ${resp.errorBody()?.string()}")
+                    return@withContext false
+                }
+                // FIX (2026-08-06): same partial-failure class as deleteRow — Google
+                // returns 200 with per-request errors in responses[].error.
+                @Suppress("UNCHECKED_CAST")
+                val responses = resp.body()?.get("responses") as? List<Map<String, Any>>
+                if (responses != null) {
+                    val failed = responses.firstOrNull { it["error"] != null }
+                    if (failed != null) {
+                        android.util.Log.e(TAG, "batchWrite inner request error: ${failed["error"]}")
+                        return@withContext false
+                    }
+                }
+                true
             } catch (e: Exception) { false }
         }
 
@@ -171,6 +186,31 @@ class SheetsRemoteDataSource @Inject constructor(
                 AppendResult(false, 0, "Exception: ${e.message ?: "Unknown"}")
             }
         }
+
+    /**
+     * M2.9 — Appends rows to a DIFFERENT spreadsheet (nightly backup target).
+     * Uses the backup spreadsheet's own id with the same append endpoint.
+     */
+    suspend fun appendRowsToSheet(targetSpreadsheetId: String, tabName: String, rows: List<List<Any>>): Boolean =
+        withContext(Dispatchers.IO) {
+            if (targetSpreadsheetId.isBlank()) return@withContext false
+            try {
+                val resp = api.appendValues(
+                    targetSpreadsheetId,
+                    "$tabName!A:ZZ",
+                    body = mapOf(
+                        "range"          to "$tabName!A:ZZ",
+                        "majorDimension" to "ROWS",
+                        "values"         to rows
+                    )
+                )
+                resp.isSuccessful
+            } catch (e: Exception) {
+                android.util.Log.w("SheetsRemoteDataSource", "appendToBackup failed: ${e.message}")
+                false
+            }
+        }
+
 
     // ── Read Range ───────────────────────────────────────────────────────────
 
@@ -276,8 +316,28 @@ class SheetsRemoteDataSource @Inject constructor(
                         )
                     )))
                 )
-                resp.isSuccessful
-            } catch (e: Exception) { false }
+                if (!resp.isSuccessful) {
+                    android.util.Log.e(TAG, "deleteRow HTTP ${resp.code()}: ${resp.errorBody()?.string()}")
+                    return@withContext false
+                }
+                // FIX (2026-08-06): Google batchUpdate returns HTTP 200 even when the
+                // inner request FAILS — per-request errors live in responses[].error.
+                // Treat any response entry with an "error" field as failure so the
+                // row stays pending and is retried next sync.
+                @Suppress("UNCHECKED_CAST")
+                val responses = resp.body()?.get("responses") as? List<Map<String, Any>>
+                if (responses != null) {
+                    val failed = responses.firstOrNull { it["error"] != null }
+                    if (failed != null) {
+                        android.util.Log.e(TAG, "deleteRow inner request error: ${failed["error"]}")
+                        return@withContext false
+                    }
+                }
+                true
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "deleteRow exception: ${e.message}")
+                false
+            }
         }
 
     /**

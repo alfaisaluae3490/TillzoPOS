@@ -45,6 +45,20 @@ class AppSetupPrefs @Inject constructor(
         const val KEY_PRINTER_IP        = "printer_ip"
         const val KEY_CURRENCY_SYMBOL   = "currency_symbol"
         const val KEY_ADMIN_PASSCODE    = "admin_passcode"
+        const val KEY_BLOCK_NEGATIVE_STOCK = "block_negative_stock"
+
+        // ── Onboarding / Business Profile (FIX 2026-08-06: Faisal) ──────────
+        const val KEY_ONBOARDING_COMPLETE = "onboarding_complete"
+        const val KEY_OWNER_NAME          = "owner_name"
+        const val KEY_BUSINESS_NAME       = "business_name"
+        const val KEY_BUSINESS_ADDRESS    = "business_address"
+        const val KEY_BUSINESS_LOGO_PATH  = "business_logo_path"
+        const val KEY_BUSINESS_PHONE      = "business_phone"
+        const val KEY_BUSINESS_SOCIAL     = "business_social"
+        const val KEY_BUSINESS_WEBSITE    = "business_website"
+        const val KEY_BUSINESS_PORTAL     = "business_portal"
+        const val KEY_BUSINESS_APP_LINK   = "business_app_link"
+        const val KEY_BUSINESS_FOLDER_ID  = "business_folder_id"
     }
 
     // ── Read ──────────────────────────────────────────────────────────────
@@ -86,7 +100,7 @@ class AppSetupPrefs @Inject constructor(
     // ── Currency Configuration ───────────────────────────────────────────────
 
     var currencySymbol: String
-        get() = prefs.getString(KEY_CURRENCY_SYMBOL, "Rs") ?: "Rs"
+        get() = prefs.getString(KEY_CURRENCY_SYMBOL, "$") ?: "$"
         set(value) = prefs.edit().putString(KEY_CURRENCY_SYMBOL, value).apply()
 
     // ── Admin Passcode ────────────────────────────────────────────────────────
@@ -94,6 +108,29 @@ class AppSetupPrefs @Inject constructor(
     var adminPasscode: String
         get() = prefs.getString(KEY_ADMIN_PASSCODE, "") ?: ""
         set(value) = prefs.edit().putString(KEY_ADMIN_PASSCODE, value).apply()
+
+    // ── Stock Control ───────────────────────────────────────────────────────────
+
+    var blockNegativeStock: Boolean
+        get() = prefs.getBoolean(KEY_BLOCK_NEGATIVE_STOCK, false)
+        set(value) = prefs.edit().putBoolean(KEY_BLOCK_NEGATIVE_STOCK, value).apply()
+
+    // ── Tax Configuration (FIX 2026-08-06: industry-standard) ──────────────────
+    // true = prices include tax (tax shown separately, total unchanged)
+    // false = tax added on top of subtotal
+    var taxInclusive: Boolean
+        get() = prefs.getBoolean("KEY_TAX_INCLUSIVE", false)
+        set(value) = prefs.edit().putBoolean("KEY_TAX_INCLUSIVE", value).apply()
+
+    // ── Loyalty Program (FIX 2026-08-06: industry-standard) ────────────────────
+    // Points earned per Rs/currency unit spent; 100 points = 1 currency unit discount
+    var loyaltyEnabled: Boolean
+        get() = prefs.getBoolean("KEY_LOYALTY_ENABLED", true)
+        set(value) = prefs.edit().putBoolean("KEY_LOYALTY_ENABLED", value).apply()
+
+    var loyaltyPointsPerCurrency: Double
+        get() = prefs.getFloat("KEY_LOYALTY_RATE", 1f).toDouble()
+        set(value) = prefs.edit().putFloat("KEY_LOYALTY_RATE", value.toFloat()).apply()
 
     fun saveGrnFolder(folderId: String, name: String) {
         prefs.edit()
@@ -109,6 +146,72 @@ class AppSetupPrefs @Inject constructor(
             .putString(KEY_USER_EMAIL, email)
             .putString(KEY_USER_DISPLAY_NAME, displayName)
             .apply()
+    }
+
+    // ── Onboarding / Business Profile (FIX 2026-08-06: Faisal) ─────────────
+
+    val onboardingComplete: Boolean
+        get() = prefs.getBoolean(KEY_ONBOARDING_COMPLETE, false)
+
+    val ownerName: String
+        get() = prefs.getString(KEY_OWNER_NAME, "") ?: ""
+
+    val businessName: String
+        get() = prefs.getString(KEY_BUSINESS_NAME, "") ?: ""
+
+    val businessAddress: String
+        get() = prefs.getString(KEY_BUSINESS_ADDRESS, "") ?: ""
+
+    val businessLogoPath: String
+        get() = prefs.getString(KEY_BUSINESS_LOGO_PATH, "") ?: ""
+
+    val businessPhone: String
+        get() = prefs.getString(KEY_BUSINESS_PHONE, "") ?: ""
+
+    val businessSocial: String
+        get() = prefs.getString(KEY_BUSINESS_SOCIAL, "") ?: ""
+
+    val businessWebsite: String
+        get() = prefs.getString(KEY_BUSINESS_WEBSITE, "") ?: ""
+
+    val businessPortal: String
+        get() = prefs.getString(KEY_BUSINESS_PORTAL, "") ?: ""
+
+    val businessAppLink: String
+        get() = prefs.getString(KEY_BUSINESS_APP_LINK, "") ?: ""
+
+    val businessFolderId: String
+        get() = prefs.getString(KEY_BUSINESS_FOLDER_ID, "") ?: ""
+
+    fun saveBusinessProfile(
+        ownerName: String,
+        businessName: String,
+        businessAddress: String,
+        businessPhone: String,
+        businessSocial: String,
+        businessWebsite: String,
+        businessPortal: String,
+        businessAppLink: String
+    ) {
+        prefs.edit()
+            .putString(KEY_OWNER_NAME, ownerName)
+            .putString(KEY_BUSINESS_NAME, businessName)
+            .putString(KEY_BUSINESS_ADDRESS, businessAddress)
+            .putString(KEY_BUSINESS_PHONE, businessPhone)
+            .putString(KEY_BUSINESS_SOCIAL, businessSocial)
+            .putString(KEY_BUSINESS_WEBSITE, businessWebsite)
+            .putString(KEY_BUSINESS_PORTAL, businessPortal)
+            .putString(KEY_BUSINESS_APP_LINK, businessAppLink)
+            .putBoolean(KEY_ONBOARDING_COMPLETE, true)
+            .apply()
+    }
+
+    fun saveBusinessLogoPath(path: String) {
+        prefs.edit().putString(KEY_BUSINESS_LOGO_PATH, path).apply()
+    }
+
+    fun saveBusinessFolder(folderId: String) {
+        prefs.edit().putString(KEY_BUSINESS_FOLDER_ID, folderId).apply()
     }
 
     fun saveProvisioningResult(

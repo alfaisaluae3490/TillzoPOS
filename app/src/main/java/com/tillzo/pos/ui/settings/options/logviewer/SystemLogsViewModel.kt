@@ -1,11 +1,11 @@
 package com.tillzo.pos.ui.settings.options.logviewer
 
 import android.content.Context
-import android.os.Environment
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tillzo.pos.data.local.dao.LogDao
 import com.tillzo.pos.data.local.entity.AppLogEntity
+import com.tillzo.pos.utils.AppLogger
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -17,16 +17,13 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import javax.inject.Inject
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class SystemLogsViewModel @Inject constructor(
     private val logDao: LogDao,
+    private val appLogger: AppLogger,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -77,27 +74,12 @@ class SystemLogsViewModel @Inject constructor(
             _isExporting.value = true
             _exportMessage.value = null
             try {
-                val logs = logDao.getAllLogsSync()
-                val content = buildString {
-                    appendLine("TillzoPOS System Logs")
-                    appendLine("Exported: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())}")
-                    appendLine("Total entries: ${logs.size}")
-                    appendLine("=" .repeat(80))
-                    appendLine()
-                    for (log in logs) {
-                        val ts = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(log.timestamp))
-                        appendLine("[$ts] [${log.logLevel}] [${log.tag}] ${log.message}")
-                        appendLine("-" .repeat(80))
-                    }
+                val file = appLogger.exportLogsToFile(context)
+                if (file != null) {
+                    _exportMessage.value = "Exported to Downloads/${file.name}"
+                } else {
+                    _exportMessage.value = "Export failed"
                 }
-
-                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                if (!downloadsDir.exists()) downloadsDir.mkdirs()
-                val fileName = "TillzoPOS_Logs_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())}.txt"
-                val file = File(downloadsDir, fileName)
-                file.writeText(content)
-
-                _exportMessage.value = "Exported to Downloads/$fileName"
             } catch (e: Exception) {
                 _exportMessage.value = "Export failed: ${e.message}"
             } finally {

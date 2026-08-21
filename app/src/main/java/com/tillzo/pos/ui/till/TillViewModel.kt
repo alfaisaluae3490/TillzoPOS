@@ -68,4 +68,18 @@ class TillViewModel @Inject constructor(
             withContext(Dispatchers.Main) { onDone() }
         }
     }
+
+    fun addPayIn(amount: Double) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val session = tillSessionDao.getOpenSession(posTerminalId()) ?: return@launch
+            tillSessionDao.addPayIn(sessionId = session.sessionId, amount = amount)
+        }
+    }
+
+    fun addPayOut(amount: Double) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val session = tillSessionDao.getOpenSession(posTerminalId()) ?: return@launch
+            tillSessionDao.addPayOut(sessionId = session.sessionId, amount = amount)
+        }
+    }
 }

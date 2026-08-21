@@ -13,6 +13,9 @@ interface KhataEventDao : BaseDao<KhataEventEntity> {
     
     @Query("SELECT * FROM KhataEvents WHERE sync_status = 'pending'")
     suspend fun getPendingKhataEvents(): List<KhataEventEntity>
+    // FIX (2026-08-06): full export — ALL events, not just pending (backup completeness)
+    @Query("SELECT * FROM KhataEvents ORDER BY created_at ASC")
+    suspend fun getAllKhataEvents(): List<KhataEventEntity>
 
     // Aggregations
     @Query("SELECT COALESCE(SUM(amount), 0.0) FROM KhataEvents WHERE customer_id = :customerId AND event_type = 'UDHAAR' AND is_deleted = 0")

@@ -34,8 +34,20 @@ class KhataEventUseCase @Inject constructor(
                 return true
             }
 
+            val existingIds = try { sheetsRepository.getExistingUuids("Khata_Events") } catch (e: Exception) { emptySet() }
+            val newEvents = pendingEvents.filter { it.system_row_id !in existingIds }
+
+            if (newEvents.isEmpty()) {
+                Log.d(TAG, "All pending Khata events already present on sheet. Mark as synced.")
+                pendingEvents.forEach { event ->
+                    val updatedEvent = event.copy(sync_status = "synced")
+                    khataEventDao.update(updatedEvent)
+                }
+                return true
+            }
+
             // Convert to SyncMap representation
-            val payloadRows = pendingEvents.map { it.toSyncMap() }
+            val payloadRows = newEvents.map { it.toSyncMap() }
 
             val payload = SyncPayload(
                 tableName = tableName,

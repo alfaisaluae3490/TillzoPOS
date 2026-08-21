@@ -7,11 +7,37 @@ package com.tillzo.pos.utils
 object Constants {
 
     /**
-     * Google OAuth 2.0 Web Client ID.
-     * Obtained from Google Cloud Console → APIs & Services → Credentials.
-     * Used by: SignInViewModel, OAuthTokenManager.
+     * Google OAuth WEB client ID.
+     *
+     * FIX (2026-08-06): MUST be the WEB client (`default_web_client_id` from
+     * google-services.json / strings.xml), NOT the Android client ID.
+     *
+     * Why: Google Play Services issues the server auth code against the WEB
+     * client (the consent URL in logcat shows client_id=3m583... even when the
+     * Android ID was passed). Exchanging that code with the Android client ID
+     * returns HTTP 400 invalid_grant. Both `requestServerAuthCode()` and the
+     * token exchange MUST use this same web client ID.
+     *
+     * Used by: SignInViewModel (requestServerAuthCode), OAuthTokenManager,
+     * AuthRepositoryImpl.
      */
     const val WEB_CLIENT_ID =
+        "191290481305-3m583fdj0hq5je8mnj34frqih33lssqc.apps.googleusercontent.com"
+
+    /**
+     * Google OAuth ANDROID client ID (SHA-1 verified in Google Cloud Console).
+     *
+     * FIX (2026-08-06): `requestIdToken()` MUST use the Android client ID —
+     * passing the web client ID there fails with DEVELOPER_ERROR (10)
+     * "SHA-1 mismatch or Client ID misconfiguration" because Play Services
+     * verifies the Android SHA-1 fingerprint for idToken requests.
+     *
+     * Correct split:
+     *   requestIdToken(ANDROID_CLIENT_ID)          ← SHA-1 verified
+     *   requestServerAuthCode(WEB_CLIENT_ID, true) ← code bound to web client
+     *   token exchange client_id = WEB_CLIENT_ID   ← matches the code
+     */
+    const val ANDROID_CLIENT_ID =
         "191290481305-3ag6k2hakgtdjkted28bulmig9eb1eaq.apps.googleusercontent.com"
 
     /**
@@ -84,8 +110,15 @@ object SheetColumns {
         "items_json",
         "subtotal",
         "tax",
+        "discount",
         "total",
         "payment_method",
+        "cash_amount",
+        "card_amount",
+        "wallet_amount",
+        "udhaar_amount",
+        "customer_id",
+        "payment_split_json",
         "reference_id",
         "cashier_id",
         "sync_uuid",
@@ -105,6 +138,9 @@ object SheetColumns {
         "whatsapp",
         "email",
         "address",
+        // FIX (2026-08-06): loyalty program columns
+        "loyalty_points",
+        "lifetime_spend",
         "is_deleted",
         "deleted_at",
         "sync_status",
@@ -198,5 +234,61 @@ object SheetColumns {
         "total_sales_count", "total_refunds", "net_cash", "status",
         "notes", "shift_date", "opened_at", "closed_at", "sync_status",
         "created_at", "updated_at"
+    )
+
+    // FIX (2026-08-06): employee time-tracking
+    val TIME_CLOCK = listOf(
+        "system_row_id", "employee_email", "employee_name", "event_type",
+        "timestamp", "note", "pos_terminal_id", "created_at", "updated_at",
+        "sync_status"
+    )
+
+    val WASTAGE_LEDGER = listOf(
+        "wastage_id",
+        "product_id",
+        "product_name",
+        "batch_id",
+        "batch_number",
+        "quantity",
+        "unit",
+        "cost_price",
+        "total_loss",
+        "reason",
+        "notes",
+        "logged_by",
+        "wastage_date",
+        "sync_status",
+        "pos_terminal_id",
+        "created_at",
+        "updated_at"
+    )
+
+    val STOCK_ADJUSTMENTS = listOf(
+        "adjustment_id",
+        "product_id",
+        "adjustment_type",
+        "quantity_changed",
+        "reason",
+        "adjusted_by",
+        "sync_status",
+        "pos_terminal_id",
+        "created_at",
+        "updated_at"
+    )
+
+    val RETURNS = listOf(
+        "return_id",
+        "system_row_id",
+        "original_invoice_id",
+        "item_id",
+        "qty_returned",
+        "condition",
+        "refund_method",
+        "amount",
+        "last_updated",
+        "sync_status",
+        "created_at",
+        "updated_at",
+        "pos_terminal_id"
     )
 }

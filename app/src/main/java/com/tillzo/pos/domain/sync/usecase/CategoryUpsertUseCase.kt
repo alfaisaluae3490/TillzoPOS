@@ -121,29 +121,32 @@ class CategoryUpsertUseCase @Inject constructor(
 
             // ── Deletions: soft-deleted rows pending removal from Sheet ───────
             if (pendingDeletions.isNotEmpty()) {
-                val sheetId = try { getSheetIdForTab(TABLE_NAME) } catch (e: Exception) {
-                    Log.w(TAG, "Could not get sheetId for deletions: ${e.message}")
-                    -1
+                val (onSheet, notOnSheet) = pendingDeletions.partition { idToRowMap.containsKey(it.system_row_id) }
+
+                for (row in notOnSheet) {
+                    categoryDao.hardDeleteCategory(row.system_row_id)
+                    Log.d(TAG, "Hard deleted local-only category: ${row.system_row_id}")
                 }
 
-                for (row in pendingDeletions) {
-                    if (idToRowMap.containsKey(row.system_row_id)) {
-                        if (sheetId >= 0) {
-                            val sheetRowIndex = idToRowMap[row.system_row_id]!!
-                            val deleteSuccess = dataSource.deleteRow(
-                                sheetId = sheetId,
-                                rowIndex = sheetRowIndex
-                            )
-                            if (deleteSuccess) {
-                                categoryDao.hardDeleteCategory(row.system_row_id)
-                            } else {
-                                Log.w(TAG, "Failed to delete category ${row.system_row_id} from Sheet")
-                                anyFailure = true
-                            }
-                        }
-                    } else {
-                        // Never made it to Sheet — safe to hard-delete locally
+                for (row in onSheet) {
+                    val rowIndex = idToRowMap[row.system_row_id]
+                    if (rowIndex == null) {
                         categoryDao.hardDeleteCategory(row.system_row_id)
+                        Log.d(TAG, "Category ${row.system_row_id} missing row index — hard deleting locally")
+                        continue
+                    }
+                    // FIX (2026-08-05, TillzoTest Bug #2): use the repository-level
+                    // deleteRow which resolves sheetId from metadata internally and
+                    // reports failure properly. The old getSheetIdForTab() could throw
+                    // (tab missing from metadata) → sheetId=-1 → delete silently skipped
+                    // while the local row was left in a permanent pending state.
+                    val deleteSuccess = sheetsRepository.deleteRow(TABLE_NAME, rowIndex)
+                    if (deleteSuccess) {
+                        categoryDao.hardDeleteCategory(row.system_row_id)
+                        Log.d(TAG, "Deleted remote row for category: ${row.system_row_id}")
+                    } else {
+                        Log.w(TAG, "Failed to delete category ${row.system_row_id} from Sheet")
+                        anyFailure = true
                     }
                 }
             }
@@ -154,10 +157,5 @@ class CategoryUpsertUseCase @Inject constructor(
             Log.e(TAG, "Error in CategoryUpsertUseCase: ${e.message}", e)
             false
         }
-    }
-
-    private suspend fun getSheetIdForTab(tabName: String): Int {
-        val metadata = dataSource.getSheetMetadata()
-        return metadata[tabName] ?: throw IllegalArgumentException("Tab $tabName not found in metadata")
     }
 }

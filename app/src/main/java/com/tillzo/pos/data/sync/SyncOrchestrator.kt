@@ -10,9 +10,13 @@ import androidx.work.WorkManager
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.ExistingWorkPolicy
 import androidx.work.BackoffPolicy
+import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import com.tillzo.pos.data.sync.options.delta.DeltaSyncManager
 import com.tillzo.pos.data.sync.options.worker.SyncWorker
 import com.tillzo.pos.data.sync.options.worker.ExpiryCheckWorker
+import com.tillzo.pos.data.sync.options.worker.MonthlyShardWorker
+import com.tillzo.pos.data.sync.options.worker.NightlyBackupWorker
+import com.tillzo.pos.data.sync.options.worker.AutoLocalBackupWorker
 import com.tillzo.pos.domain.sync.usecase.SchemaGuardUseCase
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -35,7 +39,8 @@ import javax.inject.Singleton
 class SyncOrchestrator @Inject constructor(
     @ApplicationContext private val context: Context,
     private val deltaSyncManager: DeltaSyncManager,
-    private val schemaGuardUseCase: SchemaGuardUseCase
+    private val schemaGuardUseCase: SchemaGuardUseCase,
+    private val appSetupPrefs: AppSetupPrefs
 ) {
     companion object {
         private const val TAG = "SyncOrchestrator"
@@ -52,10 +57,18 @@ class SyncOrchestrator @Inject constructor(
         try {
             scheduleSyncWorkers()
             scheduleExpiryCheckWorker()
+            scheduleMonthlyShardWorker()
+            scheduleNightlyBackupWorker()
+            scheduleAutoLocalBackupWorker()
         } catch (e: Exception) {
             Log.e(TAG, "Worker scheduling failed (non-fatal): ${e.message}", e)
             // Non-fatal — app continues normally. Workers retry on next launch.
         }
+        if (appSetupPrefs.spreadsheetId.isBlank()) {
+            Log.w(TAG, "spreadsheetId not configured — skipping schema guard and delta sync. Setup not completed.")
+            return
+        }
+
         // M2.3 Schema validation on App Startup explicitly runs here
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -137,6 +150,65 @@ class SyncOrchestrator @Inject constructor(
             .build()
         workManager.enqueueUniquePeriodicWork(
             ExpiryCheckWorker.WORK_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            request
+        )
+    }
+
+    // FIX (2026-08-06): M2.2 Monthly Sharding + M2.9 Nightly Backup workers —
+    // previously only referenced in comments/docstrings, never registered.
+    private fun scheduleMonthlyShardWorker() {
+        // Runs daily; first run delayed to the 1st of next month at 00:01.
+        val now = java.util.Calendar.getInstance()
+        val nextMonth1st = java.util.Calendar.getInstance().apply {
+            add(java.util.Calendar.MONTH, 1)
+            set(java.util.Calendar.DAY_OF_MONTH, 1)
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 1)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        val delay = (nextMonth1st.timeInMillis - now.timeInMillis).coerceAtLeast(60_000L)
+        val request = PeriodicWorkRequestBuilder<MonthlyShardWorker>(1, TimeUnit.DAYS)
+            .setInitialDelay(delay, TimeUnit.MILLISECONDS)
+            .build()
+        workManager.enqueueUniquePeriodicWork(
+            MonthlyShardWorker::class.java.simpleName,
+            ExistingPeriodicWorkPolicy.KEEP,
+            request
+        )
+    }
+
+    private fun scheduleNightlyBackupWorker() {
+        val request = PeriodicWorkRequestBuilder<NightlyBackupWorker>(1, TimeUnit.DAYS)
+            .setInitialDelay(calculateDelayToMidnight(), TimeUnit.MILLISECONDS)
+            .build()
+        workManager.enqueueUniquePeriodicWork(
+            NightlyBackupWorker::class.java.simpleName,
+            ExistingPeriodicWorkPolicy.KEEP,
+            request
+        )
+    }
+
+    // FIX (2026-08-06): Faisal's requirement — local backup copy that survives
+    // uninstall/reinstall. Runs 15 min after midnight (00:15), public Documents.
+    private fun scheduleAutoLocalBackupWorker() {
+        val now = java.util.Calendar.getInstance()
+        val next = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 15)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        if (next.timeInMillis <= now.timeInMillis) {
+            next.add(java.util.Calendar.DAY_OF_MONTH, 1)
+        }
+        val delay = next.timeInMillis - now.timeInMillis
+        val request = PeriodicWorkRequestBuilder<AutoLocalBackupWorker>(1, TimeUnit.DAYS)
+            .setInitialDelay(delay, TimeUnit.MILLISECONDS)
+            .build()
+        workManager.enqueueUniquePeriodicWork(
+            AutoLocalBackupWorker.WORK_NAME,
             ExistingPeriodicWorkPolicy.KEEP,
             request
         )

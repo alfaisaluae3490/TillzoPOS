@@ -87,7 +87,7 @@ fun StatementScreen(
                         Text(customer!!.phone, style = MaterialTheme.typography.bodyMedium)
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            "Net Baqaya: Rs ${String.format("%.2f", baqaya)}",
+                            "Net Balance: $currencySymbol ${String.format("%.2f", baqaya)}",
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.Bold,
                             color = if (baqaya < 0) Color.Red else Color(0xFF4CAF50)
@@ -119,7 +119,7 @@ fun StatementScreen(
                         ) {
                             Column {
                                 Text(
-                                    if (event.event_type == "UDHAAR") "Udhaar" else "Jama", 
+                                    if (event.event_type == "UDHAAR") "Credit" else "Payment", 
                                     fontWeight = FontWeight.Bold,
                                     color = if (event.event_type == "UDHAAR") Color.Red else Color(0xFF4CAF50)
                                 )

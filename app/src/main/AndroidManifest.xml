@@ -5,6 +5,9 @@
     <!-- Network access for cloud sync -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- FIX (2026-08-06): auto local backup → public Documents (survives uninstall) -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 
     <!-- Play Billing (M8.4) -->
     <uses-permission android:name="com.android.vending.BILLING" />

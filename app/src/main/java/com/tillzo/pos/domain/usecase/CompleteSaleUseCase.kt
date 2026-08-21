@@ -103,6 +103,26 @@ class CompleteSaleUseCase @Inject constructor(
         }
         Log.d(TAG, "Sale saved and stock deducted: $invoiceUuid")
 
+        // Step 2c: Loyalty points (FIX 2026-08-06 — industry-standard rewards)
+        if (selectedCustomerId != null && appSetupPrefs.loyaltyEnabled) {
+            try {
+                val customer = customerDao.getCustomerById(selectedCustomerId)
+                if (customer != null) {
+                    val earnRate = appSetupPrefs.loyaltyPointsPerCurrency.coerceAtLeast(0.0)
+                    val pointsEarned = (total.coerceAtLeast(0.0) * earnRate)
+                    customerDao.updateLoyalty(
+                        id = selectedCustomerId,
+                        points = customer.loyalty_points + pointsEarned,
+                        spend = customer.lifetime_spend + total.coerceAtLeast(0.0),
+                        ts = now
+                    )
+                    Log.d(TAG, "Loyalty: customer $selectedCustomerId earned $pointsEarned pts")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Loyalty update failed (non-fatal): ${e.message}")
+            }
+        }
+
         // Step 2b: Record sale in active till session (non-fatal — no open session is OK)
         try {
             val openSession = tillSessionDao.getOpenSession(posId)
@@ -178,7 +198,7 @@ class CompleteSaleUseCase @Inject constructor(
                     // Recalculate totalStock from all active batches
                     val allBatches = productBatchDao.getAllBatchesForProduct(item.itemId)
                     val total = allBatches.filter { it.isActive && !it.isDeleted }.sumOf { it.stockQty }
-                    inventoryDao.updateTotalStock(item.itemId, total, now)
+                    inventoryDao.updateTotalStockAndSyncStatus(item.itemId, total, now)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Stock deduction failed for ${item.itemId}: ${e.message}")

@@ -26,6 +26,7 @@ class StoreRepositoryImpl @Inject constructor(
     override suspend fun insertCustomer(customer: CustomerEntity) { customerDao.insert(customer) }
     
     override suspend fun updateCustomer(customer: CustomerEntity) { customerDao.update(customer) }
+    override suspend fun softDeleteCustomer(customerId: String, timestamp: Long) { customerDao.softDeleteById(customerId, timestamp) }
 
     // Khata Ledger
     override fun getKhataEventsForCustomer(customerId: String): Flow<List<KhataEventEntity>> = khataEventDao.getEventsForCustomer(customerId)
@@ -44,4 +45,6 @@ class StoreRepositoryImpl @Inject constructor(
     override fun getExpensesBetweenDates(startTime: Long, endTime: Long): Flow<List<ExpenseEntity>> = expenseDao.getExpensesBetweenDates(startTime, endTime)
     
     override suspend fun insertExpense(expense: ExpenseEntity) { expenseDao.insert(expense) }
+    override suspend fun updateExpense(id: String, category: String, amount: Double, description: String, now: Long) { expenseDao.updateExpense(id, category, amount, description, now) }
+    override suspend fun softDeleteExpense(id: String, timestamp: Long) { expenseDao.softDeleteById(id, timestamp) }
 }

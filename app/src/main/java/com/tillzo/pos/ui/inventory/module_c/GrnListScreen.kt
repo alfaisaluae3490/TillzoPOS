@@ -33,14 +33,18 @@ private fun formatGrnDate(millis: Long): String {
 @Composable
 fun GrnListScreen(
     onNavigateBack: () -> Unit,
+    onNavigateToGrnDetail: (String) -> Unit = {},
     viewModel: GrnListViewModel = hiltViewModel()
 ) {
     val grnList by viewModel.grnList.collectAsState()
+    // FIX (2026-08-06): multi-currency
+    val grnContext = androidx.compose.ui.platform.LocalContext.current
+    val currencySymbol = remember(grnContext) { com.tillzo.pos.data.local.prefs.AppSetupPrefs(grnContext).currencySymbol.ifBlank { "$" } }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("GRN History", color = Color.White, fontWeight = FontWeight.Bold) },
+                title = { Text("Receiving History", color = Color.White, fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.Default.ArrowBack, null, tint = Color.White)
@@ -63,10 +67,10 @@ fun GrnListScreen(
                         modifier = Modifier.size(72.dp)
                     )
                     Spacer(Modifier.height(16.dp))
-                    Text("No GRNs yet", color = Color.White.copy(alpha = 0.5f), fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                    Text("No receipts yet", color = Color.White.copy(alpha = 0.5f), fontSize = 18.sp, fontWeight = FontWeight.Medium)
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "Create a GRN from a Purchase Order",
+                        "Create a receipt from a Purchase Order",
                         color = Color.White.copy(alpha = 0.3f),
                         fontSize = 13.sp
                     )
@@ -75,7 +79,9 @@ fun GrnListScreen(
                         onClick = onNavigateBack,
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E88E5))
                     ) {
-                        Text("Go to Purchase Orders", color = Color.White)
+                        // FIX (2026-08-06): label said "Go to Purchase Orders" but
+                        // called onNavigateBack (goes Home) — renamed to match.
+                        Text("Back", color = Color.White)
                     }
                 }
             }
@@ -86,7 +92,9 @@ fun GrnListScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(grnList, key = { it.grnId }) { grn ->
-                    GrnListCard(grn = grn)
+                    // FIX (2026-08-06): cards were not clickable — grn_detail route
+                    // existed but was unreachable from the list.
+                    GrnListCard(grn = grn, currencySymbol = currencySymbol, onClick = { onNavigateToGrnDetail(grn.grnId) })
                 }
             }
         }
@@ -94,11 +102,12 @@ fun GrnListScreen(
 }
 
 @Composable
-private fun GrnListCard(grn: GrnHeaderEntity) {
+private fun GrnListCard(grn: GrnHeaderEntity, currencySymbol: String = "$", onClick: () -> Unit = {}) {
     val statusColor = if (grn.status == "CONFIRMED") Color(0xFF4CAF50) else Color(0xFFFF9800)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,
         colors = CardDefaults.cardColors(containerColor = Color(0xFF2A2A2A)),
         shape = RoundedCornerShape(12.dp)
     ) {
@@ -125,7 +134,7 @@ private fun GrnListCard(grn: GrnHeaderEntity) {
             Spacer(Modifier.height(4.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
-                    "PKR ${String.format("%,.0f", grn.totalAmount)}",
+                    "$currencySymbol ${String.format("%,.0f", grn.totalAmount)}",
                     color = Color(0xFF1E88E5),
                     fontWeight = FontWeight.SemiBold
                 )

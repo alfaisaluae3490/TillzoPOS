@@ -6,7 +6,7 @@ import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import com.tillzo.pos.domain.model.Sale
 import com.tillzo.pos.domain.repository.SaleRepository
 import com.tillzo.pos.domain.usecase.ReprintReceiptUseCase
-import com.tillzo.pos.utils.printer.TsplPrinter
+import com.tillzo.pos.utils.printer.EscPosPrinter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,10 +18,12 @@ import javax.inject.Inject
 @HiltViewModel
 class HistoryViewModel @Inject constructor(
     private val saleRepository: SaleRepository,
-    private val tsplPrinter: TsplPrinter,
+    private val escPosPrinter: EscPosPrinter,
     private val appSetupPrefs: AppSetupPrefs,
     private val reprintReceiptUseCase: ReprintReceiptUseCase
 ) : ViewModel() {
+
+    private val currencySymbol get() = appSetupPrefs.currencySymbol.ifBlank { "$" }
 
     private val _sales = MutableStateFlow<List<Sale>>(emptyList())
     val sales = _sales.asStateFlow()
@@ -120,7 +122,7 @@ class HistoryViewModel @Inject constructor(
                     append("Invoice ID: ${saleForPrint.invoiceId.take(8)}\n")
                     append("Time: ${java.util.Date(saleForPrint.timestamp)}\n")
                     append("--------------------------------\n")
-                    append("TOTAL: Rs ${String.format("%.2f", saleForPrint.total)}\n")
+                    append("TOTAL: $currencySymbol ${String.format("%.2f", saleForPrint.total)}\n")
                     append("PAID VIA: ${saleForPrint.paymentMethod}\n")
                     if (saleForPrint.total < 0) {
                         append("Status: REFUNDED\n")
@@ -129,7 +131,9 @@ class HistoryViewModel @Inject constructor(
                 }
                 
                 val printerMac = appSetupPrefs.printerMac
-                val success = tsplPrinter.printBarcodeLabel(printerMac, "Tillzo POS", receiptText)
+                // FIX (2026-08-06): was TSPL label protocol for text — receipts
+                // must use ESC/POS. History reprint now prints a real receipt.
+                val success = escPosPrinter.printViaBluetooth(printerMac, receiptText)
                 
                 if (success) {
                     _printStatus.value = "Duplicate Printed Successfully."

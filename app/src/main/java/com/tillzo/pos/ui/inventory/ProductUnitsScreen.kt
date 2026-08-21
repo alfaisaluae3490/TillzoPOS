@@ -105,6 +105,16 @@ class ProductUnitsViewModel @Inject constructor(
             }
         }
     }
+
+    fun updateUnit(unitId: String, name: String, abbreviation: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                productUnitDao.updateUnit(unitId, name.trim(), abbreviation.trim().uppercase(), System.currentTimeMillis())
+            } catch (e: Exception) {
+                _errorChannel.send(e.localizedMessage ?: "Failed to update unit")
+            }
+        }
+    }
 }
 
 // ── Screen ─────────────────────────────────────────────────────────────────────
@@ -125,11 +135,21 @@ fun ProductUnitsScreen(
     }
 
     var showDialog by remember { mutableStateOf(false) }
+    var editingUnit by remember { mutableStateOf<ProductUnitEntity?>(null) }
 
     if (showDialog) {
         AddUnitDialog(
-            onDismiss = { showDialog = false },
-            onSave = { name, abbr -> viewModel.addUnit(name, abbr); showDialog = false }
+            existing = editingUnit,
+            onDismiss = { showDialog = false; editingUnit = null },
+            onSave = { name, abbr ->
+                if (editingUnit != null) {
+                    viewModel.updateUnit(editingUnit!!.unitId, name, abbr)
+                } else {
+                    viewModel.addUnit(name, abbr)
+                }
+                showDialog = false
+                editingUnit = null
+            }
         )
     }
 
@@ -181,6 +201,11 @@ fun ProductUnitsScreen(
                             fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                         // Prevent deletion of the 7 default units by checking abbreviation
                         if (!DEFAULT_UNITS.any { it.second == unit.abbreviation }) {
+                            IconButton(onClick = { editingUnit = unit; showDialog = true }) {
+                                Icon(Icons.Default.Edit, "Edit Unit",
+                                    tint = Color(0xFF1E88E5).copy(alpha = 0.8f),
+                                    modifier = Modifier.size(18.dp))
+                            }
                             IconButton(onClick = { viewModel.deleteUnit(unit.unitId) }) {
                                 Icon(Icons.Default.Delete, null,
                                     tint = Color(0xFFF44336).copy(alpha = 0.7f),
@@ -197,14 +222,18 @@ fun ProductUnitsScreen(
 }
 
 @Composable
-private fun AddUnitDialog(onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
-    var name by remember { mutableStateOf("") }
-    var abbr by remember { mutableStateOf("") }
+private fun AddUnitDialog(
+    existing: ProductUnitEntity? = null,
+    onDismiss: () -> Unit,
+    onSave: (String, String) -> Unit
+) {
+    var name by remember { mutableStateOf(existing?.unitName ?: "") }
+    var abbr by remember { mutableStateOf(existing?.abbreviation ?: "") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Color(0xFF2A2A2A),
-        title = { Text("Add Custom Unit", color = Color.White, fontWeight = FontWeight.Bold) },
+        title = { Text(if (existing == null) "Add Custom Unit" else "Edit Custom Unit", color = Color.White, fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 val colors = OutlinedTextFieldDefaults.colors(
@@ -227,7 +256,7 @@ private fun AddUnitDialog(onDismiss: () -> Unit, onSave: (String, String) -> Uni
             Button(
                 onClick = { if (name.isNotBlank() && abbr.isNotBlank()) onSave(name, abbr) },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E88E5))
-            ) { Text("Add") }
+            ) { Text(if (existing == null) "Add" else "Save") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel", color = Color.White.copy(alpha=0.6f)) }

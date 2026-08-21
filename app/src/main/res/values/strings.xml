@@ -2,4 +2,14 @@
 <resources>
     <string name="app_name">TillzoPOS</string>
     <string name="default_web_client_id" translatable="false">191290481305-3m583fdj0hq5je8mnj34frqih33lssqc.apps.googleusercontent.com</string>
+    <string name="sale">Sale</string>
+    <string name="inventory">Inventory</string>
+    <string name="khata">Accounts</string>
+    <string name="close_till">Close Register</string>
+    <string name="total">Total</string>
+    <string name="items">Items</string>
+    <string name="print_receipt">Print Receipt</string>
+    <string name="search_hint">Search by name, SKU, or scan barcode…</string>
+    <string name="open_till">Open Register</string>
+    <string name="close_day">Close Day (Z-Report)</string>
 </resources>

@@ -14,5 +14,7 @@ data class StockAdjustmentEntity(
     val reason: String,
     val adjustedBy: String,
     val syncStatus: String = "pending",
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
+    val posTerminalId: String = "TERM_1"
 )

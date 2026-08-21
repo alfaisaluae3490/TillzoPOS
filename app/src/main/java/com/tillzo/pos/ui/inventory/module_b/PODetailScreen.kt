@@ -40,6 +40,7 @@ fun PODetailScreen(
     val items by viewModel.items.collectAsState()
     val linkedGrns by viewModel.linkedGrns.collectAsState()
     val context = LocalContext.current
+    val currencySymbol = remember(context) { com.tillzo.pos.data.local.prefs.AppSetupPrefs(context).currencySymbol.ifBlank { "$" } }
 
     if (po == null) {
         Box(Modifier.fillMaxSize().background(Color(0xFF1A1A1A)), contentAlignment = Alignment.Center) {
@@ -75,10 +76,10 @@ fun PODetailScreen(
                                 appendLine()
                                 appendLine("Please process the following order:")
                                 items.forEachIndexed { i, item ->
-                                    appendLine("${i + 1}. ${item.productName} — Qty: ${item.orderedQty} ${item.unit} @ PKR ${item.unitCostPrice}")
+                                    appendLine("${i + 1}. ${item.productName} — Qty: ${item.orderedQty} ${item.unit} @ $currencySymbol ${item.unitCostPrice}")
                                 }
                                 appendLine()
-                                appendLine("*Total: PKR ${String.format("%,.0f", order.totalAmount)}*")
+                                appendLine("*Total: $currencySymbol ${String.format("%,.0f", order.totalAmount)}*")
                                 if (order.notes.isNotEmpty()) appendLine("Notes: ${order.notes}")
                             }
                             val intent = Intent(Intent.ACTION_VIEW).apply {
@@ -185,7 +186,7 @@ fun PODetailScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("Total Amount", color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp)
-                            Text("PKR ${String.format("%,.0f", order.totalAmount)}",
+                            Text("$currencySymbol ${String.format("%,.0f", order.totalAmount)}",
                                 color = Color(0xFF1E88E5), fontWeight = FontWeight.Bold, fontSize = 18.sp)
                         }
                     }
@@ -199,18 +200,18 @@ fun PODetailScreen(
                     modifier = Modifier.padding(horizontal = 4.dp))
             }
             items(items, key = { it.poItemId }) { item ->
-                POItemCard(item)
+                POItemCard(item, currencySymbol)
             }
 
             // ── Linked GRNs ───────────────────────────────────────────────────
             if (linkedGrns.isNotEmpty()) {
                 item {
-                    Text("Linked GRNs (${linkedGrns.size})",
+                    Text("Linked Receipts (${linkedGrns.size})",
                         color = Color(0xFF1E88E5), fontWeight = FontWeight.Bold, fontSize = 14.sp,
                         modifier = Modifier.padding(top = 4.dp, start = 4.dp, end = 4.dp))
                 }
                 items(linkedGrns, key = { it.grnId }) { grn ->
-                    LinkedGrnCard(grn, onClick = { onNavigateToGrnDetail(grn.grnId) })
+                    LinkedGrnCard(grn, currencySymbol, onClick = { onNavigateToGrnDetail(grn.grnId) })
                 }
             }
         }
@@ -242,7 +243,7 @@ private fun LabelValue(label: String, value: String) {
 }
 
 @Composable
-private fun POItemCard(item: PurchaseOrderItemEntity) {
+private fun POItemCard(item: PurchaseOrderItemEntity, currencySymbol: String = "$") {
     val receivedPct = if (item.orderedQty > 0) (item.receivedQty / item.orderedQty).coerceIn(0.0, 1.0) else 0.0
     val progressColor = when {
         receivedPct >= 1.0 -> Color(0xFF4CAF50)
@@ -258,7 +259,7 @@ private fun POItemCard(item: PurchaseOrderItemEntity) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(item.productName, color = Color.White, fontWeight = FontWeight.SemiBold,
                     fontSize = 14.sp, modifier = Modifier.weight(1f))
-                Text("PKR ${String.format("%,.0f", item.totalCost)}",
+                Text("$currencySymbol ${String.format("%,.0f", item.totalCost)}",
                     color = Color(0xFF1E88E5), fontWeight = FontWeight.Medium, fontSize = 13.sp)
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -279,7 +280,7 @@ private fun POItemCard(item: PurchaseOrderItemEntity) {
 }
 
 @Composable
-private fun LinkedGrnCard(grn: GrnHeaderEntity, onClick: () -> Unit) {
+private fun LinkedGrnCard(grn: GrnHeaderEntity, currencySymbol: String = "$", onClick: () -> Unit) {
     val statusColor = if (grn.status == "CONFIRMED") Color(0xFF4CAF50) else Color(0xFFFF9800)
     val dateStr = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(grn.createdAt))
     Card(
@@ -295,7 +296,7 @@ private fun LinkedGrnCard(grn: GrnHeaderEntity, onClick: () -> Unit) {
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(grn.grnNumber, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                Text("PKR ${String.format("%,.0f", grn.totalAmount)} · $dateStr",
+                Text("$currencySymbol ${String.format("%,.0f", grn.totalAmount)} · $dateStr",
                     color = Color.White.copy(alpha=0.5f), fontSize = 12.sp)
             }
             Text(grn.status, color = statusColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)

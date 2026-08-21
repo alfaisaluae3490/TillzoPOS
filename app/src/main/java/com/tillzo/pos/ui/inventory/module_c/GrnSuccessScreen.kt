@@ -23,7 +23,7 @@ fun GrnSuccessScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("GRN Successful") },
+                title = { Text("Receipt Successful") },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Color(0xFF1E88E5),
                     titleContentColor = Color.White

@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tillzo.pos.data.remote.PosSheetInfo
+import com.tillzo.pos.data.sync.options.delta.DeltaSyncManager
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -34,9 +35,45 @@ fun SheetPickerScreen(
     viewModel: SheetPickerViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val restoreState by viewModel.restoreState.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    // FIX (2026-08-07): no existing sheet found → run the Onboarding wizard
+    // (new user setup) instead of silently creating a blank sheet. Existing
+    // users with sheets skip onboarding entirely (simple login + restore).
+    var showOnboarding by remember { mutableStateOf(false) }
+
+    if (showOnboarding) {
+        com.tillzo.pos.ui.setup.onboarding.OnboardingScreen(
+            onComplete = {
+                showOnboarding = false
+                val prefs = com.tillzo.pos.data.local.prefs.AppSetupPrefs(context)
+                val bizName = prefs.businessName.ifBlank { shopName }
+                viewModel.createNewSheet(accessToken, bizName) { newId ->
+                    onSheetReady(newId)
+                }
+            }
+        )
+        return
+    }
 
     LaunchedEffect(Unit) {
         viewModel.loadExistingSheets(accessToken)
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.navigateToHome.collect { id ->
+            onSheetReady(id)
+        }
+    }
+
+    // FIX (2026-08-06): navigate as soon as the initial restore completes.
+    // Old code only checked restoreState once right after enqueue (worker runs
+    // async) so a fresh sheet never navigated home — user stuck on picker.
+    LaunchedEffect(restoreState) {
+        if (restoreState is DeltaSyncManager.RestoreState.Success) {
+            onSheetReady(viewModel.spreadsheetIdOrEmpty)
+        }
     }
 
     Scaffold(
@@ -64,194 +101,318 @@ fun SheetPickerScreen(
         }
     ) { padding ->
 
-        when (val state = uiState) {
-
-            is SheetPickerViewModel.UiState.Loading -> {
-                FullScreenLoader("Initializing...")
+        when (restoreState) {
+            is DeltaSyncManager.RestoreState.Running -> {
+                RestoreInProgressDialog(
+                    state = restoreState as DeltaSyncManager.RestoreState.Running,
+                    modifier = Modifier.padding(padding)
+                )
             }
-
-            is SheetPickerViewModel.UiState.CreatingNewSheet -> {
-                FullScreenLoader("Creating your data sheet...")
+            is DeltaSyncManager.RestoreState.Failed -> {
+                RestoreFailedDialog(
+                    error = (restoreState as DeltaSyncManager.RestoreState.Failed).error,
+                    onRetry = { viewModel.retryRestore() },
+                    modifier = Modifier.padding(padding)
+                )
             }
+            else -> {
+                when (val state = uiState) {
 
-            is SheetPickerViewModel.UiState.Error -> {
-                Box(
-                    Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(24.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.ErrorOutline,
-                            null,
-                            tint = Color(0xFFF44336),
-                            modifier = Modifier.size(48.dp)
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        Text(state.msg, color = Color.White,
-                            textAlign = TextAlign.Center)
-                        Spacer(Modifier.height(16.dp))
-                        Button(
-                            onClick = {
-                                viewModel.loadExistingSheets(accessToken)
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF1E88E5)
-                            )
-                        ) { Text("Retry") }
+                    is SheetPickerViewModel.UiState.Loading -> {
+                        FullScreenLoader("Initializing...")
                     }
-                }
-            }
 
-            is SheetPickerViewModel.UiState.Ready -> {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding)
-                ) {
-                    LazyColumn(
-                        modifier = Modifier.weight(1f),
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
+                    is SheetPickerViewModel.UiState.CreatingNewSheet -> {
+                        FullScreenLoader("Creating your data sheet...")
+                    }
 
-                        // Searching indicator
-                        if (state.isSearching) {
-                            item {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(16.dp),
-                                        strokeWidth = 2.dp,
-                                        color = Color(0xFF1E88E5)
+                    is SheetPickerViewModel.UiState.Error -> {
+                        Box(
+                            Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(24.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.ErrorOutline,
+                                    null,
+                                    tint = Color(0xFFF44336),
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                Text(state.msg, color = Color.White,
+                                    textAlign = TextAlign.Center)
+                                Spacer(Modifier.height(16.dp))
+                                Button(
+                                    onClick = {
+                                        viewModel.loadExistingSheets(accessToken)
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFF1E88E5)
                                     )
-                                    Spacer(Modifier.width(8.dp))
+                                ) { Text("Retry") }
+                            }
+                        }
+                    }
+
+                    is SheetPickerViewModel.UiState.Ready -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(padding)
+                        ) {
+                            LazyColumn(
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+
+                                if (state.isSearching) {
+                                    item {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.Center,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(16.dp),
+                                                strokeWidth = 2.dp,
+                                                color = Color(0xFF1E88E5)
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(
+                                                "Searching your Google Drive...",
+                                                color = Color.White.copy(alpha = 0.5f),
+                                                fontSize = 13.sp
+                                            )
+                                        }
+                                    }
+                                }
+
+                                if (state.sheets.isNotEmpty()) {
+                                    item {
+                                        Text(
+                                            "\uD83D\uDCC2  Found in your Google Drive",
+                                            color = Color(0xFF1E88E5),
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp
+                                        )
+                                    }
+
+                                    items(
+                                        state.sheets,
+                                        key = { it.spreadsheetId }
+                                    ) { sheet ->
+                                        SheetOptionCard(
+                                            sheet = sheet,
+                                            onClick = {
+                                                viewModel.selectSheet(sheet)
+                                            }
+                                        )
+                                    }
+                                }
+
+                                if (state.sheets.isEmpty() && !state.isSearching) {
+                                    item {
+                                        Card(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = Color(0xFF2A2A2A)
+                                            ),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(24.dp),
+                                                horizontalAlignment =
+                                                    Alignment.CenterHorizontally
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.SearchOff,
+                                                    null,
+                                                    tint = Color.White.copy(alpha = 0.3f),
+                                                    modifier = Modifier.size(40.dp)
+                                                )
+                                                Spacer(Modifier.height(8.dp))
+                                                Text(
+                                                    "No existing sheets found",
+                                                    color = Color.White.copy(alpha = 0.5f),
+                                                    fontSize = 14.sp
+                                                )
+                                                Text(
+                                                    "Create a new one below",
+                                                    color = Color.White.copy(alpha = 0.3f),
+                                                    fontSize = 12.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                item {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        HorizontalDivider(
+                                            modifier = Modifier.weight(1f),
+                                            color = Color.White.copy(alpha = 0.1f)
+                                        )
+                                        Text(
+                                            "  OR  ",
+                                            color = Color.White.copy(alpha = 0.3f),
+                                            fontSize = 11.sp
+                                        )
+                                        HorizontalDivider(
+                                            modifier = Modifier.weight(1f),
+                                            color = Color.White.copy(alpha = 0.1f)
+                                        )
+                                    }
+                                }
+
+                                item {
                                     Text(
-                                        "Searching your Google Drive...",
-                                        color = Color.White.copy(alpha = 0.5f),
+                                        "✨  Start Fresh",
+                                        color = Color(0xFF1E88E5),
+                                        fontWeight = FontWeight.Bold,
                                         fontSize = 13.sp
                                     )
                                 }
-                            }
-                        }
 
-                        // Existing sheets section
-                        if (state.sheets.isNotEmpty()) {
-                            item {
-                                Text(
-                                    "\uD83D\uDCC2  Found in your Google Drive",
-                                    color = Color(0xFF1E88E5),
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp
-                                )
-                            }
-
-                            items(
-                                state.sheets,
-                                key = { it.spreadsheetId }
-                            ) { sheet ->
-                                SheetOptionCard(
-                                    sheet = sheet,
-                                    onClick = {
-                                        viewModel.selectSheet(sheet)
-                                        // Wait a tiny bit and navigate
-                                        onSheetReady(sheet.spreadsheetId)
-                                    }
-                                )
-                            }
-                        }
-
-                        // Empty state
-                        if (state.sheets.isEmpty() && !state.isSearching) {
-                            item {
-                                Card(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = Color(0xFF2A2A2A)
-                                    ),
-                                    shape = RoundedCornerShape(12.dp)
-                                ) {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(24.dp),
-                                        horizontalAlignment =
-                                            Alignment.CenterHorizontally
-                                    ) {
-                                        Icon(
-                                            Icons.Default.SearchOff,
-                                            null,
-                                            tint = Color.White.copy(alpha = 0.3f),
-                                            modifier = Modifier.size(40.dp)
-                                        )
-                                        Spacer(Modifier.height(8.dp))
-                                        Text(
-                                            "No existing sheets found",
-                                            color = Color.White.copy(alpha = 0.5f),
-                                            fontSize = 14.sp
-                                        )
-                                        Text(
-                                            "Create a new one below",
-                                            color = Color.White.copy(alpha = 0.3f),
-                                            fontSize = 12.sp
-                                        )
-                                    }
+                                item {
+                                    CreateNewSheetCard(
+                                        onClick = {
+                                            // FIX (2026-08-07): new user → run Onboarding
+                                            // wizard first (business profile), then create sheet
+                                            showOnboarding = true
+                                        }
+                                    )
                                 }
                             }
-                        }
-
-                        // Divider
-                        item {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                HorizontalDivider(
-                                    modifier = Modifier.weight(1f),
-                                    color = Color.White.copy(alpha = 0.1f)
-                                )
-                                Text(
-                                    "  OR  ",
-                                    color = Color.White.copy(alpha = 0.3f),
-                                    fontSize = 11.sp
-                                )
-                                HorizontalDivider(
-                                    modifier = Modifier.weight(1f),
-                                    color = Color.White.copy(alpha = 0.1f)
-                                )
-                            }
-                        }
-
-                        // Create new section
-                        item {
-                            Text(
-                                "✨  Start Fresh",
-                                color = Color(0xFF1E88E5),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp
-                            )
-                        }
-
-                        item {
-                            CreateNewSheetCard(
-                                onClick = {
-                                    viewModel.createNewSheet(
-                                        accessToken, shopName
-                                    ) { newId ->
-                                        onSheetReady(newId)
-                                    }
-                                }
-                            )
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun RestoreInProgressDialog(
+    state: DeltaSyncManager.RestoreState.Running,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(32.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF2A2A2A)),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                CircularProgressIndicator(
+                    color = Color(0xFF1E88E5),
+                    modifier = Modifier.size(48.dp),
+                    strokeWidth = 4.dp
+                )
+                Spacer(Modifier.height(24.dp))
+                Text(
+                    "Restoring cloud database...",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    state.status,
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 14.sp
+                )
+                Spacer(Modifier.height(16.dp))
+                LinearProgressIndicator(
+                    progress = { state.progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp),
+                    color = Color(0xFF1E88E5),
+                    trackColor = Color.White.copy(alpha = 0.1f)
+                )
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    "This may take up to a minute. Please do not close the app.",
+                    color = Color.White.copy(alpha = 0.5f),
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun RestoreFailedDialog(
+    error: String,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(32.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF2A2A2A)),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    Icons.Default.ErrorOutline,
+                    null,
+                    tint = Color(0xFFF44336),
+                    modifier = Modifier.size(48.dp)
+                )
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    "Restore Failed",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    error,
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(24.dp))
+                Button(
+                    onClick = onRetry,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF1E88E5)
+                    )
+                ) { Text("Retry Restore") }
             }
         }
     }

@@ -22,8 +22,11 @@ interface ProductUnitDao {
     @Query("SELECT COUNT(*) FROM product_units WHERE isDeleted = 0")
     suspend fun getActiveCount(): Int
 
-    @Query("UPDATE product_units SET isDeleted = 1, updatedAt = :time WHERE unitId = :id")
+    @Query("UPDATE product_units SET isDeleted = 1, syncStatus = 'pending', updatedAt = :time WHERE unitId = :id")
     suspend fun softDelete(id: String, time: Long = System.currentTimeMillis())
+
+    @Query("UPDATE product_units SET unitName = :name, abbreviation = :abbr, syncStatus = 'pending', updatedAt = :time WHERE unitId = :id")
+    suspend fun updateUnit(id: String, name: String, abbr: String, time: Long)
 
     @Query("SELECT * FROM product_units WHERE syncStatus = 'pending'")
     suspend fun getPendingSyncUnits(): List<ProductUnitEntity>

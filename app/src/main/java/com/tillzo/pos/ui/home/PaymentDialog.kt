@@ -30,7 +30,7 @@ import com.tillzo.pos.ui.theme.*
 /**
  * M4 Payment Bottom Sheet Dialog.
  *
- * Supports: Cash, Card, Wallet (JazzCash/EasyPaisa), Udhaar (Credit)
+ * Supports: Cash, Card, Digital Wallet, Credit
  * Split payment: user may fill multiple fields — sum must equal grandTotal before confirm enables.
  * Udhaar section: customer search OR new customer form.
  * Cash change: shown when cash > grandTotal.
@@ -62,13 +62,29 @@ fun PaymentDialog(
     var newCustPhone by remember { mutableStateOf("") }
     var newCustWhatsapp by remember { mutableStateOf("") }
 
+    // Partial payment / Khata allocation
+    var addBalanceToKhata by remember { mutableStateOf(false) }
+
+    val cashAmount = cashText.toDoubleOrNull() ?: 0.0
+    val partialCash = cashAmount > 0 && cashAmount < cartTotal
+    val balanceForKhata = if (partialCash && addBalanceToKhata) cartTotal - cashAmount else 0.0
+
     val cashChange = remember(cashText, cartTotal) {
         val cash = cashText.toDoubleOrNull() ?: 0.0
         if (cash > cartTotal) cash - cartTotal else 0.0
     }
 
+    // When Khata balance is active, auto-set the udhaar amount
+    LaunchedEffect(balanceForKhata) {
+        if (balanceForKhata > 0) {
+            viewModel.onPaymentAmountChanged(PaymentMethod.UDHAAR, balanceForKhata)
+        } else if (!showUdhaarSection) {
+            viewModel.onPaymentAmountChanged(PaymentMethod.UDHAAR, 0.0)
+        }
+    }
+
     val isConfirmEnabled = remainingAmount <= 0.01 && !isProcessing &&
-        (paymentBreakdown.udhaarAmount <= 0.0 || selectedCustomer != null)
+        ((paymentBreakdown.udhaarAmount <= 0.0) || selectedCustomer != null)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -91,7 +107,7 @@ fun PaymentDialog(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("Payment", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Text("Total: Rs %.2f".format(cartTotal), color = AccentBlue, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text("Total: $currencySymbol %.2f".format(cartTotal), color = AccentBlue, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
 
             Spacer(Modifier.height(16.dp))
@@ -138,12 +154,119 @@ fun PaymentDialog(
 
             if (cashChange > 0) {
                 Text(
-                    "Change to return: Rs %.2f".format(cashChange),
+                    "Change to return: $currencySymbol %.2f".format(cashChange),
                     color = SuccessGreen,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
+            }
+
+            // Partial Payment — Khata Allocation
+            if (partialCash) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (addBalanceToKhata) AccentBlue.copy(alpha = 0.15f) else SurfaceVariant)
+                        .clickable { addBalanceToKhata = !addBalanceToKhata }
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.AccountBalance,
+                        contentDescription = null,
+                        tint = if (addBalanceToKhata) AccentBlue else TextSecondary
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Add $currencySymbol %.2f balance to customer account".format(balanceForKhata),
+                            color = TextPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text("Remaining amount goes to customer credit", color = TextSecondary, fontSize = 11.sp)
+                    }
+                    Switch(
+                        checked = addBalanceToKhata,
+                        onCheckedChange = { addBalanceToKhata = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = AccentBlue)
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+
+            // Khata customer selection (when balance will be added to Khata)
+            if (addBalanceToKhata && balanceForKhata > 0) {
+                Text("Select Customer for Account Balance", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(6.dp))
+
+                if (selectedCustomer != null) {
+                    SelectedCustomerCard(
+                        customer = selectedCustomer!!,
+                        onClear = {
+                            viewModel.clearSelectedCustomer()
+                            addBalanceToKhata = false
+                        }
+                    )
+                } else {
+                    OutlinedTextField(
+                        value = customerQuery,
+                        onValueChange = { viewModel.onCustomerQueryChanged(it) },
+                        label = { Text("Search customer name or phone", color = TextSecondary) },
+                        leadingIcon = { Icon(Icons.Default.Search, null, tint = TextSecondary) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = outlinedTextFieldColors(),
+                        singleLine = true
+                    )
+
+                    if (customerResults.isNotEmpty()) {
+                        LazyColumn(modifier = Modifier.heightIn(max = 160.dp)) {
+                            items(customerResults) { customer ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { viewModel.selectCustomer(customer) }
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column {
+                                        Text(customer.name, color = TextPrimary, fontSize = 14.sp)
+                                        Text(customer.phone, color = TextSecondary, fontSize = 12.sp)
+                                    }
+                                    Icon(Icons.Default.ChevronRight, null, tint = TextSecondary)
+                                }
+                                HorizontalDivider(color = SurfaceVariant)
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = { showNewCustomerForm = !showNewCustomerForm }) {
+                        Icon(Icons.Default.PersonAdd, null, tint = AccentBlue, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Add New Customer", color = AccentBlue, fontSize = 13.sp)
+                    }
+
+                    if (showNewCustomerForm) {
+                        NewCustomerForm(
+                            name = newCustName,
+                            phone = newCustPhone,
+                            whatsapp = newCustWhatsapp,
+                            onNameChange = { newCustName = it },
+                            onPhoneChange = { newCustPhone = it },
+                            onWhatsappChange = { newCustWhatsapp = it },
+                            onSave = {
+                                if (newCustName.isNotBlank() && newCustPhone.isNotBlank()) {
+                                    viewModel.createAndSelectNewCustomer(newCustName, newCustPhone, newCustWhatsapp)
+                                    showNewCustomerForm = false
+                                }
+                            }
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
             }
 
             // CARD
@@ -160,7 +283,7 @@ fun PaymentDialog(
             // WALLET
             PaymentMethodField(
                 icon = Icons.Default.AccountBalanceWallet,
-                label = "Wallet (JazzCash / EasyPaisa)",
+                label = "Digital Wallet",
                 value = walletText,
                 onValueChange = { v ->
                     walletText = v
@@ -187,7 +310,7 @@ fun PaymentDialog(
                 Icon(Icons.Default.AccountBalance, contentDescription = null, tint = if (showUdhaarSection) AccentBlue else TextSecondary)
                 Spacer(Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Udhaar (Credit)", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text("Credit", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                     Text("Customer must be selected", color = TextSecondary, fontSize = 11.sp)
                 }
                 Switch(
@@ -213,7 +336,7 @@ fun PaymentDialog(
                         udhaarText = v
                         viewModel.onPaymentAmountChanged(PaymentMethod.UDHAAR, v.toDoubleOrNull() ?: 0.0)
                     },
-                    label = { Text("Udhaar Amount", color = TextSecondary) },
+                    label = { Text("Credit Amount", color = TextSecondary) },
                     leadingIcon = { Icon(Icons.Default.AccountBalance, null, tint = TextSecondary) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     modifier = Modifier.fillMaxWidth(),
@@ -223,7 +346,7 @@ fun PaymentDialog(
                 Spacer(Modifier.height(12.dp))
 
                 // Customer section
-                Text("Select Customer for Udhaar", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text("Select Customer for Credit", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(6.dp))
 
                 if (selectedCustomer != null) {
@@ -312,7 +435,7 @@ fun PaymentDialog(
             // Udhaar without customer warning
             if (showUdhaarSection && paymentBreakdown.udhaarAmount > 0 && selectedCustomer == null) {
                 Text(
-                    "⚠ Please select a customer to proceed with Udhaar",
+                    "⚠ Please select a customer to proceed with Credit",
                     color = ErrorRed, fontSize = 12.sp,
                     modifier = Modifier.padding(bottom = 8.dp)
                 )

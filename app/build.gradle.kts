@@ -14,14 +14,14 @@ android {
 
     defaultConfig {
         applicationId = "com.tillzo.pos"
-        minSdk = 26
+        minSdk = 24
         targetSdk = 35
         versionCode = 1
         versionName = "1.0.0"
 
         ndk {
             version = "27.0.12077973"
-            abiFilters += listOf("arm64-v8a", "x86_64")
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
         }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -65,6 +65,20 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
+            excludes.add("**/libtoolChecker.so")
+            excludes.add("**/libtoolChecker*")
+            excludes.add("lib/**/libtoolChecker.so")
+            excludes.add("lib/arm64-v8a/libtoolChecker.so")
+            excludes.add("lib/armeabi-v7a/libtoolChecker.so")
+            excludes.add("lib/x86/libtoolChecker.so")
+            excludes.add("lib/x86_64/libtoolChecker.so")
+            excludes.add("arm64-v8a/libtoolChecker.so")
+            excludes.add("armeabi-v7a/libtoolChecker.so")
+            excludes.add("x86/libtoolChecker.so")
+            excludes.add("x86_64/libtoolChecker.so")
+        }
+        resources {
+            excludes += setOf("**/libtoolChecker.so")
         }
     }
 }
@@ -117,6 +131,9 @@ dependencies {
     // WorkManager
     implementation(libs.workmanager.ktx)
 
+    // Logging (Timber)
+    implementation(libs.timber)
+
     // Network
     implementation(libs.retrofit)
     implementation(libs.retrofit.gson)
@@ -140,6 +157,10 @@ dependencies {
 
     // Security Crypto — EncryptedSharedPreferences for OAuth token storage (M2.10)
     implementation(libs.security.crypto)
+
+    // SQLCipher — encrypted Room database (FIX 2026-08-07: Issue 1 — plaintext SQLite)
+    implementation(libs.sqlcipher)
+    implementation(libs.sqlite.ktx)
 
     // Google Sign-In / Credentials
     implementation(libs.google.signin)

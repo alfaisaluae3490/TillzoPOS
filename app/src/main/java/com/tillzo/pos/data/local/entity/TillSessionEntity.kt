@@ -25,7 +25,10 @@ data class TillSessionEntity(
     val totalSalesCount: Int = 0,
     val totalRefunds: Double = 0.0,
     val netCash: Double = 0.0,                   // closingCash - expectedCash (overage/shortage)
-    val status: String = "OPEN",                 // OPEN | CLOSED
+    val cashVariance: Double = 0.0,              // physicalCashCount - expectedCash (reconciliation variance)
+    val totalPayIn: Double = 0.0,                // Cash added to drawer (e.g., change)
+    val totalPayOut: Double = 0.0,               // Cash removed from drawer (expenses/lunch)
+    val status: String = "OPEN",                 // OPEN | CLOSED | RECONCILED
     val notes: String = "",
     val shiftDate: String = "",                  // YYYY-MM-DD
     val openedAt: Long = System.currentTimeMillis(),

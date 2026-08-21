@@ -6,10 +6,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -26,6 +30,9 @@ fun ExpenseScreen(
 ) {
     val expenses by viewModel.expenses.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
+    var editingExpense by remember { mutableStateOf<com.tillzo.pos.data.local.entity.ExpenseEntity?>(null) }
+    val context = LocalContext.current
+    val currencySymbol = remember { AppSetupPrefs(context).currencySymbol.ifBlank { "$" } }
 
     Scaffold(
         topBar = {
@@ -83,11 +90,19 @@ fun ExpenseScreen(
                                     Text(formatter.format(Date(exp.timestamp)), style = MaterialTheme.typography.bodySmall)
                                 }
                                 Text(
-                                    "- Rs ${String.format("%.2f", exp.amount)}",
+                                    "- $currencySymbol ${String.format("%.2f", exp.amount)}",
                                     color = Color.Red,
                                     fontWeight = FontWeight.Bold,
                                     style = MaterialTheme.typography.titleMedium
                                 )
+                                Row {
+                                    IconButton(onClick = { editingExpense = exp; showAddDialog = true }) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Edit Expense", tint = MaterialTheme.colorScheme.primary)
+                                    }
+                                    IconButton(onClick = { viewModel.deleteExpense(exp.system_row_id) }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete Expense", tint = MaterialTheme.colorScheme.error)
+                                    }
+                                }
                             }
                         }
                     }
@@ -97,15 +112,16 @@ fun ExpenseScreen(
     }
 
     if (showAddDialog) {
-        var category by remember { mutableStateOf("Rent") }
-        var amount by remember { mutableStateOf("") }
-        var description by remember { mutableStateOf("") }
+        val editing = editingExpense
+        var category by remember { mutableStateOf(editing?.category ?: "Rent") }
+        var amount by remember { mutableStateOf(editing?.amount?.toString() ?: "") }
+        var description by remember { mutableStateOf(editing?.description ?: "") }
 
         val categories = listOf("Rent", "Electricity", "Wages", "Maintenance", "Misc")
 
         AlertDialog(
-            onDismissRequest = { showAddDialog = false },
-            title = { Text("Log New Expense") },
+            onDismissRequest = { showAddDialog = false; editingExpense = null },
+            title = { Text(if (editing == null) "Log New Expense" else "Edit Expense") },
             text = {
                 Column {
                     // Simple category selector using buttons for quick entry
@@ -147,13 +163,18 @@ fun ExpenseScreen(
             confirmButton = {
                 Button(onClick = {
                     amount.toDoubleOrNull()?.let {
-                        viewModel.addExpense(category, it, description)
+                        if (editing != null) {
+                            viewModel.updateExpense(editing.system_row_id, category, it, description)
+                        } else {
+                            viewModel.addExpense(category, it, description)
+                        }
                         showAddDialog = false
+                        editingExpense = null
                     }
                 }) { Text("Save Expense") }
             },
             dismissButton = {
-                TextButton(onClick = { showAddDialog = false }) { Text("Cancel") }
+                TextButton(onClick = { showAddDialog = false; editingExpense = null }) { Text("Cancel") }
             }
         )
     }

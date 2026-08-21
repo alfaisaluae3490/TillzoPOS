@@ -32,6 +32,12 @@ class PINUnlockViewModel @Inject constructor(
     }
 
     fun setPIN(pin: String) {
+        // FIX (2026-08-06): enforce 4-digit PIN like Settings does — previously
+        // any-length input was accepted here.
+        if (pin.length != 4 || !pin.all { it.isDigit() }) {
+            _unlockState.value = PINUnlockState.Error("PIN must be exactly 4 digits")
+            return
+        }
         viewModelScope.launch {
             authRepository.setPIN(pin)
             _unlockState.value = PINUnlockState.Success

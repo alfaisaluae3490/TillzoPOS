@@ -258,11 +258,10 @@ private fun LogEntryCard(
     val clipboardManager = LocalClipboardManager.current
     val isError = log.logLevel in listOf("ERROR", "FATAL")
 
-    val levelColor = when (log.logLevel) {
-        "ERROR" -> Color(0xFFF44336)
-        "FATAL" -> Color(0xFFD32F2F)
-        "WARN" -> Color(0xFFFF9800)
-        "INFO" -> Color(0xFF4CAF50)
+    val levelColor = when {
+        isError -> MaterialTheme.colorScheme.onErrorContainer
+        log.logLevel == "WARN" -> Color(0xFFFF9800)
+        log.logLevel == "INFO" -> Color(0xFF4CAF50)
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 

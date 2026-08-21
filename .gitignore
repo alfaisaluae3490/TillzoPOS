@@ -29,3 +29,9 @@ repomix-output.md
 # Python caches
 __pycache__/
 *.pyc
+
+# Google OAuth client secrets (must never be checked in)
+client_secret_*.json
+
+# Binary packages
+*.apk

@@ -52,10 +52,29 @@ import androidx.hilt.navigation.compose.hiltViewModel
 fun AppNavHost(
     onOpenMenu: () -> Unit,
     showAdvancedMenu: Boolean,
-    onMenuDismiss: () -> Unit
+    onMenuDismiss: () -> Unit,
+    appLogger: com.tillzo.pos.utils.AppLogger
 ) {
     val context = LocalContext.current
-    val isRooted = remember { RootBeer(context).isRooted }
+    val isRooted = remember {
+        try {
+            RootBeer(context).isRooted
+        } catch (t: Throwable) {
+            val suPaths = listOf(
+                "/system/app/Superuser.apk",
+                "/sbin/su",
+                "/system/bin/su",
+                "/system/xbin/su",
+                "/data/local/xbin/su",
+                "/data/local/bin/su",
+                "/system/sd/xbin/su",
+                "/system/bin/failsafe/su",
+                "/data/local/su",
+                "/su/bin/su"
+            )
+            suPaths.any { java.io.File(it).exists() }
+        }
+    }
 
     if (isRooted) {
         RootBlockedScreen()
@@ -63,6 +82,20 @@ fun AppNavHost(
     }
 
     val navController = rememberNavController()
+
+    androidx.compose.runtime.DisposableEffect(navController) {
+        val listener = androidx.navigation.NavController.OnDestinationChangedListener { _, destination, arguments ->
+            val argsString = arguments?.let { bundle ->
+                bundle.keySet().joinToString(", ") { key -> "$key=${bundle.get(key)}" }
+            } ?: ""
+            appLogger.logInfo("NAVIGATION", "Navigated to: ${destination.route} | Args: $argsString")
+        }
+        navController.addOnDestinationChangedListener(listener)
+        onDispose {
+            navController.removeOnDestinationChangedListener(listener)
+        }
+    }
+
     val appSetupPrefs = remember { AppSetupPrefs(context) }
     val startDest = if (appSetupPrefs.spreadsheetId.isEmpty()) "sheet_picker" else "home"
 
@@ -76,7 +109,8 @@ fun AppNavHost(
     ) {
         
         composable("sheet_picker") {
-            val shopName = appSetupPrefs.userDisplayName
+            // FIX (2026-08-06): prefer business name from onboarding for the sheet title
+            val shopName = appSetupPrefs.businessName.ifBlank { appSetupPrefs.userDisplayName }
             SheetPickerScreen(
                 accessToken = "",
                 shopName = shopName,
@@ -150,9 +184,13 @@ fun AppNavHost(
                     onNavigateToVendors = { onMenuDismiss(); navController.navigate("vendor_management") },
                     onNavigateToStockAdjustment = { onMenuDismiss(); navController.navigate("stock_adjustment") },
                     onNavigateToTill = { onMenuDismiss(); navController.navigate("till_open") },
+                    onNavigateToTimeClock = { onMenuDismiss(); navController.navigate("time_clock") },
+                    onNavigateToVerifyQr = { onMenuDismiss(); navController.navigate("verify_qr") },
                     onNavigateToWastage = { onMenuDismiss(); navController.navigate("wastage_log") },
                     onNavigateToStockAlerts = { onMenuDismiss(); navController.navigate("stock_alerts") },
                     onNavigateToHardwareDiagnostics = { onMenuDismiss(); navController.navigate("hardware_diagnostics") },
+                    // FIX (2026-08-06): Admin Dashboard menu item had NO route — dead.
+                    onNavigateToAdmin = { onMenuDismiss(); navController.navigate("admin_dashboard") },
                     onNavigateToSync = {
                         homeViewModel.forceSync()
                         onMenuDismiss()
@@ -184,7 +222,8 @@ fun AppNavHost(
             InventoryModule(
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToCategories = { navController.navigate("category_management") },
-                onNavigateToUnits = { navController.navigate("product_units") }
+                onNavigateToUnits = { navController.navigate("product_units") },
+                onNavigateToStockAlerts = { navController.navigate("stock_alerts") }
             )
         }
 
@@ -231,7 +270,9 @@ fun AppNavHost(
         // Module C: GRN
         composable("grn_list") {
             com.tillzo.pos.ui.inventory.module_c.GrnListScreen(
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.popBackStack() },
+                // FIX (2026-08-06): GRN cards now open their detail screen.
+                onNavigateToGrnDetail = { grnId -> navController.navigate("grn_detail/$grnId") }
             )
         }
 
@@ -331,6 +372,20 @@ fun AppNavHost(
             )
         }
 
+        // FIX (2026-08-06): employee time-tracking
+        composable("time_clock") {
+            com.tillzo.pos.ui.store.options.timeclock.PunchClockScreen(
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        // FIX (2026-08-06): receipt QR verification
+        composable("verify_qr") {
+            com.tillzo.pos.ui.store.options.verifyqr.VerifyQrScreen(
+                onBack = { navController.popBackStack() }
+            )
+        }
+
         // E1: Wastage Log Screen
         composable("wastage_log") {
             WastageLogScreen(
@@ -342,7 +397,9 @@ fun AppNavHost(
         composable("stock_alerts") {
             StockAlertsScreen(
                 onNavigateBack = { navController.popBackStack() },
-                onNavigateToInventory = { navController.navigate("inventory") }
+                // FIX (2026-08-06): was navigating to "inventory" — a route that does
+                // NOT exist (crash). The real route is the nested "inventory_module".
+                onNavigateToInventory = { navController.navigate("inventory_module") }
             )
         }
 
@@ -353,6 +410,20 @@ fun AppNavHost(
                 onBack = { navController.popBackStack() },
                 tsplPrinter = com.tillzo.pos.utils.printer.TsplPrinter(),
                 appSetupPrefs = remember { AppSetupPrefs(context) }
+            )
+        }
+
+        // FIX (2026-08-06): Admin Dashboard + User Management — newly developed
+        // (previously the menu item was dead, no route existed).
+        composable("admin_dashboard") {
+            com.tillzo.pos.ui.security.AdminDashboardScreen(
+                onBack = { navController.popBackStack() },
+                onNavigateToUsers = { navController.navigate("user_management") }
+            )
+        }
+        composable("user_management") {
+            com.tillzo.pos.ui.security.UserManagementScreen(
+                onBack = { navController.popBackStack() }
             )
         }
     }

@@ -31,4 +31,8 @@ interface CustomerDao : BaseDao<CustomerEntity> {
 
     @Query("UPDATE Customers SET sync_status = 'synced' WHERE system_row_id = :id AND is_deleted = 1")
     suspend fun markSyncedAndDeleted(id: String)
+
+    // FIX (2026-08-06): loyalty — update points + lifetime spend atomically
+    @Query("UPDATE Customers SET loyalty_points = :points, lifetime_spend = :spend, updated_at = :ts WHERE system_row_id = :id")
+    suspend fun updateLoyalty(id: String, points: Double, spend: Double, ts: Long)
 }

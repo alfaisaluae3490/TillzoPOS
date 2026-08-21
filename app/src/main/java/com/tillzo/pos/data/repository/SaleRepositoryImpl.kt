@@ -14,7 +14,8 @@ import javax.inject.Inject
 
 class SaleRepositoryImpl @Inject constructor(
     private val saleDao: SaleDao,
-    private val gson: Gson
+    private val gson: Gson,
+    private val appSetupPrefs: com.tillzo.pos.data.local.prefs.AppSetupPrefs
 ) : SaleRepository {
 
     override fun getAllSales(): Flow<List<Sale>> {
@@ -95,8 +96,10 @@ class SaleRepositoryImpl @Inject constructor(
     }
 
     private fun Sale.toEntity(): SaleEntity {
-        // Note: For a real app, pos_terminal_id would come from DataStore/Environment
-        val terminalId = "TERM_1" 
+        // FIX (2026-08-06): terminal ID was hardcoded "TERM_1" for every device —
+        // broke M2.8 multi-terminal replica (every device sharing a sheet got the
+        // same id). Now derived from the spreadsheetId like SyncWorker does.
+        val terminalId = appSetupPrefs.spreadsheetId.take(20).ifBlank { "TERM_1" }
         
         return SaleEntity(
             system_row_id = systemRowId,

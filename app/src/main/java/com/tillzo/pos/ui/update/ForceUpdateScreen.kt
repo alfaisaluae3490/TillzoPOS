@@ -44,6 +44,7 @@ fun ForceUpdateScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .systemBarsPadding()
                 .background(BackgroundDark),
             contentAlignment = Alignment.Center
         ) {

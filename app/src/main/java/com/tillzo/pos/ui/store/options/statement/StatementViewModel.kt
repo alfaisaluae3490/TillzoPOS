@@ -17,8 +17,10 @@ import javax.inject.Inject
 
 @HiltViewModel
 class StatementViewModel @Inject constructor(
-    private val storeRepository: StoreRepository
+    private val storeRepository: StoreRepository,
+    private val appSetupPrefs: com.tillzo.pos.data.local.prefs.AppSetupPrefs
 ) : ViewModel() {
+    private val currencySymbol get() = appSetupPrefs.currencySymbol.ifBlank { "$" }
 
     private val _customer = MutableStateFlow<CustomerEntity?>(null)
     val customer = _customer.asStateFlow()
@@ -52,16 +54,16 @@ class StatementViewModel @Inject constructor(
         val builder = java.lang.StringBuilder()
         builder.append("*Account Statement - Tillzo POS*\n")
         builder.append("Customer: ${cust.name}\n")
-        builder.append("Current Balance (Baqaya): *Rs ${String.format("%.2f", _baqaya.value)}*\n\n")
+        builder.append("Current Balance: *$currencySymbol ${String.format("%.2f", _baqaya.value)}*\n\n")
         builder.append("Recent Transactions:\n")
 
         // Take last 10 events for brevity in WhatsApp
         val recentEvents = _events.value.take(10)
         for (event in recentEvents) {
             val date = formatter.format(Date(event.created_at))
-            val typeStr = if (event.event_type == "UDHAAR") "Udhaar (-)" else "Jama (+)"
+            val typeStr = if (event.event_type == "UDHAAR") "Credit (-)" else "Payment (+)"
             val amt = Math.abs(event.amount)
-            builder.append("- $date: $typeStr Rs $amt")
+            builder.append("- $date: $typeStr $currencySymbol $amt")
             if (!event.note.isNullOrBlank()) {
                 builder.append(" (${event.note})")
             }

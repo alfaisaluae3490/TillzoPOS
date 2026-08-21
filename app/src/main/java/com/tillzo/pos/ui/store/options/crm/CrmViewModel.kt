@@ -107,6 +107,13 @@ class CrmViewModel @Inject constructor(
         }
     }
 
+    fun deleteCustomer(customer: CustomerEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            storeRepository.softDeleteCustomer(customer.system_row_id, System.currentTimeMillis())
+            loadCustomers()
+        }
+    }
+
     fun addKhataEvent(amount: Double, type: String, note: String) {
         val custId = _selectedCustomer.value?.system_row_id ?: return
         if (amount <= 0) return

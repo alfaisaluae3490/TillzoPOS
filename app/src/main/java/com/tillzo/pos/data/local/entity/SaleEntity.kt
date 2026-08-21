@@ -1,6 +1,7 @@
 package com.tillzo.pos.data.local.entity
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
 /**
@@ -10,7 +11,13 @@ import androidx.room.PrimaryKey
  * payment_split_json: Serialized Map or List for Multi-Tender (Cash, Card, Wallet, Udhaar).
  * sync_uuid: Used as the QR Code invoice identifier. It maps to Google Sheets "sync_uuid" / "invoice_id".
  */
-@Entity(tableName = "Sales")
+@Entity(
+    tableName = "Sales",
+    indices = [
+        Index(value = ["customer_id"]),
+        Index(value = ["timestamp"])
+    ]
+)
 data class SaleEntity(
     @PrimaryKey
     override val system_row_id: String,
@@ -54,6 +61,7 @@ data class SaleEntity(
             "discount" to discount,
             "total" to total,
             "payment_method" to payment_method,
+            "payment_split_json" to (payment_split_json ?: ""),
             "cash_amount" to cash_amount,
             "card_amount" to card_amount,
             "wallet_amount" to wallet_amount,

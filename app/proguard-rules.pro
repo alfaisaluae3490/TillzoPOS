@@ -40,5 +40,8 @@
 # ─── BuildConfig ─────────────────────────────────────────────────────────────
 -keep class com.tillzo.pos.BuildConfig { *; }
 
+# ─── Timber ──────────────────────────────────────────────────────────────────
+-keep class timber.log.** { *; }
+
 # ─── Play Billing ────────────────────────────────────────────────────────────
 -keep class com.android.billingclient.api.** { *; }

@@ -64,6 +64,11 @@ fun ReceiptScreen(
 
     val appSetupPrefs = remember { AppSetupPrefs(context) }
     val currencySymbol = appSetupPrefs.currencySymbol
+    // FIX (2026-08-06): business branding from onboarding wizard
+    val businessName = appSetupPrefs.businessName.ifBlank { "TILLZO POS" }
+    val businessAddress = appSetupPrefs.businessAddress
+    val businessPhone = appSetupPrefs.businessPhone
+    val businessLogoPath = appSetupPrefs.businessLogoPath
     val scope = rememberCoroutineScope()
     val escPosPrinter = remember { EscPosPrinter() }
 
@@ -103,16 +108,23 @@ fun ReceiptScreen(
                         .padding(20.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Shop Header
+                    // Shop Header (FIX 2026-08-06: business branding from onboarding)
                     Text(
-                        text = "TILLZO POS",
+                        text = businessName.uppercase(),
                         fontSize = 22.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = TextPrimary,
-                        fontFamily = FontFamily.Monospace
+                        fontFamily = FontFamily.Monospace,
+                        textAlign = TextAlign.Center
                     )
+                    if (businessAddress.isNotBlank()) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(businessAddress, color = TextSecondary, fontSize = 11.sp, textAlign = TextAlign.Center)
+                    }
+                    if (businessPhone.isNotBlank()) {
+                        Text(businessPhone, color = TextSecondary, fontSize = 11.sp)
+                    }
                     Spacer(Modifier.height(2.dp))
-                    Text("Powered by Tillzo", color = TextSecondary, fontSize = 11.sp)
 
                     ReceiptDivider()
 
@@ -152,7 +164,7 @@ fun ReceiptScreen(
                     if (sale != null) {
                         ReceiptInfoRow("Subtotal:", "$currencySymbol %.2f".format(sale.subtotal))
                         if (sale.tax > 0) ReceiptInfoRow("Tax:", "$currencySymbol %.2f".format(sale.tax))
-                        if (sale.discount > 0) ReceiptInfoRow("Discount:", "- Rs %.2f".format(sale.discount))
+                        if (sale.discount > 0) ReceiptInfoRow("Discount:", "- $currencySymbol %.2f".format(sale.discount))
                         ReceiptDivider()
                         Row(Modifier.fillMaxWidth()) {
                             Text("TOTAL:", color = TextPrimary, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, modifier = Modifier.weight(1f))
@@ -164,7 +176,7 @@ fun ReceiptScreen(
                         if (sale.cash_amount > 0) ReceiptInfoRow("Cash Paid:", "$currencySymbol %.2f".format(sale.cash_amount))
                         if (sale.card_amount > 0) ReceiptInfoRow("Card:", "$currencySymbol %.2f".format(sale.card_amount))
                         if (sale.wallet_amount > 0) ReceiptInfoRow("Wallet:", "$currencySymbol %.2f".format(sale.wallet_amount))
-                        if (sale.udhaar_amount > 0) ReceiptInfoRow("Udhaar:", "$currencySymbol %.2f".format(sale.udhaar_amount))
+                        if (sale.udhaar_amount > 0) ReceiptInfoRow("Credit:", "$currencySymbol %.2f".format(sale.udhaar_amount))
 
                         val cashChange = sale.cash_amount - sale.total
                         if (cashChange > 0) {
@@ -231,7 +243,7 @@ fun ReceiptScreen(
                             showWhatsappInput = true
                         } else {
                             viewModel.logClick("UI_CLICK", "WhatsApp share receipt: $invoiceId")
-                            sendWhatsApp(context, number, buildReceiptText(sale, invoiceId))
+                            sendWhatsApp(context, number, buildReceiptText(sale, invoiceId, currencySymbol))
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
@@ -248,7 +260,7 @@ fun ReceiptScreen(
                     Button(
                         onClick = {
                             viewModel.logClick("UI_CLICK", "WhatsApp send receipt: $invoiceId to $whatsappNumber")
-                            sendWhatsApp(context, whatsappNumber, buildReceiptText(sale, invoiceId))
+                            sendWhatsApp(context, whatsappNumber, buildReceiptText(sale, invoiceId, currencySymbol))
                         },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366)),
@@ -270,7 +282,7 @@ fun ReceiptScreen(
                         } else {
                             scope.launch {
                                 snackbarHostState.showSnackbar("Printing...")
-                                val receiptText = buildReceiptText(sale, invoiceId)
+                                val receiptText = buildReceiptText(sale, invoiceId, currencySymbol)
                                 val success = escPosPrinter.printViaBluetooth(mac, receiptText)
                                 snackbarHostState.showSnackbar(
                                     if (success) "Receipt sent to printer"
@@ -354,7 +366,7 @@ private fun generateQrCode(content: String, size: Int): Bitmap? {
     }
 }
 
-private fun buildReceiptText(sale: SaleEntity?, invoiceId: String): String {
+private fun buildReceiptText(sale: SaleEntity?, invoiceId: String, currencySymbol: String = "$"): String {
     return buildString {
         appendLine("================================")
         appendLine("TILLZO POS")
@@ -364,17 +376,17 @@ private fun buildReceiptText(sale: SaleEntity?, invoiceId: String): String {
             appendLine("Date: ${formatTimestamp(sale.timestamp)}")
             appendLine("Cashier: ${sale.cashier_id.take(20)}")
             appendLine("--------------------------------")
-            appendLine("Subtotal:  Rs %.2f".format(sale.subtotal))
-            if (sale.tax > 0) appendLine("Tax:       Rs %.2f".format(sale.tax))
-            if (sale.discount > 0) appendLine("Discount:  Rs %.2f".format(sale.discount))
-            appendLine("TOTAL:     Rs %.2f".format(sale.total))
+            appendLine("Subtotal:  $currencySymbol %.2f".format(sale.subtotal))
+            if (sale.tax > 0) appendLine("Tax:       $currencySymbol %.2f".format(sale.tax))
+            if (sale.discount > 0) appendLine("Discount:  $currencySymbol %.2f".format(sale.discount))
+            appendLine("TOTAL:     $currencySymbol %.2f".format(sale.total))
             appendLine("--------------------------------")
-            if (sale.cash_amount > 0) appendLine("Cash:      Rs %.2f".format(sale.cash_amount))
-            if (sale.card_amount > 0) appendLine("Card:      Rs %.2f".format(sale.card_amount))
-            if (sale.wallet_amount > 0) appendLine("Wallet:    Rs %.2f".format(sale.wallet_amount))
-            if (sale.udhaar_amount > 0) appendLine("Udhaar:    Rs %.2f".format(sale.udhaar_amount))
+            if (sale.cash_amount > 0) appendLine("Cash:      $currencySymbol %.2f".format(sale.cash_amount))
+            if (sale.card_amount > 0) appendLine("Card:      $currencySymbol %.2f".format(sale.card_amount))
+            if (sale.wallet_amount > 0) appendLine("Wallet:    $currencySymbol %.2f".format(sale.wallet_amount))
+            if (sale.udhaar_amount > 0) appendLine("Credit:    $currencySymbol %.2f".format(sale.udhaar_amount))
             val change = sale.cash_amount - sale.total
-            if (change > 0) appendLine("Change:    Rs %.2f".format(change))
+            if (change > 0) appendLine("Change:    $currencySymbol %.2f".format(change))
         }
         appendLine("================================")
         appendLine("Thank you! Come again.")

@@ -1,13 +1,19 @@
 package com.tillzo.pos.data.local.entity
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.util.UUID
 
 /**
  * M7.6 Store Module — Daily Expense Tracking.
  */
-@Entity(tableName = "Expenses")
+@Entity(
+    tableName = "Expenses",
+    indices = [
+        Index(value = ["timestamp"])
+    ]
+)
 data class ExpenseEntity(
     @PrimaryKey
     override val system_row_id: String = UUID.randomUUID().toString(),

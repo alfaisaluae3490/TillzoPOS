@@ -13,19 +13,20 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import androidx.core.content.ContextCompat
 import androidx.core.content.PermissionChecker
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tillzo.pos.data.local.prefs.AppSetupPrefs
+import com.tillzo.pos.data.sync.options.token.OAuthTokenManager
 import com.tillzo.pos.domain.update.ForceUpdateState
 import com.tillzo.pos.ui.auth.options.session.PINUnlockScreen
 import com.tillzo.pos.ui.signin.SignInScreen
@@ -34,6 +35,7 @@ import com.tillzo.pos.ui.update.ForceUpdateScreen
 import com.tillzo.pos.ui.update.ForceUpdateViewModel
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import androidx.compose.ui.platform.LocalContext
 
 /**
  * MainActivity — single-activity entry point.
@@ -50,6 +52,12 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var appSetupPrefs: AppSetupPrefs
 
+    @Inject
+    lateinit var authRepository: com.tillzo.pos.domain.repository.AuthRepository
+
+    @Inject
+    lateinit var appLogger: com.tillzo.pos.utils.AppLogger
+
     private val forceUpdateViewModel: ForceUpdateViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -57,12 +65,20 @@ class MainActivity : ComponentActivity() {
         // Portrait lock in code (manifest attribute triggers Android 16 + Chrome OS warnings)
         requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         enableEdgeToEdge()
+        // FIX (2026-08-07): Issue 6 — FLAG_SECURE (screenshot/recents protection)
+        // App switcher/recents mein sales data screenshot leak se bachao
+        window.setFlags(
+            android.view.WindowManager.LayoutParams.FLAG_SECURE,
+            android.view.WindowManager.LayoutParams.FLAG_SECURE
+        )
 
         setContent {
             TillzoPOSTheme {
                 TillzoPOSApp(
                     appSetupPrefs       = appSetupPrefs,
-                    forceUpdateViewModel = forceUpdateViewModel
+                    authRepository      = authRepository,
+                    forceUpdateViewModel = forceUpdateViewModel,
+                    appLogger            = appLogger
                 )
             }
         }
@@ -73,7 +89,9 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun TillzoPOSApp(
     appSetupPrefs: AppSetupPrefs,
-    forceUpdateViewModel: ForceUpdateViewModel
+    authRepository: com.tillzo.pos.domain.repository.AuthRepository,
+    forceUpdateViewModel: ForceUpdateViewModel,
+    appLogger: com.tillzo.pos.utils.AppLogger
 ) {
     // Track sign-in / provisioning status
     var isProvisioned by remember { mutableStateOf(appSetupPrefs.isProvisioned) }
@@ -87,7 +105,9 @@ private fun TillzoPOSApp(
     val updateState by forceUpdateViewModel.uiState.collectAsStateWithLifecycle()
 
     if (!isProvisioned) {
-        // ── Not signed in yet — show SignInScreen ─────────────────────────
+        // ── FIX (2026-08-07): Gmail sign-in FIRST (Faisal's requirement) ──
+        // Login pehle, phir business check (SheetPicker) decide karta hai:
+        // existing user → simple login + cloud restore; naya user → onboarding.
         SignInScreen(
             onSignInComplete = {
                 isProvisioned = true
@@ -98,13 +118,36 @@ private fun TillzoPOSApp(
         return
     }
 
-    val isPinEnabled = appSetupPrefs.isPinEnabled
+    // FIX (2026-08-06): PIN gate must only apply when a PIN actually EXISTS.
+    // Old code checked appSetupPrefs.isPinEnabled (default TRUE) so a brand-new
+    // user who never set a PIN got stuck on the PIN unlock screen after sign-in.
+    val isPinEnabled = appSetupPrefs.isPinEnabled && authRepository.hasPIN()
     if (isPinEnabled && !isUnlocked) {
         PINUnlockScreen(
             onUnlockSuccess = { isUnlocked = true },
             onNeedsLogin = { isProvisioned = false; isUnlocked = false }
         )
         return
+    }
+
+    // FIX (2026-08-06): listen for RE_AUTH_NEEDED — when the OAuth token can no
+    // longer be refreshed (expired/revoked), drop back to the SignInScreen so the
+    // user can do a fresh interactive Google sign-in. Without this receiver the
+    // broadcast was dead code and the app silently kept 401ing forever.
+    val context = LocalContext.current
+    DisposableEffect(Unit) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context?, intent: Intent?) {
+                android.util.Log.i("RE_AUTH", "received: ${intent?.action}")
+                if (intent?.action == OAuthTokenManager.ACTION_RE_AUTH_NEEDED) {
+                    isProvisioned = false
+                    isUnlocked = false
+                }
+            }
+        }
+        val filter = IntentFilter(OAuthTokenManager.ACTION_RE_AUTH_NEEDED)
+        ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        onDispose { context.unregisterReceiver(receiver) }
     }
 
     // ── Signed in — check force update then show Home ─────────────────────
@@ -121,7 +164,8 @@ private fun TillzoPOSApp(
                     AppNavHost(
                         onOpenMenu = { showAdvancedMenu = true },
                         showAdvancedMenu = showAdvancedMenu,
-                        onMenuDismiss = { showAdvancedMenu = false }
+                        onMenuDismiss = { showAdvancedMenu = false },
+                        appLogger = appLogger
                     )
                     if (!dismissedCountdown) {
                         ForceUpdateScreen(
@@ -136,7 +180,8 @@ private fun TillzoPOSApp(
                     AppNavHost(
                         onOpenMenu = { showAdvancedMenu = true },
                         showAdvancedMenu = showAdvancedMenu,
-                        onMenuDismiss = { showAdvancedMenu = false }
+                        onMenuDismiss = { showAdvancedMenu = false },
+                        appLogger = appLogger
                     )
                 }
             }

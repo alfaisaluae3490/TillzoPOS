@@ -90,20 +90,24 @@ class ReturnsViewModel @Inject constructor(
                         val returnedQty = saleItem.quantity
                         val item = inventoryDao.getItemById(saleItem.itemId)
                         if (item != null) {
+                            val now = System.currentTimeMillis()
                             val newStock = item.current_stock + returnedQty
-                            inventoryDao.updateStock(item.system_row_id, newStock)
+                            inventoryDao.updateStockAndSyncStatus(item.system_row_id, newStock, now)
                             
                             if (item.hasBatches) {
                                 val batches = productBatchDao.getAllBatchesForProduct(item.system_row_id)
                                 val activeBatch = batches.filter { it.isActive && !it.isDeleted }
-                                                         .maxByOrNull { it.createdAt }
+                                                                 .maxByOrNull { it.createdAt }
                                 activeBatch?.let { batch ->
                                     productBatchDao.updateBatchStock(
                                         batch.batchId,
                                         batch.stockQty + returnedQty,
-                                        System.currentTimeMillis()
+                                        now
                                     )
                                 }
+                                // Recalculate total stock from all active batches
+                                val total = batches.filter { it.isActive && !it.isDeleted }.sumOf { it.stockQty }
+                                inventoryDao.updateTotalStockAndSyncStatus(item.system_row_id, total, now)
                             }
                         }
                     }

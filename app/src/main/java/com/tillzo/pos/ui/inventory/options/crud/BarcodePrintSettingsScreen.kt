@@ -1037,7 +1037,7 @@ fun BarcodePrintSettingsScreen(
                     titleTextSize = 6f
                     isTitleBold = true
                     barcodeSize = 48f
-                    currencySymbol = "PKR"
+                    currencySymbol = "$"
                     labelWidth = "144"
                     labelHeight = "72"
                     titleX = 4f

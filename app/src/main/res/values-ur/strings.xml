@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TillzoPOS</string>
+    <string name="default_web_client_id" translatable="false">191290481305-3m583fdj0hq5je8mnj34frqih33lssqc.apps.googleusercontent.com</string>
+    <string name="sale">فروخت</string>
+    <string name="inventory">انوینٹری</string>
+    <string name="khata">کھاتہ</string>
+    <string name="close_till">باکس بند کریں</string>
+    <string name="total">کل</string>
+    <string name="items">اشیاء</string>
+    <string name="print_receipt">رسید پرنٹ کریں</string>
+    <string name="search_hint">نام، SKU سے تلاش کریں یا بارکوڈ اسکین کریں…</string>
+    <string name="open_till">باکس کھولیں</string>
+    <string name="close_day">دن بند کریں (Z-رپورٹ)</string>
+</resources>

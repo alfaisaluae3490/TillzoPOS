@@ -26,6 +26,8 @@ import com.tillzo.pos.domain.sync.usecase.SalesUploadUseCase
 import com.tillzo.pos.domain.sync.usecase.SchemaGuardUseCase
 import com.tillzo.pos.domain.sync.usecase.ProductUnitUpsertUseCase
 import com.tillzo.pos.domain.sync.usecase.VendorUpsertUseCase
+import com.tillzo.pos.domain.sync.usecase.CustomerUpsertUseCase
+import com.tillzo.pos.domain.sync.usecase.ExpenseUpsertUseCase
 import com.tillzo.pos.utils.AppLogger
 import com.tillzo.pos.utils.NotificationHelper
 import dagger.assisted.Assisted
@@ -60,6 +62,8 @@ class SyncWorker @AssistedInject constructor(
     private val categoryUpsertUseCase: CategoryUpsertUseCase,
     private val productUnitUpsertUseCase: ProductUnitUpsertUseCase,
     private val vendorUpsertUseCase: VendorUpsertUseCase,
+    private val customerUpsertUseCase: CustomerUpsertUseCase,
+    private val expenseUpsertUseCase: ExpenseUpsertUseCase,
     private val schemaGuardUseCase: SchemaGuardUseCase,
     private val sheetsRepository: SheetsRepository,
     private val sheetsRemoteDataSource: SheetsRemoteDataSource,
@@ -81,11 +85,23 @@ class SyncWorker @AssistedInject constructor(
         syncLogDao.ensureTableRegistered("Categories")
         syncLogDao.ensureTableRegistered("Product_Units")
         syncLogDao.ensureTableRegistered("Vendors")
+        syncLogDao.ensureTableRegistered("Customers")
+        syncLogDao.ensureTableRegistered("Expenses")
+        // FIX (2026-08-06): Users_Permissions was never registered → local user
+        // changes (roles, new users) never uploaded to the Sheet. Now tracked.
+        syncLogDao.ensureTableRegistered("Users")
+        syncLogDao.ensureTableRegistered("Time_Clock")
     }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         Log.d(TAG, "SyncWorker started (attempt #${runAttemptCount + 1})")
         appLogger.logInfo("SYNC_PROCESS", "SyncWorker started (attempt #${runAttemptCount + 1})")
+
+        if (appSetupPrefs.spreadsheetId.isBlank()) {
+            Log.w(TAG, "spreadsheetId not configured — skipping sync. Setup not completed.")
+            appLogger.logWarn("SYNC_PROCESS", "spreadsheetId not configured — skipping sync")
+            return@withContext Result.success()
+        }
 
         try {
             val syncLogDao = appDatabase.syncLogDao()
@@ -116,7 +132,6 @@ class SyncWorker @AssistedInject constructor(
             // M11 Explicit Sync Methods
             uploadPendingPurchaseOrders()
             uploadPendingGRNs()
-            uploadPendingVendors()
             if (!uploadPendingProductBatches()) anyFailure = true
             uploadPendingStockAdjustments()
             uploadPendingTillSessions()
@@ -231,7 +246,7 @@ class SyncWorker @AssistedInject constructor(
 
                             val allBatches = productBatchDao.getAllBatchesForProduct(productId)
                             val total = allBatches.filter { it.isActive && !it.isDeleted }.sumOf { it.stockQty }
-                            inventoryDao.updateTotalStock(productId, total, System.currentTimeMillis())
+                            inventoryDao.updateTotalStockAndSyncStatus(productId, total, System.currentTimeMillis())
                         }
 
                         Log.d(TAG, "Fallback stock deducted: $productId → ${item.current_stock} - $qtySold = $newStock")
@@ -254,10 +269,74 @@ class SyncWorker @AssistedInject constructor(
             "KhataEvents" -> khataEventUseCase(tableName, posTerminalId)
             "Categories"  -> categoryUpsertUseCase(posTerminalId)
             "Product_Units" -> productUnitUpsertUseCase(posTerminalId)
+            "Customers"   -> customerUpsertUseCase(posTerminalId)
+            "Expenses"    -> expenseUpsertUseCase(posTerminalId)
+            "Vendors"     -> vendorUpsertUseCase.invoke()
+            // FIX (2026-08-06): Users_Permissions upload — previously fell into the
+            // `else` branch (silently "passed" without uploading anything). Now
+            // pending users (new/role-changed) are appended to the Users_Permissions tab.
+            "Users", "Users_Permissions" -> uploadPendingUsers()
+            "Time_Clock" -> uploadPendingTimeClock()
             else -> {
                 Log.w(TAG, "Unknown table name for sync: $tableName")
                 true
             }
+        }
+    }
+
+    private suspend fun uploadPendingUsers(): Boolean {
+        return try {
+            val pending = appDatabase.userDao().getPendingSyncUsers()
+            if (pending.isEmpty()) return true
+            val rows = pending.map { u ->
+                listOf(
+                    u.system_row_id, u.email, u.name, u.role,
+                    u.password_hash ?: "", u.permissions_json ?: "",
+                    if (u.is_deleted) 1 else 0, u.deleted_at ?: "",
+                    u.sync_status, u.pos_terminal_id, u.created_at, u.updated_at
+                )
+            }
+            val result = sheetsRepository.uploadBatch("Users_Permissions", rows)
+            if (result is SyncResult.Success) {
+                pending.forEach { u ->
+                    appDatabase.userDao().updateUser(u.copy(sync_status = "synced"))
+                }
+                Log.d(TAG, "Users_Permissions uploaded: ${pending.size}")
+                true
+            } else {
+                Log.w(TAG, "Users_Permissions upload failed")
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Users_Permissions upload error", e)
+            false
+        }
+    }
+
+    // FIX (2026-08-06): employee time-tracking cloud sync
+    private suspend fun uploadPendingTimeClock(): Boolean {
+        return try {
+            val pending = appDatabase.timeClockDao().getPendingPunches()
+            if (pending.isEmpty()) return true
+            val rows = pending.map { p ->
+                listOf(
+                    p.system_row_id, p.employee_email, p.employee_name, p.event_type,
+                    p.timestamp, p.note ?: "", p.pos_terminal_id, p.created_at,
+                    p.updated_at, "synced"
+                )
+            }
+            val result = sheetsRepository.uploadBatch("Time_Clock", rows)
+            if (result is SyncResult.Success) {
+                pending.forEach { p -> appDatabase.timeClockDao().markSynced(p.system_row_id) }
+                Log.d(TAG, "Time_Clock uploaded: ${pending.size}")
+                true
+            } else {
+                Log.w(TAG, "Time_Clock upload failed")
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Time_Clock upload error", e)
+            false
         }
     }
 
@@ -285,22 +364,38 @@ class SyncWorker @AssistedInject constructor(
         try {
             val poDao = appDatabase.purchaseOrderDao()
             val pendingPOs = poDao.getPendingPOs()
-            val existingIds = sheetsRepository.getExistingUuids("Purchase_Orders")
-            val newPOs = pendingPOs.filter { it.poId !in existingIds }
-            val result = uploadTableIfNeeded("Purchase_Orders", newPOs.map { it.toSheetRow() })
-            if (result is SyncResult.Success) {
-                newPOs.forEach { poDao.markSynced(it.poId) }
-                pendingPOs.forEach { po ->
-                    val items = poDao.getPOItems(po.poId)
-                    if (items.isNotEmpty()) {
-                        val itemsResult = sheetsRepository.uploadBatch("PO_Items", items.map { it.toSheetRow() })
+            if (pendingPOs.isEmpty()) return
+
+            val existingHeaderIds = sheetsRepository.getExistingUuids("Purchase_Orders").toHashSet()
+            val existingItemIds = sheetsRepository.getExistingUuids("PO_Items").toHashSet()
+
+            for (po in pendingPOs) {
+                // 1. Upload items first
+                val items = poDao.getPOItems(po.poId)
+                var itemsSucceeded = true
+                if (items.isNotEmpty()) {
+                    val newItems = items.filter { it.poItemId !in existingItemIds }
+                    if (newItems.isNotEmpty()) {
+                        val itemsResult = sheetsRepository.uploadBatch("PO_Items", newItems.map { it.toSheetRow() })
                         if (itemsResult !is SyncResult.Success) {
-                            Log.w(TAG, "PO_Items upload failed for PO ${po.poId}")
+                            Log.w(TAG, "PO_Items upload failed for PO ${po.poId} — keeping pending")
+                            itemsSucceeded = false
                         }
                     }
                 }
-            } else if (result != null) {
-                Log.w(TAG, "Purchase Orders upload failed — keeping pending")
+                if (!itemsSucceeded) continue
+
+                // 2. Upload header (only if not already on sheet)
+                if (po.poId !in existingHeaderIds) {
+                    val headerResult = sheetsRepository.uploadBatch("Purchase_Orders", listOf(po.toSheetRow()))
+                    if (headerResult !is SyncResult.Success) {
+                        Log.w(TAG, "PO header upload failed for ${po.poId} — keeping pending")
+                        continue
+                    }
+                }
+
+                // 3. Both items and header succeeded
+                poDao.markSynced(po.poId)
             }
         } catch (e: Exception) { Log.e(TAG, "PO Upload failed", e) }
     }
@@ -309,35 +404,40 @@ class SyncWorker @AssistedInject constructor(
         try {
             val grnDao = appDatabase.grnDao()
             val pendingHeaders = grnDao.getPendingGrns()
-            val existingIds = sheetsRepository.getExistingUuids("GRN_Headers")
-            val newHeaders = pendingHeaders.filter { it.grnId !in existingIds }
-            val result = uploadTableIfNeeded("GRN_Headers", newHeaders.map { it.toSheetRow() })
-            if (result is SyncResult.Success) {
-                newHeaders.forEach { grnDao.markGrnSynced(it.grnId, System.currentTimeMillis()) }
-                pendingHeaders.forEach { grn ->
-                    val items = grnDao.getGrnItems(grn.grnId)
-                    if (items.isNotEmpty()) {
-                        val itemsResult = sheetsRepository.uploadBatch("GRN_Items", items.map { it.toSheetRow() })
+            if (pendingHeaders.isEmpty()) return
+
+            val existingHeaderIds = sheetsRepository.getExistingUuids("GRN_Headers").toHashSet()
+            val existingItemIds = sheetsRepository.getExistingUuids("GRN_Items").toHashSet()
+
+            for (grn in pendingHeaders) {
+                // 1. Upload items first
+                val items = grnDao.getGrnItems(grn.grnId)
+                var itemsSucceeded = true
+                if (items.isNotEmpty()) {
+                    val newItems = items.filter { it.grnItemId !in existingItemIds }
+                    if (newItems.isNotEmpty()) {
+                        val itemsResult = sheetsRepository.uploadBatch("GRN_Items", newItems.map { it.toSheetRow() })
                         if (itemsResult !is SyncResult.Success) {
-                            Log.w(TAG, "GRN_Items upload failed for GRN ${grn.grnId}")
+                            Log.w(TAG, "GRN_Items upload failed for GRN ${grn.grnId} — keeping pending")
+                            itemsSucceeded = false
                         }
                     }
                 }
-            } else if (result != null) {
-                Log.w(TAG, "GRN Headers upload failed — keeping pending")
+                if (!itemsSucceeded) continue
+
+                // 2. Upload header (only if not already on sheet)
+                if (grn.grnId !in existingHeaderIds) {
+                    val headerResult = sheetsRepository.uploadBatch("GRN_Headers", listOf(grn.toSheetRow()))
+                    if (headerResult !is SyncResult.Success) {
+                        Log.w(TAG, "GRN header upload failed for ${grn.grnId} — keeping pending")
+                        continue
+                    }
+                }
+
+                // 3. Both items and header succeeded
+                grnDao.markGrnSynced(grn.grnId, System.currentTimeMillis())
             }
         } catch (e: Exception) { Log.e(TAG, "GRN Upload failed", e) }
-    }
-
-    private suspend fun uploadPendingVendors() {
-        try {
-            val success = vendorUpsertUseCase.invoke()
-            if (success) {
-                Log.d(TAG, "Vendors synced via VendorUpsertUseCase")
-            } else {
-                Log.w(TAG, "VendorUpsertUseCase reported failure — will retry")
-            }
-        } catch (e: Exception) { Log.e(TAG, "Vendor Upload failed", e) }
     }
 
     private suspend fun uploadPendingProductBatches(): Boolean {
@@ -345,7 +445,16 @@ class SyncWorker @AssistedInject constructor(
             val productBatchDao = appDatabase.productBatchDao()
             val pendingBatches = productBatchDao.getPendingBatches()
             if (pendingBatches.isEmpty()) return true
-            val result = sheetsRepository.uploadBatch("Product_Batches", pendingBatches.map { it.toSheetRow() })
+            
+            val existingIds = sheetsRepository.getExistingUuids("Product_Batches")
+            val newBatches = pendingBatches.filter { it.batchId !in existingIds }
+            
+            val result = if (newBatches.isNotEmpty()) {
+                sheetsRepository.uploadBatch("Product_Batches", newBatches.map { it.toSheetRow() })
+            } else {
+                SyncResult.Success(0)
+            }
+            
             if (result is SyncResult.Success) {
                 pendingBatches.forEach { productBatchDao.markSynced(it.batchId) }
                 true
@@ -364,22 +473,27 @@ class SyncWorker @AssistedInject constructor(
             val dao = appDatabase.stockAdjustmentDao()
             val inventoryDao = appDatabase.inventoryDao()
             val pendingAdj = dao.getPendingAdjustments()
+            if (pendingAdj.isEmpty()) return
+            
             val existingAdjIds = sheetsRepository.getExistingUuids("Stock_Adjustments")
             val newAdj = pendingAdj.filter { it.adjustmentId !in existingAdjIds }
             val termId = appSetupPrefs.spreadsheetId.take(20).ifBlank { "TERM_1" }
-            val result = uploadTableIfNeeded("Stock_Adjustments", newAdj.map { it.toSheetRow(termId) })
+            
+            val result = if (newAdj.isNotEmpty()) {
+                uploadTableIfNeeded("Stock_Adjustments", newAdj.map { it.toSheetRow(termId) })
+            } else {
+                SyncResult.Success(0)
+            }
+            
             if (result is SyncResult.Success) {
-                val ids = newAdj.map { it.adjustmentId }
-                if (ids.isNotEmpty()) {
-                    dao.markAsSynced(ids)
-                    // Apply adjustment to local inventory current_stock
-                    for (adj in newAdj) {
-                        val product = inventoryDao.getItemById(adj.productId) ?: continue
-                        val newStock = maxOf(0.0, product.current_stock + adj.quantityChanged)
-                        inventoryDao.updateStockAndSyncStatus(adj.productId, newStock)
-                        Log.d(TAG, "Stock adjustment applied: ${adj.productId} → $newStock (${adj.adjustmentType}, ${adj.quantityChanged})")
-                    }
-                }
+                val ids = pendingAdj.map { it.adjustmentId }
+                dao.markAsSynced(ids)
+                // FIX (2026-08-05, TillzoTest Bug #3): REMOVED the duplicate
+                // stock-apply loop that ran here. Stock is already applied at
+                // save time in StockAdjustmentViewModel.saveAdjustment() /
+                // ManualStockAdjustmentUseCase — applying it again on every sync
+                // caused quantity double-counting (+2 entered → +4 in stock).
+                Log.d(TAG, "Stock adjustments marked synced: ${ids.size} (no re-apply)")
             } else if (result != null) {
                 Log.w(TAG, "Stock Adjustments upload failed — keeping pending")
             }
@@ -391,23 +505,40 @@ class SyncWorker @AssistedInject constructor(
             val tillDao = appDatabase.tillSessionDao()
             val pendingSessions = tillDao.getPendingSessions()
             if (pendingSessions.isEmpty()) return
-            val rows = pendingSessions.map { s ->
-                listOf(
-                    s.sessionId, s.cashierId, s.cashierName,
-                    s.posTerminalId, s.openingCash, s.closingCash,
-                    s.expectedCash, s.totalCashSales,
-                    s.totalCardSales, s.totalWalletSales,
-                    s.totalUdhaarSales, s.totalSalesCount,
-                    s.totalRefunds, s.netCash, s.status,
-                    s.notes, s.shiftDate, s.openedAt,
-                    s.closedAt ?: "", s.syncStatus,
-                    s.createdAt, s.updatedAt
-                )
+            
+            val existingIds = sheetsRepository.getExistingUuids("Till_Sessions")
+            val newSessions = pendingSessions.filter { it.sessionId !in existingIds }
+            val updateSessions = pendingSessions.filter { it.sessionId in existingIds }
+
+            fun sessionRow(s: com.tillzo.pos.data.local.entity.TillSessionEntity) = listOf(
+                s.sessionId, s.cashierId, s.cashierName,
+                s.posTerminalId, s.openingCash, s.closingCash,
+                s.expectedCash, s.totalCashSales,
+                s.totalCardSales, s.totalWalletSales,
+                s.totalUdhaarSales, s.totalSalesCount,
+                s.totalRefunds, s.netCash, s.status,
+                s.notes, s.shiftDate, s.openedAt,
+                s.closedAt ?: "", s.syncStatus,
+                s.createdAt, s.updatedAt
+            )
+
+            // FIX (2026-08-06): sessions that already exist in the Sheet (closed /
+            // reconciled → sync_status back to pending) were previously filtered
+            // out and their closingCash/netCash/variance/payIn/payOut NEVER synced.
+            // Now they are PUT-updated in place.
+            var allOk = true
+            if (newSessions.isNotEmpty()) {
+                val result = sheetsRepository.uploadBatch("Till_Sessions", newSessions.map { sessionRow(it) })
+                if (result !is SyncResult.Success) allOk = false
             }
-            val result = sheetsRepository.uploadBatch("Till_Sessions", rows)
-            if (result is SyncResult.Success) {
+            for (s in updateSessions) {
+                val ok = sheetsRepository.updateRowByUuid("Till_Sessions", s.sessionId, sessionRow(s))
+                if (!ok) allOk = false
+            }
+            
+            if (allOk) {
                 pendingSessions.forEach { tillDao.markSynced(it.sessionId) }
-                Log.d(TAG, "Till sessions synced: ${pendingSessions.size}")
+                Log.d(TAG, "Till sessions synced: ${newSessions.size} new, ${updateSessions.size} updated")
             }
         } catch (e: Exception) { Log.e(TAG, "Till Sessions Upload failed", e) }
     }
@@ -417,8 +548,16 @@ class SyncWorker @AssistedInject constructor(
             val wastageDao = appDatabase.wastageDao()
             val pendingWastage = wastageDao.getPendingWastage()
             if (pendingWastage.isEmpty()) return
-            val rows = pendingWastage.map { it.toSheetRow() }
-            val result = sheetsRepository.uploadBatch("Wastage_Ledger", rows)
+            
+            val existingIds = sheetsRepository.getExistingUuids("Wastage_Ledger")
+            val newWastage = pendingWastage.filter { it.wastageId !in existingIds }
+            
+            val result = if (newWastage.isNotEmpty()) {
+                sheetsRepository.uploadBatch("Wastage_Ledger", newWastage.map { it.toSheetRow() })
+            } else {
+                SyncResult.Success(0)
+            }
+            
             if (result is SyncResult.Success) {
                 pendingWastage.forEach { wastageDao.markSynced(it.wastageId) }
                 Log.d(TAG, "Wastage records synced: ${pendingWastage.size}")
@@ -461,7 +600,7 @@ fun com.tillzo.pos.data.local.entity.ProductBatchEntity.toSheetRow() = listOf(
 )
 fun com.tillzo.pos.data.local.entity.StockAdjustmentEntity.toSheetRow(posTerminalId: String = "TERM_1") = listOf(
     adjustmentId, productId, adjustmentType, quantityChanged, reason, adjustedBy, syncStatus,
-    posTerminalId, createdAt, createdAt
+    posTerminalId, createdAt, updatedAt
 )
 
 

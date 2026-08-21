@@ -1,6 +1,7 @@
 package com.tillzo.pos.data.local.entity
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.util.UUID
 
@@ -8,7 +9,12 @@ import java.util.UUID
  * M7.1 Khata Module — Append-Only Ledger for Udhaar / Jama.
  * DO NOT UPDATE existing records.
  */
-@Entity(tableName = "KhataEvents")
+@Entity(
+    tableName = "KhataEvents",
+    indices = [
+        Index(value = ["customer_id"])
+    ]
+)
 data class KhataEventEntity(
     @PrimaryKey
     override val system_row_id: String = UUID.randomUUID().toString(),
@@ -36,6 +42,7 @@ data class KhataEventEntity(
             "event_type" to event_type,
             "type" to event_type,
             "amount" to amount,
+            "note" to (note ?: ""),
             "reference_sale_id" to (reference_sale_id ?: ""),
             "sync_uuid" to system_row_id, // Note: no distinct sync_uuid generated, reusing systemRowId
             "is_deleted" to (if (is_deleted) 1 else 0),

@@ -15,7 +15,7 @@ import java.util.UUID
  * Handles raw ESC/POS byte commands over Bluetooth (SPP) and Wi-Fi (TCP/IP Port 9100).
  * Implements M5.3 Non-blocking queue and 3-retry logic.
  */
-class EscPosPrinter {
+class EscPosPrinter @javax.inject.Inject constructor() {
 
     // SPP UUID for Bluetooth Serial Port Profile
     private val sppUuid: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")

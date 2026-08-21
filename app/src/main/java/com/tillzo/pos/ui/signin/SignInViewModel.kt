@@ -56,8 +56,19 @@ class SignInViewModel @Inject constructor(
     fun buildSignInClient(): GoogleSignInClient {
         val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
-            .requestIdToken(WEB_CLIENT_ID)
-            .requestServerAuthCode(WEB_CLIENT_ID, true)
+            // FIX (2026-08-06): requestServerAuthCode REMOVED.
+            //
+            // Why: Google SDK requires requestIdToken + requestServerAuthCode
+            // to use the SAME client id (else "two different server client ids"
+            // crash). But idToken needs the ANDROID client (SHA-1 verified)
+            // while server-auth-code exchange needs the WEB client + its
+            // client_secret (else HTTP 401 unauthorized_client on-device).
+            // These constraints are mutually exclusive on-device, so the
+            // standard Android pattern is: idToken only + GoogleAuthUtil for
+            // access tokens. OAuthTokenManager.fetchViaGoogleAuthUtil() gets a
+            // fresh token from the signed-in account whenever the cache
+            // expires — no server auth code, no client_secret, no 400/401.
+            .requestIdToken(ANDROID_CLIENT_ID)
             .requestScopes(
                 // Blueprint Security Rule: sirf drive.file — broader scope kabhi nahi
                 Scope("https://www.googleapis.com/auth/drive.file")
@@ -170,6 +181,10 @@ class SignInViewModel @Inject constructor(
     fun retrySignIn() { updateState(SignInUiState.Idle) }
 
     companion object {
-        const val WEB_CLIENT_ID = "191290481305-3ag6k2hakgtdjkted28bulmig9eb1eaq.apps.googleusercontent.com"
+        // FIX (2026-08-06): single source of truth from Constants.
+        // idToken → ANDROID client (SHA-1 verified); server auth code →
+        // WEB client (matches OAuthTokenManager exchange).
+        const val WEB_CLIENT_ID = com.tillzo.pos.utils.Constants.WEB_CLIENT_ID
+        const val ANDROID_CLIENT_ID = com.tillzo.pos.utils.Constants.ANDROID_CLIENT_ID
     }
 }

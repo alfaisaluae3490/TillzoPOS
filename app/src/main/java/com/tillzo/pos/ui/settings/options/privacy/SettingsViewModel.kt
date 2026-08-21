@@ -1,5 +1,6 @@
 package com.tillzo.pos.ui.settings.options.privacy
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tillzo.pos.data.local.prefs.AppSetupPrefs
@@ -8,6 +9,7 @@ import com.tillzo.pos.data.remote.PosSheetInfo
 import com.tillzo.pos.data.remote.SheetsRemoteDataSource
 import com.tillzo.pos.data.repository.SheetsRepository
 import com.tillzo.pos.domain.repository.AuthRepository
+import com.tillzo.pos.utils.LocalBackupManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,11 +26,38 @@ class SettingsViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val driveSearchHelper: DriveSearchHelper,
     private val sheetsRepository: SheetsRepository,
-    private val sheetsRemoteDataSource: SheetsRemoteDataSource
+    private val sheetsRemoteDataSource: SheetsRemoteDataSource,
+    private val localBackupManager: LocalBackupManager
 ) : ViewModel() {
 
     private val _spreadsheetId = MutableStateFlow(appSetupPrefs.spreadsheetId)
     val spreadsheetId = _spreadsheetId.asStateFlow()
+
+    // FIX (2026-08-06): multi-currency support — selectable in Settings
+    private val _currencySymbol = MutableStateFlow(appSetupPrefs.currencySymbol.ifBlank { "$" })
+    val currencySymbol = _currencySymbol.asStateFlow()
+
+    fun setCurrencySymbol(symbol: String) {
+        _currencySymbol.value = symbol
+        appSetupPrefs.currencySymbol = symbol
+    }
+
+    // FIX (2026-08-06): tax + loyalty configuration
+    private val _taxInclusive = MutableStateFlow(appSetupPrefs.taxInclusive)
+    val taxInclusive: StateFlow<Boolean> = _taxInclusive.asStateFlow()
+
+    fun setTaxInclusive(enabled: Boolean) {
+        _taxInclusive.value = enabled
+        appSetupPrefs.taxInclusive = enabled
+    }
+
+    private val _loyaltyEnabled = MutableStateFlow(appSetupPrefs.loyaltyEnabled)
+    val loyaltyEnabled: StateFlow<Boolean> = _loyaltyEnabled.asStateFlow()
+
+    fun setLoyaltyEnabled(enabled: Boolean) {
+        _loyaltyEnabled.value = enabled
+        appSetupPrefs.loyaltyEnabled = enabled
+    }
 
     private val _hasPin = MutableStateFlow(authRepository.hasPIN())
     val hasPin: StateFlow<Boolean> = _hasPin.asStateFlow()
@@ -53,6 +82,53 @@ class SettingsViewModel @Inject constructor(
 
     private val _isSearchingFolders = MutableStateFlow(false)
     val isSearchingFolders: StateFlow<Boolean> = _isSearchingFolders.asStateFlow()
+
+    private val _blockNegativeStock = MutableStateFlow(appSetupPrefs.blockNegativeStock)
+    val blockNegativeStock: StateFlow<Boolean> = _blockNegativeStock.asStateFlow()
+
+    private val _backupProgress = MutableStateFlow<String?>(null)
+    val backupProgress: StateFlow<String?> = _backupProgress.asStateFlow()
+
+    fun exportBackup(uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _backupProgress.value = "Starting backup..."
+            localBackupManager.exportToZip(uri) { progress ->
+                _backupProgress.value = progress
+            }
+            _backupProgress.value = "Backup completed successfully!"
+            kotlinx.coroutines.delay(3000)
+            _backupProgress.value = null
+        }
+    }
+
+    // FIX (2026-08-06): Faisal's requirement — one-tap local backup copy to
+    // public Documents (survives uninstall/reinstall). Same writer as the
+    // nightly AutoLocalBackupWorker, but immediate + shows file path.
+    private val _autoBackupStatus = MutableStateFlow<String?>(null)
+    val autoBackupStatus: StateFlow<String?> = _autoBackupStatus.asStateFlow()
+
+    fun runAutoBackupNow() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                _autoBackupStatus.value = "Creating local backup copy..."
+                val path = localBackupManager.exportToPublicDocuments()
+                _autoBackupStatus.value = "Backup saved: $path"
+            } catch (e: Exception) {
+                _autoBackupStatus.value = "Backup failed: ${e.message}"
+            }
+        }
+    }
+
+    fun clearAutoBackupStatus() { _autoBackupStatus.value = null }
+
+    fun setBlockNegativeStock(enabled: Boolean) {
+        appSetupPrefs.blockNegativeStock = enabled
+        _blockNegativeStock.value = enabled
+    }
+
+    fun clearBackupProgress() {
+        _backupProgress.value = null
+    }
 
     fun searchFolders() {
         viewModelScope.launch {

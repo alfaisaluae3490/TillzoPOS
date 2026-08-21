@@ -43,8 +43,13 @@ class WastageViewModel @Inject constructor(
     private val wastageDao: WastageDao,
     private val inventoryDao: InventoryDao,
     private val productBatchDao: ProductBatchDao,
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val appSetupPrefs: com.tillzo.pos.data.local.prefs.AppSetupPrefs
 ) : ViewModel() {
+
+    // FIX (2026-08-06): real user/terminal identity instead of hardcoded values
+    fun currentUserId(): String = appSetupPrefs.userEmail.ifBlank { "user_1" }
+    fun currentTerminalId(): String = appSetupPrefs.spreadsheetId.take(20).ifBlank { "TERM_1" }
 
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
     private val monthFormat = SimpleDateFormat("yyyy-MM", Locale.US)
@@ -139,15 +144,15 @@ class WastageViewModel @Inject constructor(
             // Deduct from inventory
             val item = inventoryDao.getItemById(productId)
             if (item != null) {
+                val now = System.currentTimeMillis()
                 val newStock = maxOf(0.0, item.current_stock - quantity)
-                inventoryDao.updateStock(productId, newStock)
+                inventoryDao.updateStockAndSyncStatus(productId, newStock, now)
 
                 // Deduct from specific batch if provided
                 if (!batchId.isNullOrBlank()) {
                     val batch = productBatchDao.getBatchById(batchId)
                     if (batch != null) {
                         val newBatchQty = maxOf(0.0, batch.stockQty - quantity)
-                        val now = System.currentTimeMillis()
                         if (reason == WastageReason.EXPIRED || newBatchQty <= 0.0) {
                             productBatchDao.deactivateBatch(batchId, now)
                         } else {
@@ -156,7 +161,7 @@ class WastageViewModel @Inject constructor(
                         // Recalculate total stock
                         val allBatches = productBatchDao.getAllBatchesForProduct(productId)
                         val total = allBatches.filter { it.isActive && !it.isDeleted }.sumOf { it.stockQty }
-                        inventoryDao.updateTotalStock(productId, total)
+                        inventoryDao.updateTotalStockAndSyncStatus(productId, total, now)
                     }
                 }
             }

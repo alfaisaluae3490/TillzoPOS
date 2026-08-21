@@ -2,6 +2,8 @@ package com.tillzo.pos.ui.settings.options.privacy
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,9 +19,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Payment
+import androidx.compose.material.icons.filled.Payments
+import androidx.compose.material.icons.filled.Calculate
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Policy
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SearchOff
@@ -55,6 +63,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onNavigateToBilling: () -> Unit,
     onNavigateToSystemLogs: () -> Unit = {},
+    onNavigateToDataViewer: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -67,6 +76,16 @@ fun SettingsScreen(
     val grnFolderName by viewModel.grnFolderName.collectAsStateWithLifecycle()
     val folderList by viewModel.folderList.collectAsStateWithLifecycle()
     val isSearchingFolders by viewModel.isSearchingFolders.collectAsStateWithLifecycle()
+    val backupProgress by viewModel.backupProgress.collectAsStateWithLifecycle()
+    val blockNegativeStock by viewModel.blockNegativeStock.collectAsStateWithLifecycle()
+
+    val backupLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            viewModel.exportBackup(uri)
+        }
+    }
     var showPinConfigDialog by remember { mutableStateOf(false) }
     var showGrnFolderDialog by remember { mutableStateOf(false) }
     var grnNewFolderName by remember { mutableStateOf("") }
@@ -167,6 +186,135 @@ fun SettingsScreen(
             }
 
             Spacer(modifier = Modifier.height(24.dp))
+            Text("Store Settings", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                shape = RoundedCornerShape(12.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.FilterList, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Block Negative Stock", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                        Text(
+                            "Prevent selling more than available stock",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = blockNegativeStock,
+                        onCheckedChange = { viewModel.setBlockNegativeStock(it) }
+                    )
+                }
+            }
+
+            // FIX (2026-08-06): multi-currency selector (industry-standard feature)
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                shape = RoundedCornerShape(12.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                val currencySymbol by viewModel.currencySymbol.collectAsState()
+                var currencyMenu by remember { mutableStateOf(false) }
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Payments, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Currency Symbol", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                        Text(
+                            "Applies to POS, receipts, reports (e.g. $, USD, EUR, AED, SAR, INR)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Box {
+                        OutlinedButton(onClick = { currencyMenu = true }) { Text(currencySymbol.ifBlank { "Rs" }) }
+                        DropdownMenu(expanded = currencyMenu, onDismissRequest = { currencyMenu = false }) {
+                            listOf("$", "USD", "EUR", "AED", "SAR", "INR", "GBP", "QAR", "OMR", "PKR").forEach { sym ->
+                                DropdownMenuItem(
+                                    text = { Text(sym) },
+                                    onClick = {
+                                        currencyMenu = false
+                                        viewModel.setCurrencySymbol(sym)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // FIX (2026-08-06): tax-inclusive toggle (industry-standard)
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                shape = RoundedCornerShape(12.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                val taxInclusive by viewModel.taxInclusive.collectAsState()
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Calculate, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Tax-Inclusive Prices", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                        Text(
+                            "On: prices already include tax (total = subtotal). Off: tax added on top.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = taxInclusive,
+                        onCheckedChange = { viewModel.setTaxInclusive(it) }
+                    )
+                }
+            }
+
+            // FIX (2026-08-06): loyalty program toggle (industry-standard)
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                shape = RoundedCornerShape(12.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                val loyaltyEnabled by viewModel.loyaltyEnabled.collectAsState()
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Star, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Loyalty Program", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                        Text(
+                            "Customers earn points on every sale (shown in CRM / Accounts)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = loyaltyEnabled,
+                        onCheckedChange = { viewModel.setLoyaltyEnabled(it) }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
             Text("Data & Privacy (Google Play Compliance)", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -250,7 +398,7 @@ fun SettingsScreen(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        "GRN Google Drive Folder",
+                        "Goods Receipt Drive Folder",
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Bold
                     )
@@ -277,7 +425,7 @@ fun SettingsScreen(
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            if (grnFolderId.isEmpty()) "Select GRN Folder" else "Change GRN Folder",
+                            if (grnFolderId.isEmpty()) "Select Receipt Folder" else "Change Receipt Folder",
                             color = MaterialTheme.colorScheme.primary
                         )
                     }
@@ -303,7 +451,7 @@ fun SettingsScreen(
             SettingsCard(
                 icon = Icons.Default.Info,
                 title = "Version",
-                subtitle = "Tillzo POS 1.0.0 (Build 1) - Protected by RootBeer",
+                subtitle = "Tillzo POS ${com.tillzo.pos.BuildConfig.VERSION_NAME} (Build ${com.tillzo.pos.BuildConfig.VERSION_CODE}) - Protected by RootBeer",
                 onClick = { }
             )
 
@@ -313,6 +461,43 @@ fun SettingsScreen(
                 subtitle = "View and export app logs (rolling 48-hour buffer)",
                 onClick = onNavigateToSystemLogs
             )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            SettingsCard(
+                icon = Icons.Default.CloudUpload,
+                title = "Local Backup",
+                subtitle = if (backupProgress != null) backupProgress!! else "Export all data to a ZIP file",
+                onClick = {
+                    val timestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(java.util.Date())
+                    backupLauncher.launch("TillzoPOS_Backup_$timestamp.zip")
+                }
+            )
+
+            // FIX (2026-08-06): Faisal's requirement — view what's stored on this phone
+            SettingsCard(
+                icon = Icons.Default.Storage,
+                title = "Stored Data (This Phone)",
+                subtitle = "View all data saved on this device",
+                onClick = { onNavigateToDataViewer() }
+            )
+
+            // FIX (2026-08-06): one-tap local backup copy to Documents (survives reinstall)
+            val autoBackupStatus by viewModel.autoBackupStatus.collectAsState()
+            SettingsCard(
+                icon = Icons.Default.Save,
+                title = "Back Up Now",
+                subtitle = autoBackupStatus ?: "Save a backup copy to Documents (safe even if you uninstall)",
+                onClick = { viewModel.runAutoBackupNow() }
+            )
+
+            if (backupProgress != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
         }
     }
 
@@ -552,7 +737,7 @@ fun SettingsScreen(
                         .padding(16.dp)
                 ) {
                     Text(
-                        "Select GRN Folder",
+                        "Select Receipt Folder",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )

@@ -1,5 +1,6 @@
 package com.tillzo.pos.data.sync.options.token
 
+import android.accounts.AccountManager
 import android.content.Context
 import android.content.Intent
 import android.util.Log
@@ -122,12 +123,15 @@ class OAuthTokenManager @Inject constructor(
                 .add("code", authCode)
                 .add("grant_type", "authorization_code")
                 .build()
-
             val request = Request.Builder().url(TOKEN_ENDPOINT).post(body).build()
             val response = tokenHttpClient.newCall(request).execute()
 
             if (!response.isSuccessful) {
-                Log.w(TAG, "Auth code exchange HTTP ${response.code}")
+                // FIX (2026-08-06): log the actual Google error body so the
+                // failure reason (invalid_grant / unauthorized_client / etc.)
+                // is visible in logcat instead of just "HTTP 400".
+                val errBody = response.body?.string() ?: ""
+                Log.w(TAG, "Auth code exchange HTTP ${response.code}: $errBody")
                 return@withContext null
             }
 
@@ -174,6 +178,25 @@ class OAuthTokenManager @Inject constructor(
         return try {
             val account = GoogleSignIn.getLastSignedInAccount(context) ?: return null
             val email   = account.email ?: return null
+            // FIX (2026-08-06): invalidate BOTH caches before requesting a fresh
+            // token. GoogleAuthUtil keeps its OWN internal token cache (separate
+            // from AccountManager) — an expired token in that cache is returned
+            // forever, so every Sheets API call 401s and the TokenAuthenticator
+            // retry loop silently fails. invalidateToken() clears the GMS cache;
+            // invalidateAuthToken() clears the AccountManager cache.
+            val cachedToken = prefs.getString(KEY_ACCESS_TOKEN, null)
+            if (!cachedToken.isNullOrBlank()) {
+                try { GoogleAuthUtil.invalidateToken(context, cachedToken) } catch (_: Exception) {}
+            }
+            try {
+                AccountManager.get(context).invalidateAuthToken(
+                    "com.google",
+                    AccountManager.get(context).peekAuthToken(
+                        android.accounts.Account(email, "com.google"),
+                        "oauth2:https://www.googleapis.com/auth/drive.file"
+                    )
+                )
+            } catch (_: Exception) { /* best-effort invalidation */ }
             GoogleAuthUtil.getToken(
                 context,
                 android.accounts.Account(email, "com.google"),
@@ -197,7 +220,8 @@ class OAuthTokenManager @Inject constructor(
             val response = tokenHttpClient.newCall(request).execute()
 
             if (!response.isSuccessful) {
-                Log.w(TAG, "Token refresh HTTP ${response.code}")
+                val errBody = response.body?.string() ?: ""
+                Log.w(TAG, "Token refresh HTTP ${response.code}: $errBody")
                 return null
             }
 

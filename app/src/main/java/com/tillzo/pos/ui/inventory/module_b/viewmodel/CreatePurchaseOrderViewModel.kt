@@ -142,7 +142,7 @@ class CreatePurchaseOrderViewModel @Inject constructor(
                 status                = if (markAsSent) "SENT" else "DRAFT",
                 notes                 = notes,
                 totalAmount           = _totalAmount.value,
-                currency              = "PKR",
+                currency              = "$",
                 expectedDeliveryDate  = expectedDate,
                 createdBy             = "admin",
                 syncStatus            = "pending",

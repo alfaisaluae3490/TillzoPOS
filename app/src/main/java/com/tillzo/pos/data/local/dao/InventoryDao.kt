@@ -75,23 +75,17 @@ interface InventoryDao {
     @Query("UPDATE Inventory SET is_deleted = 1, deleted_at = :timestamp, sync_status = 'pending' WHERE system_row_id = :id")
     suspend fun deleteItemById(id: String, timestamp: Long)
 
-    @Query("UPDATE Inventory SET current_stock = :total WHERE system_row_id = :productId")
-    suspend fun updateTotalStock(productId: String, total: Double)
-
-    @Query("UPDATE Inventory SET current_stock = :newStock WHERE system_row_id = :id")
-    suspend fun updateStock(id: String, newStock: Double)
-
     @Query("UPDATE Inventory SET current_stock = :newStock, sync_status = 'pending', updated_at = :now WHERE system_row_id = :id")
     suspend fun updateStockAndSyncStatus(id: String, newStock: Double, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE Inventory SET totalStock = :total, sync_status = 'pending', updated_at = :time WHERE system_row_id = :id")
+    suspend fun updateTotalStockAndSyncStatus(id: String, total: Double, time: Long = System.currentTimeMillis())
     // Also needed by ExpiryCheckWorker (suspend, list-form)
     @Query("SELECT * FROM Inventory WHERE is_deleted = 0 AND current_stock > 0 AND expiry_date != '' AND expiry_date < :today")
     suspend fun getExpiredItemsList(today: String): List<InventoryEntity>
 
     @Query("SELECT * FROM Inventory WHERE is_deleted = 0 AND expiry_date != '' AND expiry_date >= :today AND expiry_date <= :thresholdDate")
     suspend fun getNearExpiryItemsList(today: String, thresholdDate: String): List<InventoryEntity>
-
-    @Query("UPDATE Inventory SET totalStock = :total, updated_at = :time WHERE system_row_id = :id")
-    suspend fun updateTotalStock(id: String, total: Double, time: Long = System.currentTimeMillis())
 
     @Query("SELECT MAX(item_number) FROM Inventory")
     suspend fun getMaxItemNumber(): Int?

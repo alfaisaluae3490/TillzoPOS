@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.tillzo.pos.data.local.dao.CustomerDao
 import com.tillzo.pos.data.local.dao.InventoryDao
 import com.tillzo.pos.data.local.dao.SaleDao
+import com.tillzo.pos.data.local.dao.ExpenseDao
+import com.tillzo.pos.data.local.dao.KhataEventDao
 import com.tillzo.pos.data.local.dao.TillSessionDao
 import com.tillzo.pos.data.local.entity.CustomerEntity
 import com.tillzo.pos.data.local.entity.InventoryEntity
@@ -76,6 +78,8 @@ class PosViewModel @Inject constructor(
     private val inventoryDao: InventoryDao,
     private val customerDao: CustomerDao,
     private val saleDao: SaleDao,
+    private val expenseDao: ExpenseDao,
+    private val khataEventDao: KhataEventDao,
     private val tillSessionDao: TillSessionDao,
     private val appSetupPrefs: AppSetupPrefs,
     private val appLogger: AppLogger
@@ -101,11 +105,17 @@ class PosViewModel @Inject constructor(
     private val _cartDiscount = MutableStateFlow(0.0)
     val cartDiscount: StateFlow<Double> = _cartDiscount.asStateFlow()
 
+    // FIX (2026-08-06): tax-inclusive mode — when enabled, prices already contain
+    // tax, so the displayed total stays = subtotal (tax shown separately, not added).
     val cartTotal: StateFlow<Double> = _cartItems
         .map { items ->
             val sub = items.sumOf { it.total }
-            val tax = items.sumOf { item -> item.total * item.taxPercent / 100.0 }
-            sub + tax - _cartDiscount.value
+            if (appSetupPrefs.taxInclusive) {
+                sub - _cartDiscount.value
+            } else {
+                val tax = items.sumOf { item -> item.total * item.taxPercent / 100.0 }
+                sub + tax - _cartDiscount.value
+            }
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
 
@@ -164,21 +174,24 @@ class PosViewModel @Inject constructor(
     private val _hasPendingSync = MutableStateFlow(false)
     val hasPendingSync: StateFlow<Boolean> = _hasPendingSync.asStateFlow()
 
+    private val _pendingSyncCount = MutableStateFlow(0)
+    val pendingSyncCount: StateFlow<Int> = _pendingSyncCount.asStateFlow()
+
     init {
+        refreshPendingSyncCount()
+    }
+
+    fun refreshPendingSyncCount() {
         viewModelScope.launch {
-            val pendingSales = saleDao.getPendingSyncSales()
-            val pendingSessions = tillSessionDao.getPendingSessions()
-            _hasPendingSync.value = pendingSales.isNotEmpty() || pendingSessions.isNotEmpty()
-        }
-        viewModelScope.launch {
-            kotlinx.coroutines.flow.combine(
-                saleDao.getAllSales().map { sales -> sales.any { it.sync_status == "pending" } },
-                tillSessionDao.getAllSessions().map { sessions -> sessions.any { it.syncStatus == "pending" } }
-            ) { salesPending, sessionsPending ->
-                salesPending || sessionsPending
-            }.collect { pending ->
-                _hasPendingSync.value = pending
-            }
+            val pendingSales = saleDao.getPendingSyncSales().size
+            val pendingSessions = tillSessionDao.getPendingSyncCount()
+            val pendingExpenses = expenseDao.getPendingExpenses().size
+            val pendingKhata = khataEventDao.getPendingKhataEvents().size
+            val pendingCustomers = customerDao.getPendingCustomers().size
+            val pendingItems = inventoryDao.getPendingItems().size
+            val total = pendingSales + pendingSessions + pendingExpenses + pendingKhata + pendingCustomers + pendingItems
+            _pendingSyncCount.value = total
+            _hasPendingSync.value = total > 0
         }
     }
 
@@ -213,8 +226,8 @@ class PosViewModel @Inject constructor(
         val currentQtyInCart = if (existingIndex >= 0) currentCart[existingIndex].quantity else 0.0
         val totalRequested = currentQtyInCart + qty
 
-        // Check stock availability
-        if (totalRequested > product.current_stock) {
+        // Check stock availability (only block if preference is enabled)
+        if (appSetupPrefs.blockNegativeStock && totalRequested > product.current_stock) {
             _stockWarning.value = StockWarning(
                 itemName = product.item_name,
                 available = product.current_stock,
@@ -269,10 +282,10 @@ class PosViewModel @Inject constructor(
             removeFromCart(itemId)
             return
         }
-        // Check stock availability from local inventory
+        // Check stock availability from local inventory (only block if preference is enabled)
         viewModelScope.launch {
             val product = inventoryDao.getItemById(itemId)
-            if (product != null && newQty > product.current_stock) {
+            if (product != null && appSetupPrefs.blockNegativeStock && newQty > product.current_stock) {
                 _stockWarning.value = StockWarning(
                     itemName = product.item_name,
                     available = product.current_stock,
@@ -306,7 +319,21 @@ class PosViewModel @Inject constructor(
 
     fun setDiscount(amount: Double) {
         _cartDiscount.value = amount
-        appLogger.logInfo("UI_CLICK", "Discount applied: Rs $amount")
+        appLogger.logInfo("UI_CLICK", "Discount applied: $amount")
+    }
+
+    fun addCustomItem(name: String, sellingPrice: Double, qty: Double = 1.0) {
+        val cartItem = CartItem(
+            itemId = "CUSTOM_ITEM_${System.currentTimeMillis()}",
+            name = name,
+            quantity = qty,
+            pricePerUnit = sellingPrice,
+            unit = "PC",
+            taxPercent = 0.0,
+            total = qty * sellingPrice
+        )
+        _cartItems.value = _cartItems.value + cartItem
+        appLogger.logInfo("UI_CLICK", "Custom item added: $name x $qty @ $sellingPrice")
     }
 
     // ── Payment Functions ─────────────────────────────────────────────────────
@@ -361,29 +388,33 @@ class PosViewModel @Inject constructor(
             _isProcessing.value = true
             _saleResult.value = null
             try {
-                // Verify stock sufficiency for all cart items
-                for (cartItem in items) {
-                    val product = inventoryDao.getItemById(cartItem.itemId)
-                    if (product != null && cartItem.quantity > product.current_stock) {
-                        _stockWarning.value = StockWarning(
-                            itemName = cartItem.name,
-                            available = product.current_stock,
-                            requested = cartItem.quantity
-                        )
-                        _isProcessing.value = false
-                        _saleResult.value = SaleResult.Error(
-                            "Insufficient stock for ${cartItem.name}: " +
-                            "available ${product.current_stock} ${product.unit}, " +
-                            "requested ${cartItem.quantity}"
-                        )
-                        appLogger.logError("UI_CLICK", "Sale failed: insufficient stock for ${cartItem.name}")
-                        return@launch
+                // Verify stock sufficiency for all cart items (only block if preference is enabled)
+                if (appSetupPrefs.blockNegativeStock) {
+                    for (cartItem in items) {
+                        val product = inventoryDao.getItemById(cartItem.itemId)
+                        if (product != null && cartItem.quantity > product.current_stock) {
+                            _stockWarning.value = StockWarning(
+                                itemName = cartItem.name,
+                                available = product.current_stock,
+                                requested = cartItem.quantity
+                            )
+                            _isProcessing.value = false
+                            _saleResult.value = SaleResult.Error(
+                                "Insufficient stock for ${cartItem.name}: " +
+                                "available ${product.current_stock} ${product.unit}, " +
+                                "requested ${cartItem.quantity}"
+                            )
+                            appLogger.logError("UI_CLICK", "Sale failed: insufficient stock for ${cartItem.name}")
+                            return@launch
+                        }
                     }
                 }
                 _stockWarning.value = null
 
                 val sub = items.sumOf { it.total }
-                val tax = items.sumOf { item -> item.total * item.taxPercent / 100.0 }
+                // FIX (2026-08-06): tax-inclusive mode — total stays = subtotal
+                val tax = if (appSetupPrefs.taxInclusive) 0.0
+                          else items.sumOf { item -> item.total * item.taxPercent / 100.0 }
                 val disc = _cartDiscount.value
                 val total = sub + tax - disc
                 val pb = _paymentBreakdown.value
@@ -403,6 +434,7 @@ class PosViewModel @Inject constructor(
                     cashierId = appSetupPrefs.userEmail.ifBlank { "cashier" }
                 )
                 _saleResult.value = SaleResult.Success(sale)
+                refreshPendingSyncCount()
                 appLogger.logInfo("UI_CLICK", "Sale completed: ${sale.sync_uuid}, total=$total, method=${pb.methodString}")
             } catch (e: Exception) {
                 Log.e(TAG, "Sale failed: ${e.message}", e)
@@ -418,6 +450,10 @@ class PosViewModel @Inject constructor(
         clearCart()
         _saleResult.value = null
         appLogger.logInfo("UI_CLICK", "New sale started")
+    }
+
+    fun clearStockWarning() {
+        _stockWarning.value = null
     }
 
     fun logClick(tag: String, message: String) {

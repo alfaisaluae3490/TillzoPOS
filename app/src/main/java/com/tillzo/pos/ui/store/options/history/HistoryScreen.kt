@@ -12,6 +12,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -33,6 +35,8 @@ fun HistoryScreen(
     val printStatus by viewModel.printStatus.collectAsState()
     val isLoadingMore by viewModel.isLoadingMore.collectAsState()
     val hasMore by viewModel.hasMore.collectAsState()
+    val context = LocalContext.current
+    val currencySymbol = remember { AppSetupPrefs(context).currencySymbol.ifBlank { "$" } }
 
     LaunchedEffect(printStatus) {
         if (printStatus != null) {
@@ -163,7 +167,7 @@ fun HistoryScreen(
                             }
                             Column(horizontalAlignment = Alignment.End) {
                                 Text(
-                                    "Rs ${String.format("%.2f", sale.total)}", 
+                                    "$currencySymbol ${String.format("%.2f", sale.total)}", 
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = if (isRefund) Color.Red else Color(0xFF4CAF50)

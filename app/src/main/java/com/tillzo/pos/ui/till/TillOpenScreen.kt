@@ -1,6 +1,8 @@
 package com.tillzo.pos.ui.till
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
@@ -30,7 +32,7 @@ fun TillOpenScreen(
         containerColor = Color(0xFF1A1A1A),
         topBar = {
             TopAppBar(
-                title = { Text("Open Till / Start Shift", color = Color.White) },
+                title = { Text("Open Register / Start Shift", color = Color.White) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF1A1A1A))
             )
         }
@@ -39,7 +41,9 @@ fun TillOpenScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(24.dp),
+                .padding(24.dp)
+                .verticalScroll(rememberScrollState())
+                .imePadding(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
@@ -68,7 +72,7 @@ fun TillOpenScreen(
             OutlinedTextField(
                 value = openingCash,
                 onValueChange = { openingCash = it },
-                label = { Text("Opening Cash (Rs.)", color = Color.White.copy(alpha = 0.7f)) },
+                label = { Text("Opening Cash (Amount)", color = Color.White.copy(alpha = 0.7f)) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 modifier = Modifier.fillMaxWidth(),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -112,14 +116,13 @@ fun TillOpenScreen(
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp)
-                    .navigationBarsPadding(),
+                    .height(52.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E88E5))
             ) {
                 Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White)
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    "Open Till & Start Selling",
+                    "Open Register & Start Selling",
                     color = Color.White,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold

@@ -15,6 +15,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -35,6 +37,8 @@ fun WastageLogScreen(
     val totalLossToday by viewModel.totalLossToday.collectAsState()
     val totalLossMonth by viewModel.totalLossMonth.collectAsState()
     val allWastage by viewModel.allWastage.collectAsState()
+    val context = LocalContext.current
+    val currencySymbol = remember { AppSetupPrefs(context).currencySymbol.ifBlank { "$" } }
 
     var showLogDialog by remember { mutableStateOf(false) }
 
@@ -126,6 +130,8 @@ fun WastageLogScreen(
 
 @Composable
 private fun WastageSummaryCard(totalToday: Double, totalMonth: Double, countToday: Int) {
+    val context = LocalContext.current
+    val currencySymbol = remember { AppSetupPrefs(context).currencySymbol.ifBlank { "$" } }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -138,9 +144,9 @@ private fun WastageSummaryCard(totalToday: Double, totalMonth: Double, countToda
                 .padding(16.dp),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            SummaryItem("Today's Loss", "Rs. %.2f".format(totalToday))
+            SummaryItem("Today's Loss", "$currencySymbol %.2f".format(totalToday))
             VerticalDivider(modifier = Modifier.height(40.dp))
-            SummaryItem("Month Loss", "Rs. %.2f".format(totalMonth))
+            SummaryItem("Month Loss", "$currencySymbol %.2f".format(totalMonth))
             VerticalDivider(modifier = Modifier.height(40.dp))
             SummaryItem("Today's Items", "$countToday wasted")
         }
@@ -157,6 +163,8 @@ private fun SummaryItem(label: String, value: String) {
 
 @Composable
 private fun WastageEntryCard(entry: WastageEntity) {
+    val context = LocalContext.current
+    val currencySymbol = remember { AppSetupPrefs(context).currencySymbol.ifBlank { "$" } }
     val reasonColor = when (entry.reason) {
         "EXPIRED"  -> Color(0xFFE53935)
         "DAMAGED"  -> Color(0xFFFF6F00)
@@ -190,7 +198,7 @@ private fun WastageEntryCard(entry: WastageEntity) {
                     Text(entry.reason, color = reasonColor, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
                 }
                 Spacer(modifier = Modifier.height(4.dp))
-                Text("Loss: Rs. %.2f".format(entry.totalLoss), color = MaterialTheme.colorScheme.error, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text("Loss: $currencySymbol %.2f".format(entry.totalLoss), color = MaterialTheme.colorScheme.error, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -317,8 +325,8 @@ private fun LogWastageDialog(
                             costPrice   = selectedCostPrice,
                             reason      = selectedReason,
                             notes       = notes,
-                            loggedBy    = "user_1",
-                            posTerminalId = "terminal_1"
+                            loggedBy    = viewModel.currentUserId(),
+                            posTerminalId = viewModel.currentTerminalId()
                         )
                         onDismiss()
                     }

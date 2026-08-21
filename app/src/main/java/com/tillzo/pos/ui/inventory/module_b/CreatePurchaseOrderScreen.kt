@@ -77,6 +77,8 @@ fun CreatePurchaseOrderScreen(
     val context            = LocalContext.current
     val items              by viewModel.items.collectAsState()
     val selectedVendor     by viewModel.selectedVendor.collectAsState()
+    // FIX (2026-08-06): multi-currency — read the configured symbol instead of PKR
+    val currencySymbol     = remember(context) { com.tillzo.pos.data.local.prefs.AppSetupPrefs(context).currencySymbol.ifBlank { "$" } }
     val totalAmount        by viewModel.totalAmount.collectAsState()
 
     // Local UI state
@@ -221,7 +223,7 @@ fun CreatePurchaseOrderScreen(
                         onClick = {
                             val vendor = selectedVendor ?: return@Button
                             val wa = vendor.whatsapp.ifEmpty { vendor.phone }
-                            val text = buildPOShareText(vendor.name, vendor.phone, notes, deliveryDate, items, totalAmount)
+                            val text = buildPOShareText(vendor.name, vendor.phone, notes, deliveryDate, items, totalAmount, currencySymbol)
                             val encoded = Uri.encode(text)
                             val uri = if (wa.isNotEmpty())
                                 Uri.parse("https://api.whatsapp.com/send?phone=$wa&text=$encoded")
@@ -379,7 +381,7 @@ fun CreatePurchaseOrderScreen(
                                         Text(product.sku, color = Color.White.copy(alpha = 0.4f), fontSize = 11.sp)
                                 }
                                 Text(
-                                    "PKR ${String.format("%,.0f", product.cost_price)}",
+                                    "$currencySymbol ${String.format("%,.0f", product.cost_price)}",
                                     color = Color(0xFF1E88E5),
                                     fontSize = 13.sp
                                 )
@@ -458,7 +460,7 @@ fun CreatePurchaseOrderScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    "= PKR ${String.format("%,.0f", item.totalCost)}",
+                                    "= $currencySymbol ${String.format("%,.0f", item.totalCost)}",
                                     color      = Color(0xFF1E88E5),
                                     fontWeight = FontWeight.Bold,
                                     fontSize   = 13.sp,
@@ -482,7 +484,7 @@ fun CreatePurchaseOrderScreen(
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Total Amount:", color = Color.White.copy(alpha = 0.7f))
                             Text(
-                                "PKR ${String.format("%,.0f", totalAmount)}",
+                                "$currencySymbol ${String.format("%,.0f", totalAmount)}",
                                 color      = Color(0xFF1E88E5),
                                 fontWeight = FontWeight.Bold,
                                 fontSize   = 18.sp
@@ -501,7 +503,8 @@ private fun buildPOShareText(
     notes: String,
     deliveryDate: String,
     items: List<com.tillzo.pos.data.local.entity.PurchaseOrderItemEntity>,
-    total: Double
+    total: Double,
+    currencySymbol: String = "$"
 ): String = buildString {
     appendLine("================================")
     appendLine("       PURCHASE ORDER")
@@ -512,10 +515,10 @@ private fun buildPOShareText(
     appendLine("================================")
     items.forEach { item ->
         appendLine(item.productName)
-        appendLine("  ${item.orderedQty} ${item.unit} x PKR ${item.unitCostPrice} = PKR ${item.totalCost}")
+        appendLine("  ${item.orderedQty} ${item.unit} x $currencySymbol ${item.unitCostPrice} = $currencySymbol ${item.totalCost}")
     }
     appendLine("================================")
-    appendLine("TOTAL: PKR ${String.format("%,.0f", total)}")
+    appendLine("TOTAL: $currencySymbol ${String.format("%,.0f", total)}")
     appendLine("================================")
     if (notes.isNotEmpty()) appendLine("Notes: $notes")
     appendLine("Please confirm receipt of this order.")

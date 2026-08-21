@@ -7,6 +7,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -25,7 +27,9 @@ fun ReturnsScreen(
     val foundInvoice by viewModel.foundInvoice.collectAsState()
     val returnStatus by viewModel.returnStatus.collectAsState()
 
-    var showConfirmDialog by remember { mutableStateOf<String?>(null) } // holds reason string
+    var showConfirmDialog by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val currencySymbol = remember { AppSetupPrefs(context).currencySymbol.ifBlank { "$" } } // holds reason string
 
     LaunchedEffect(returnStatus) {
         if (returnStatus != null) {
@@ -82,7 +86,7 @@ fun ReturnsScreen(
                         
                         val formatter = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault())
                         Text("Date: ${formatter.format(Date(foundInvoice!!.timestamp))}")
-                        Text("Total: Rs ${String.format("%.2f", foundInvoice!!.total)}", fontWeight = FontWeight.Bold)
+                        Text("Total: $currencySymbol ${String.format("%.2f", foundInvoice!!.total)}", fontWeight = FontWeight.Bold)
                         Text("Payment Method: ${foundInvoice!!.paymentMethod}")
                         
                         Spacer(modifier = Modifier.height(24.dp))
@@ -122,7 +126,7 @@ fun ReturnsScreen(
         AlertDialog(
             onDismissRequest = { showConfirmDialog = null },
             title = { Text("Confirm Refund ($reason)") },
-            text = { Text("This will issue a reverse transaction for Rs ${String.format("%.2f", foundInvoice?.total ?: 0.0)}. The items will ${if (reason == "Restock") "be returned to stock" else "NOT be returned to stock"}.") },
+            text = { Text("This will issue a reverse transaction for $currencySymbol ${String.format("%.2f", foundInvoice?.total ?: 0.0)}. The items will ${if (reason == "Restock") "be returned to stock" else "NOT be returned to stock"}.") },
             confirmButton = {
                 Button(onClick = {
                     viewModel.processFullReturn(reason)

@@ -8,9 +8,10 @@ import com.tillzo.pos.data.local.entity.TillSessionEntity
 import com.tillzo.pos.domain.repository.SaleRepository
 import com.tillzo.pos.domain.repository.StoreRepository
 import com.tillzo.pos.data.local.prefs.AppSetupPrefs
-import com.tillzo.pos.utils.printer.TsplPrinter
+import com.tillzo.pos.utils.printer.EscPosPrinter
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.firstOrNull
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,9 +24,11 @@ class ZReportViewModel @Inject constructor(
     private val storeRepository: StoreRepository,
     private val syncLogDao: SyncLogDao,
     private val tillSessionDao: TillSessionDao,
-    private val tsplPrinter: TsplPrinter,
+    private val escPosPrinter: EscPosPrinter,
     private val appSetupPrefs: AppSetupPrefs
 ) : ViewModel() {
+    // FIX (2026-08-06): currency from settings (USA-friendly default)
+    private val currencySymbol get() = appSetupPrefs.currencySymbol.ifBlank { "$" }
 
     private val _totalSalesToday = MutableStateFlow(0.0)
     val totalSalesToday = _totalSalesToday.asStateFlow()
@@ -70,8 +73,14 @@ class ZReportViewModel @Inject constructor(
 
     private fun loadDailyMetrics() {
         viewModelScope.launch {
-            // Assume "today" logic for demo purposes (last 24h)
-            val startTime = System.currentTimeMillis() - (24 * 60 * 60 * 1000)
+            // FIX (2026-08-06): was "last 24h" (demo logic) — included yesterday's
+            // same-hour sales. Now proper calendar day (local midnight).
+            val cal = java.util.Calendar.getInstance()
+            cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+            cal.set(java.util.Calendar.MINUTE, 0)
+            cal.set(java.util.Calendar.SECOND, 0)
+            cal.set(java.util.Calendar.MILLISECOND, 0)
+            val startTime = cal.timeInMillis
             val endTime = System.currentTimeMillis()
 
             var salesTotal = 0.0
@@ -86,7 +95,12 @@ class ZReportViewModel @Inject constructor(
         }
         
         viewModelScope.launch {
-            val startTime = System.currentTimeMillis() - (24 * 60 * 60 * 1000)
+            val cal = java.util.Calendar.getInstance()
+            cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+            cal.set(java.util.Calendar.MINUTE, 0)
+            cal.set(java.util.Calendar.SECOND, 0)
+            cal.set(java.util.Calendar.MILLISECOND, 0)
+            val startTime = cal.timeInMillis
             val endTime = System.currentTimeMillis()
             
             storeRepository.getExpensesBetweenDates(startTime, endTime).collect { expenses ->
@@ -137,31 +151,64 @@ class ZReportViewModel @Inject constructor(
                     append("        == Z-REPORT ==        \n")
                     append("================================\n")
                     append("Date: ${java.util.Date()}\n")
-                    append("POS ID: TERMINAL_1\n")
+                    append("POS ID: ${appSetupPrefs.spreadsheetId.take(20).ifBlank { "TERMINAL_1" }}\n")
                     append("--------------------------------\n")
-                    append("Cash Sales:   Rs ${String.format("%.2f", _totalCashSales.value)}\n")
-                    append("Card Sales:   Rs ${String.format("%.2f", _totalCardSales.value)}\n")
-                    append("Wallet Sales: Rs ${String.format("%.2f", _totalWalletSales.value)}\n")
-                    append("Udhaar Sales: Rs ${String.format("%.2f", _totalUdhaarSales.value)}\n")
+                    append("Cash Sales:   $currencySymbol ${String.format("%.2f", _totalCashSales.value)}\n")
+                    append("Card Sales:   $currencySymbol ${String.format("%.2f", _totalCardSales.value)}\n")
+                    append("Wallet Sales: $currencySymbol ${String.format("%.2f", _totalWalletSales.value)}\n")
+                    append("Credit Sales: $currencySymbol ${String.format("%.2f", _totalUdhaarSales.value)}\n")
                     append("--------------------------------\n")
-                    append("Gross Sales:  Rs ${String.format("%.2f", _totalSalesToday.value)}\n")
-                    append("Expenses:     Rs ${String.format("%.2f", _totalExpensesToday.value)}\n")
+                    append("Gross Sales:  $currencySymbol ${String.format("%.2f", _totalSalesToday.value)}\n")
+                    append("Expenses:     $currencySymbol ${String.format("%.2f", _totalExpensesToday.value)}\n")
                     append("--------------------------------\n")
-                    append("Expected Cash: Rs ${String.format("%.2f", session?.expectedCash ?: 0.0)}\n")
-                    append("Physical Cash: Rs ${String.format("%.2f", physicalCashCount)}\n")
+                    append("Expected Cash: $currencySymbol ${String.format("%.2f", session?.expectedCash ?: 0.0)}\n")
+                    append("Physical Cash: $currencySymbol ${String.format("%.2f", physicalCashCount)}\n")
                     val variance = physicalCashCount - (session?.expectedCash ?: 0.0)
                     val varianceLabel = if (variance >= 0) "OVERAGE" else "SHORTAGE"
-                    append("Variance ($varianceLabel): Rs ${String.format("%.2f", variance)}\n")
+                    append("Cash Variance ($varianceLabel): $currencySymbol ${String.format("%.2f", variance)}\n")
+                    append("Status: RECONCILED\n")
                     append("================================\n")
-                    append("NET IN DRAWER: Rs ${String.format("%.2f", _netCashDrawer.value)}\n")
+                    append("NET IN DRAWER: $currencySymbol ${String.format("%.2f", _netCashDrawer.value)}\n")
                     append("================================\n")
                     append("    DAY CLOSED COMPLETELY    \n")
                 }
                 
-                tsplPrinter.printBarcodeLabel(appSetupPrefs.printerMac, "Z-Report", zReportContent)
+                // FIX (2026-08-06): was TSPL label protocol for text (wrong —
+                // labels use TSPL, receipts/reports use ESC/POS). Now ESC/POS.
+                escPosPrinter.printViaBluetooth(appSetupPrefs.printerMac, zReportContent)
+
+                // FIX (2026-08-06) M7.5: CSV auto-backup on Day Close — export today's
+                // sales to Downloads as CSV (industry-standard data-export feature).
+                exportDayCloseCsv()
             } catch (e: Exception) {
                 _reportStatus.value = "Closed, but Print Failed: ${e.message}"
             }
+        }
+    }
+
+    private fun exportDayCloseCsv() {
+        try {
+            val cal = java.util.Calendar.getInstance()
+            cal.set(java.util.Calendar.HOUR_OF_DAY, 0); cal.set(java.util.Calendar.MINUTE, 0)
+            cal.set(java.util.Calendar.SECOND, 0); cal.set(java.util.Calendar.MILLISECOND, 0)
+            val dayStart = cal.timeInMillis
+            viewModelScope.launch {
+                val sales = saleRepository.getAllSales().firstOrNull() ?: emptyList()
+                val todays = sales.filter { it.timestamp >= dayStart }
+                val sb = StringBuilder()
+                sb.appendLine("invoice_id,timestamp,items_count,subtotal,tax,discount,total,payment_method")
+                todays.forEach { s ->
+                    sb.appendLine("\"${s.invoiceId}\",${s.timestamp},${s.items.size},${s.subtotal},${s.tax},${s.discount},${s.total},\"${s.paymentMethod}\"")
+                }
+                val fileName = "TillzoPOS_Sales_${java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())}.csv"
+                val dir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                val file = java.io.File(dir, fileName)
+                file.writeText(sb.toString())
+                _reportStatus.value = "Day Closed + CSV exported: $fileName"
+                android.util.Log.i("ZReportViewModel", "CSV exported: ${file.absolutePath}")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("ZReportViewModel", "CSV export failed: ${e.message}")
         }
     }
 

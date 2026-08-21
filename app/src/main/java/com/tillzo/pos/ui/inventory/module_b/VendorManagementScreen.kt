@@ -59,7 +59,7 @@ fun VendorManagementScreen(
             title = { Text("Delete Vendor", color = Color.White) },
             text = {
                 Text(
-                    "Permanently delete ${showDeleteConfirm?.name}? This will delete the vendor locally and remove them from your spreadsheet on next sync.",
+                    "Delete ${showDeleteConfirm?.name}? This marks the vendor as deleted locally and removes them from your spreadsheet on next sync.",
                     color = Color.White.copy(alpha = 0.8f)
                 )
             },

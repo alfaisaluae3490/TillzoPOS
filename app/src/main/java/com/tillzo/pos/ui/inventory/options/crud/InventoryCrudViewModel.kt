@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 @HiltViewModel
@@ -108,16 +109,21 @@ class InventoryCrudViewModel @Inject constructor(
 
     fun addCategory(name: String) {
         if (name.isBlank()) return
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             try {
-                categoryDao.insertCategory(
-                    CategoryEntity(
-                        category_name = name,
-                        pos_terminal_id = "terminal_1" // Replace later with actual terminal id
-                    )
+                val entity = CategoryEntity(
+                    category_name = name,
+                    pos_terminal_id = "terminal_1" // Replace later with actual terminal id
                 )
+                categoryDao.insertCategory(entity)
+                // FIX (2026-08-07): verify commit + log (silent catch ne bug chipaya tha)
+                val committed = categoryDao.getPendingSyncCategories()
+                Log.i("InventoryCrudVM", "Category added: ${entity.system_row_id} name=$name pendingCount=${committed.size}")
+                if (committed.none { it.system_row_id == entity.system_row_id }) {
+                    Log.w("InventoryCrudVM", "Category NOT committed to DB! name=$name")
+                }
             } catch (e: Exception) {
-                Log.e("InventoryCrudVM", "Failed to add category", e)
+                Log.e("InventoryCrudVM", "Failed to add category: $name", e)
             }
         }
     }
@@ -184,7 +190,7 @@ class InventoryCrudViewModel @Inject constructor(
     ) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val terminalId = "terminal_1" // Hardcoded for now, replace with actual fetch mechanism
+                val terminalId = appSetupPrefs.spreadsheetId.take(20).ifBlank { "TERM_1" } // FIX 2026-08-06: real terminal idwith actual fetch mechanism
             
             val existingItem = _selectedItem.value
             val itemNum = existingItem?.item_number ?: ((inventoryDao.getMaxItemNumber() ?: 0) + 1)
@@ -297,7 +303,59 @@ class InventoryCrudViewModel @Inject constructor(
         inventoryDao.getItemById(itemId)
 
     fun showAddBatchDialog(productId: String) {
-        // Intentionally left blank as user prompt specifies only Edit dialog is needed here, and NO logic was given for showAddBatchDialog.
+        // FIX (2026-08-06): was an empty stub — "Add New Batch" button existed in
+        // the batch sheet but did nothing. Now opens the add-batch dialog.
+        _addBatchProductId.value = productId
+    }
+
+    private val _addBatchProductId = MutableStateFlow<String?>(null)
+    val addBatchProductId: StateFlow<String?> = _addBatchProductId
+
+    fun dismissAddBatchDialog() {
+        _addBatchProductId.value = null
+    }
+
+    fun addBatch(
+        productId: String,
+        batchNumber: String,
+        mfgDate: String,
+        expiryDate: String,
+        stockQty: Double,
+        costPrice: Double,
+        sellingPrice: Double,
+        onDone: () -> Unit
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val product = inventoryDao.getItemById(productId) ?: return@launch
+                val batch = ProductBatchEntity(
+                    productId = productId,
+                    barcodeId = product.barcode_id,
+                    batchNumber = batchNumber.ifBlank { "BATCH-${System.currentTimeMillis() % 100000}" },
+                    manufacturingDate = mfgDate,
+                    expiryDate = expiryDate,
+                    stockQty = stockQty,
+                    costPrice = costPrice,
+                    sellingPrice = sellingPrice,
+                    isActive = true,
+                    isDeleted = false,
+                    syncStatus = "pending",
+                    posTerminalId = product.pos_terminal_id
+                )
+                productBatchDao.insertBatch(batch)
+                // Recalculate total stock from all active batches + mark pending
+                inventoryDao.updateTotalStockAndSyncStatus(
+                    productId,
+                    product.totalStock + stockQty,
+                    System.currentTimeMillis()
+                )
+                withContext(Dispatchers.Main) {
+                    onDone()
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("InventoryCrud", "addBatch failed: ${e.message}", e)
+            }
+        }
     }
 
     fun updateBatch(
@@ -326,6 +384,6 @@ class InventoryCrudViewModel @Inject constructor(
     private suspend fun recalculateTotalStock(productId: String) {
         val batches = productBatchDao.getAllBatchesForProduct(productId)
         val total = batches.filter { it.isActive && !it.isDeleted }.sumOf { it.stockQty }
-        inventoryDao.updateTotalStock(productId, total)
+        inventoryDao.updateTotalStockAndSyncStatus(productId, total, System.currentTimeMillis())
     }
 }

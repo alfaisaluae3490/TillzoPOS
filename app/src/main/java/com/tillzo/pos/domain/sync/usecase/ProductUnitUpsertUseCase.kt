@@ -118,29 +118,25 @@ class ProductUnitUpsertUseCase @Inject constructor(
 
             // ── Deletions: soft-deleted units pending removal from Sheet ───────
             if (pendingDeletions.isNotEmpty()) {
-                val sheetId = try { getSheetIdForTab(TABLE_NAME) } catch (e: Exception) {
-                    Log.w(TAG, "Could not get sheetId for deletions: ${e.message}")
-                    -1
+                val (onSheet, notOnSheet) = pendingDeletions.partition { idToRowMap.containsKey(it.unitId) }
+
+                for (row in notOnSheet) {
+                    productUnitDao.hardDeleteUnit(row.unitId)
                 }
 
-                for (row in pendingDeletions) {
-                    if (idToRowMap.containsKey(row.unitId)) {
-                        if (sheetId >= 0) {
-                            val sheetRowIndex = idToRowMap[row.unitId]!!
-                            val deleteSuccess = dataSource.deleteRow(
-                                sheetId = sheetId,
-                                rowIndex = sheetRowIndex
-                            )
-                            if (deleteSuccess) {
-                                productUnitDao.hardDeleteUnit(row.unitId)
-                            } else {
-                                Log.w(TAG, "Failed to delete unit ${row.unitId} from Sheet")
-                                anyFailure = true
-                            }
-                        }
-                    } else {
-                        // Never made it to Sheet — safe to hard-delete locally
+                for (row in onSheet) {
+                    val rowIndex = idToRowMap[row.unitId]
+                    if (rowIndex == null) {
                         productUnitDao.hardDeleteUnit(row.unitId)
+                        continue
+                    }
+                    // FIX (2026-08-06): repository-level deleteRow resolves sheetId internally
+                    val deleteSuccess = sheetsRepository.deleteRow(TABLE_NAME, rowIndex)
+                    if (deleteSuccess) {
+                        productUnitDao.hardDeleteUnit(row.unitId)
+                    } else {
+                        Log.w(TAG, "Failed to delete unit ${row.unitId} from Sheet")
+                        anyFailure = true
                     }
                 }
             }
@@ -151,10 +147,5 @@ class ProductUnitUpsertUseCase @Inject constructor(
             Log.e(TAG, "Error in ProductUnitUpsertUseCase: ${e.message}", e)
             false
         }
-    }
-
-    private suspend fun getSheetIdForTab(tabName: String): Int {
-        val metadata = dataSource.getSheetMetadata()
-        return metadata[tabName] ?: throw IllegalArgumentException("Tab $tabName not found in metadata")
     }
 }

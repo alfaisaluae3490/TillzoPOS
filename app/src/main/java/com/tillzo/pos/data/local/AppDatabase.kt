@@ -97,9 +97,10 @@ data class SyncLogEntity(
         TillSessionEntity::class,          // M-Till — Shift / Cash Drawer
         WastageEntity::class,              // E1 — Wastage / Damage Logging
         com.tillzo.pos.data.local.entity.ItemGtinEntity::class, // GTIN Support
-        AppLogEntity::class                // CL — Rolling Logging System
+        AppLogEntity::class,                // CL — Rolling Logging System
+        com.tillzo.pos.data.local.entity.TimeClockEntity::class // Employee time-tracking
     ],
-    version = 25,
+    version = 31,
     exportSchema = false  // Set to true + provide schemaLocation when releasing to production
 )
 @TypeConverters(RoomConverters::class)
@@ -124,6 +125,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun grnDao(): GrnDao
     abstract fun productUnitDao(): ProductUnitDao
     abstract fun tillSessionDao(): TillSessionDao // M-Till — Shift management
+    abstract fun timeClockDao(): com.tillzo.pos.data.local.dao.TimeClockDao // Employee time-tracking
     abstract fun wastageDao(): WastageDao          // E1 — Wastage / Damage Logging
     abstract fun logDao(): LogDao                  // CL — Rolling Logging System
 
@@ -866,6 +868,82 @@ abstract class AppDatabase : RoomDatabase() {
                 database.execSQL("CREATE INDEX IF NOT EXISTS `index_app_logs_timestamp` ON `app_logs`(`timestamp`)")
                 database.execSQL("CREATE INDEX IF NOT EXISTS `index_app_logs_tag` ON `app_logs`(`tag`)")
                 database.execSQL("CREATE INDEX IF NOT EXISTS `index_app_logs_logLevel` ON `app_logs`(`logLevel`)")
+            }
+        }
+
+        // Optimization: Adds indexes for low-end device queries (v26)
+        val MIGRATION_25_26 = object : Migration(25, 26) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_Inventory_barcode_id` ON `Inventory`(`barcode_id`)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_Inventory_item_name` ON `Inventory`(`item_name`)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_Inventory_sku` ON `Inventory`(`sku`)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_Sales_customer_id` ON `Sales`(`customer_id`)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_Sales_timestamp` ON `Sales`(`timestamp`)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_KhataEvents_customer_id` ON `KhataEvents`(`customer_id`)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_Expenses_timestamp` ON `Expenses`(`timestamp`)")
+            }
+        }
+
+        // M-Pay migration (v27): Add totalPayIn and totalPayOut to till_sessions
+        val MIGRATION_26_27 = object : Migration(26, 27) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE `till_sessions` ADD COLUMN `totalPayIn` REAL NOT NULL DEFAULT 0.0")
+                database.execSQL("ALTER TABLE `till_sessions` ADD COLUMN `totalPayOut` REAL NOT NULL DEFAULT 0.0")
+            }
+        }
+
+        val MIGRATION_27_28 = object : Migration(27, 28) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE `StockAdjustments` ADD COLUMN `updatedAt` INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE `StockAdjustments` ADD COLUMN `posTerminalId` TEXT NOT NULL DEFAULT 'TERM_1'")
+            }
+        }
+
+        val MIGRATION_28_29 = object : Migration(28, 29) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // FIX (2026-08-06): historical bug — MIGRATION_2_3 created table
+                // `Users` but UserEntity declares `Users_Permissions`, so any v2+
+                // upgrade failed Room schema validation. Rename the legacy table.
+                try {
+                    database.execSQL("ALTER TABLE `Users` RENAME TO `Users_Permissions`")
+                } catch (e: Exception) {
+                    // Table may not exist (fresh installs already have Users_Permissions)
+                }
+            }
+        }
+
+        // FIX (2026-08-06): v30 — loyalty program columns on Customers
+        val MIGRATION_29_30 = object : Migration(29, 30) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                try {
+                    database.execSQL("ALTER TABLE `Customers` ADD COLUMN `loyalty_points` REAL NOT NULL DEFAULT 0")
+                } catch (e: Exception) { /* column exists */ }
+                try {
+                    database.execSQL("ALTER TABLE `Customers` ADD COLUMN `lifetime_spend` REAL NOT NULL DEFAULT 0")
+                } catch (e: Exception) { /* column exists */ }
+            }
+        }
+
+        // FIX (2026-08-06): v31 — employee time-tracking table
+        val MIGRATION_30_31 = object : Migration(30, 31) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    """CREATE TABLE IF NOT EXISTS `Time_Clock` (
+                        `system_row_id` TEXT NOT NULL,
+                        `sync_status` TEXT NOT NULL,
+                        `created_at` INTEGER NOT NULL,
+                        `updated_at` INTEGER NOT NULL,
+                        `pos_terminal_id` TEXT NOT NULL,
+                        `employee_email` TEXT NOT NULL,
+                        `employee_name` TEXT NOT NULL,
+                        `event_type` TEXT NOT NULL,
+                        `timestamp` INTEGER NOT NULL,
+                        `note` TEXT,
+                        `is_deleted` INTEGER NOT NULL DEFAULT 0,
+                        `deleted_at` INTEGER,
+                        PRIMARY KEY(`system_row_id`)
+                    )"""
+                )
             }
         }
     }

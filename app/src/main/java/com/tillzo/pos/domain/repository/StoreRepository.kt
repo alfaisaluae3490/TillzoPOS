@@ -12,6 +12,7 @@ interface StoreRepository {
     suspend fun getCustomerById(customerId: String): CustomerEntity?
     suspend fun insertCustomer(customer: CustomerEntity)
     suspend fun updateCustomer(customer: CustomerEntity)
+    suspend fun softDeleteCustomer(customerId: String, timestamp: Long)
 
     // Khata Ledger
     fun getKhataEventsForCustomer(customerId: String): Flow<List<KhataEventEntity>>
@@ -24,4 +25,6 @@ interface StoreRepository {
     fun getAllExpenses(): Flow<List<ExpenseEntity>>
     fun getExpensesBetweenDates(startTime: Long, endTime: Long): Flow<List<ExpenseEntity>>
     suspend fun insertExpense(expense: ExpenseEntity)
+    suspend fun updateExpense(id: String, category: String, amount: Double, description: String, now: Long)
+    suspend fun softDeleteExpense(id: String, timestamp: Long)
 }

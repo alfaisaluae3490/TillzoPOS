@@ -1,8 +1,11 @@
 package com.tillzo.pos.ui.signin
 
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -11,8 +14,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -25,6 +30,8 @@ fun SignInScreen(
     viewModel: SignInViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var showDisclosure by remember { mutableStateOf(false) }
 
     val signInLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -37,7 +44,7 @@ fun SignInScreen(
     }
 
     Box(
-        modifier = Modifier.fillMaxSize().background(BackgroundDark),
+        modifier = Modifier.fillMaxSize().background(BackgroundDark).systemBarsPadding(),
         contentAlignment = Alignment.Center
     ) {
         when (val state = uiState) {
@@ -62,7 +69,7 @@ fun SignInScreen(
                     Spacer(Modifier.height(60.dp))
 
                     Button(
-                        onClick = { signInLauncher.launch(viewModel.buildSignInClient().signInIntent) },
+                        onClick = { showDisclosure = true },
                         colors = ButtonDefaults.buttonColors(containerColor = AccentBlue),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth().height(56.dp)
@@ -76,6 +83,19 @@ fun SignInScreen(
                         "Your data stays in your own Google account.\nWe set everything up automatically.",
                         color = TextSecondary, fontSize = 13.sp,
                         textAlign = TextAlign.Center, lineHeight = 20.sp
+                    )
+
+                    Spacer(Modifier.height(24.dp))
+                    Text(
+                        text = "Privacy Policy",
+                        color = AccentBlue,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        textDecoration = TextDecoration.Underline,
+                        modifier = Modifier.clickable {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://tillzopos.com/privacy"))
+                            context.startActivity(intent)
+                        }
                     )
                 }
             }
@@ -109,6 +129,49 @@ fun SignInScreen(
                 }
             }
         }
+    }
+
+    if (showDisclosure) {
+        AlertDialog(
+            onDismissRequest = { showDisclosure = false },
+            title = {
+                Text(
+                    text = "Backup & Sync Consent",
+                    color = TextPrimary,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp
+                )
+            },
+            text = {
+                Text(
+                    text = "Tillzo POS requires access to your personal Google Drive (via drive.file scope) to create and synchronize a secure database spreadsheet. This sheet stores your sales, inventory, and expense data so you can access it across your devices.\n\nSyncing happens in the background to ensure data consistency. Your data remains stored purely locally on your device and inside your own personal Google Drive. Tillzo POS developers do NOT collect, access, transfer, or sell your data.",
+                    color = TextSecondary,
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDisclosure = false
+                        signInLauncher.launch(viewModel.buildSignInClient().signInIntent)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentBlue),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Accept & Sync", color = TextPrimary, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showDisclosure = false }
+                ) {
+                    Text("Cancel", color = AccentBlue)
+                }
+            },
+            containerColor = BackgroundDark,
+            shape = RoundedCornerShape(16.dp)
+        )
     }
 }
 

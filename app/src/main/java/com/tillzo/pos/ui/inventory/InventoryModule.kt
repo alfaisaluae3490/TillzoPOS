@@ -19,7 +19,8 @@ import com.tillzo.pos.ui.inventory.options.qr.QrGeneratorScreen
 fun InventoryModule(
     onNavigateBack: () -> Unit,
     onNavigateToCategories: () -> Unit = {},
-    onNavigateToUnits: () -> Unit = {}
+    onNavigateToUnits: () -> Unit = {},
+    onNavigateToStockAlerts: () -> Unit = {}
 ) {
     val navController = rememberNavController()
 
@@ -36,6 +37,10 @@ fun InventoryModule(
                 onNavigateBack = onNavigateBack,
                 onNavigateToCategories = onNavigateToCategories,
                 onNavigateToUnits = onNavigateToUnits,
+                // FIX (2026-08-06): alert chips now navigate via the root NavHost
+                // ("stock_alerts" is registered there) instead of the inner NavHost,
+                // which had no such route → runtime crash.
+                onNavigateToStockAlerts = onNavigateToStockAlerts,
                 onNavigateToOcr = { navController.navigate("ocr_entry") },
                 onNavigateToQr = { barcode -> navController.navigate("qr_generator/$barcode") },
                 navController = navController

@@ -51,6 +51,7 @@ interface TillSessionDao {
         UPDATE till_sessions
         SET status = 'RECONCILED',
             closingCash = :physicalCashCount,
+            cashVariance = :physicalCashCount - expectedCash,
             netCash = :physicalCashCount - expectedCash,
             closedAt = :closedAt,
             syncStatus = 'pending',
@@ -105,6 +106,34 @@ interface TillSessionDao {
         WHERE sessionId = :sessionId
     """)
     suspend fun deductExpenseFromSession(
+        sessionId: String,
+        amount: Double,
+        now: Long = System.currentTimeMillis()
+    )
+
+    @Query("""
+        UPDATE till_sessions
+        SET totalPayIn = totalPayIn + :amount,
+            expectedCash = expectedCash + :amount,
+            syncStatus = 'pending',
+            updatedAt = :now
+        WHERE sessionId = :sessionId
+    """)
+    suspend fun addPayIn(
+        sessionId: String,
+        amount: Double,
+        now: Long = System.currentTimeMillis()
+    )
+
+    @Query("""
+        UPDATE till_sessions
+        SET totalPayOut = totalPayOut + :amount,
+            expectedCash = expectedCash - :amount,
+            syncStatus = 'pending',
+            updatedAt = :now
+        WHERE sessionId = :sessionId
+    """)
+    suspend fun addPayOut(
         sessionId: String,
         amount: Double,
         now: Long = System.currentTimeMillis()

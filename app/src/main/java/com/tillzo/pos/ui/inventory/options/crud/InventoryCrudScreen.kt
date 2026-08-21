@@ -50,6 +50,7 @@ fun InventoryCrudScreen(
     onNavigateBack: () -> Unit,
     onNavigateToCategories: () -> Unit = {},
     onNavigateToUnits: () -> Unit = {},
+    onNavigateToStockAlerts: () -> Unit = {},
     onNavigateToOcr: () -> Unit,
     onNavigateToQr: (String) -> Unit,
     viewModel: InventoryCrudViewModel = hiltViewModel(),
@@ -159,19 +160,19 @@ fun InventoryCrudScreen(
                 ) {
                     if (lowCount > 0) {
                         SuggestionChip(
-                            onClick = { navController?.navigate("stock_alerts") },
+                            onClick = onNavigateToStockAlerts,
                             label = { Text("⚠️ $lowCount Low", fontSize = 12.sp) }
                         )
                     }
                     if (outCount > 0) {
                         SuggestionChip(
-                            onClick = { navController?.navigate("stock_alerts") },
+                            onClick = onNavigateToStockAlerts,
                             label = { Text("🚫 $outCount Out", fontSize = 12.sp) }
                         )
                     }
                     if (expiringCount > 0) {
                         SuggestionChip(
-                            onClick = { navController?.navigate("stock_alerts") },
+                            onClick = onNavigateToStockAlerts,
                             label = { Text("⏰ $expiringCount Expiring", fontSize = 12.sp) }
                         )
                     }
@@ -277,6 +278,22 @@ fun InventoryCrudScreen(
             onDismiss = { selectedItemForBatches = null },
             onEditBatch = { batch, batchNumber, mfgDate, expiryDate, stockQty, sellingPrice ->
                 viewModel.updateBatch(batch, batchNumber, mfgDate, expiryDate, stockQty, sellingPrice)
+            }
+        )
+    }
+
+    // FIX (2026-08-06): Add-batch dialog — was an empty stub, now functional.
+    val addBatchProductId by viewModel.addBatchProductId.collectAsState()
+    addBatchProductId?.let { productId ->
+        com.tillzo.pos.ui.inventory.module_a.AddBatchDialog(
+            onDismiss = { viewModel.dismissAddBatchDialog() },
+            onSave = { batchNumber, mfgDate, expiryDate, stockQty, costPrice, sellingPrice ->
+                viewModel.addBatch(
+                    productId, batchNumber, mfgDate, expiryDate,
+                    stockQty, costPrice, sellingPrice
+                ) {
+                    viewModel.dismissAddBatchDialog()
+                }
             }
         )
     }

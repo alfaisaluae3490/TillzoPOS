@@ -12,6 +12,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -39,6 +41,8 @@ fun ZReportScreen(
     val activeSession by viewModel.activeSession.collectAsStateWithLifecycle()
 
     var showConfirmDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val currencySymbol = remember { AppSetupPrefs(context).currencySymbol.ifBlank { "$" } }
     var physicalCount by remember { mutableStateOf("") }
 
     Scaffold(
@@ -112,18 +116,18 @@ fun ZReportScreen(
                     Divider(modifier = Modifier.padding(vertical = 12.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Gross Sales:")
-                        Text("Rs ${String.format("%.2f", totalSales)}", fontWeight = FontWeight.SemiBold)
+                        Text("$currencySymbol ${String.format("%.2f", totalSales)}", fontWeight = FontWeight.SemiBold)
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Expenses:")
-                        Text("- Rs ${String.format("%.2f", totalExpenses)}", color = Color.Red, fontWeight = FontWeight.SemiBold)
+                        Text("- $currencySymbol ${String.format("%.2f", totalExpenses)}", color = Color.Red, fontWeight = FontWeight.SemiBold)
                     }
                     Divider(modifier = Modifier.padding(vertical = 12.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Expected Cash in Drawer:", fontWeight = FontWeight.Bold)
                         Text(
-                            "Rs ${String.format("%.2f", netDrawer)}",
+                            "$currencySymbol ${String.format("%.2f", netDrawer)}",
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary,
                             style = MaterialTheme.typography.titleMedium
@@ -157,16 +161,26 @@ fun ZReportScreen(
                         )
                         TillRow(
                             label = "Opening Cash",
-                            value = "Rs ${String.format("%.2f", session.openingCash)}"
+                            value = "$currencySymbol ${String.format("%.2f", session.openingCash)}"
                         )
                         TillRow(
                             label = "Cash Sales",
-                            value = "Rs ${String.format("%.2f", session.totalCashSales)}"
+                            value = "$currencySymbol ${String.format("%.2f", session.totalCashSales)}"
                         )
                         TillRow(
                             label = "Expected in Drawer",
-                            value = "Rs ${String.format("%.2f", session.expectedCash)}",
+                            value = "$currencySymbol ${String.format("%.2f", session.expectedCash)}",
                             isHighlighted = true
+                        )
+                        TillRow(
+                            label = "Pay In (Added)",
+                            value = "$currencySymbol ${String.format("%.2f", session.totalPayIn)}",
+                            isHighlighted = false
+                        )
+                        TillRow(
+                            label = "Pay Out (Removed)",
+                            value = "$currencySymbol ${String.format("%.2f", session.totalPayOut)}",
+                            isHighlighted = false
                         )
                         TillRow(
                             label = "Total Transactions",
@@ -178,7 +192,7 @@ fun ZReportScreen(
                         OutlinedTextField(
                             value = physicalCount,
                             onValueChange = { physicalCount = it },
-                            label = { Text("Physical Cash Count (Rs.)", color = Color.White.copy(alpha = 0.7f)) },
+                            label = { Text("Physical Cash Count ($currencySymbol)", color = Color.White.copy(alpha = 0.7f)) },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             modifier = Modifier.fillMaxWidth(),
                             colors = OutlinedTextFieldDefaults.colors(
@@ -258,7 +272,7 @@ fun ZReportScreen(
                     OutlinedTextField(
                         value = dayClosePhysicalCount,
                         onValueChange = { dayClosePhysicalCount = it },
-                        label = { Text("Physical Cash Count (Rs.)") },
+                        label = { Text("Physical Cash Count ($currencySymbol)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -266,7 +280,7 @@ fun ZReportScreen(
                     dayClosePhysicalCount.toDoubleOrNull()?.let { counted ->
                         val variance = counted - netDrawer
                         Text(
-                            "Expected: Rs ${String.format("%.2f", netDrawer)}",
+                            "Expected: $currencySymbol ${String.format("%.2f", netDrawer)}",
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(

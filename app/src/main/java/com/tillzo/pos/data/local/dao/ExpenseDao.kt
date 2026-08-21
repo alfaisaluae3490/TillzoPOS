@@ -20,6 +20,9 @@ interface ExpenseDao : BaseDao<ExpenseEntity> {
     @Query("UPDATE Expenses SET is_deleted = 1, deleted_at = :timestamp, sync_status = 'pending' WHERE system_row_id = :id")
     suspend fun softDeleteById(id: String, timestamp: Long)
 
+    @Query("UPDATE Expenses SET category = :category, amount = :amount, description = :description, sync_status = 'pending', updated_at = :now WHERE system_row_id = :id")
+    suspend fun updateExpense(id: String, category: String, amount: Double, description: String, now: Long)
+
     @Query("SELECT * FROM Expenses WHERE is_deleted = 1 AND sync_status = 'pending'")
     suspend fun getPendingDeletedRows(): List<ExpenseEntity>
 

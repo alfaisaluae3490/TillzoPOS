@@ -134,29 +134,25 @@ class InventoryUpsertUseCase @Inject constructor(
 
             // ── Deletions: soft-deleted rows pending removal from Sheet ───────
             if (pendingDeletions.isNotEmpty()) {
-                val sheetId = try { getSheetIdForTab(tableName) } catch (e: Exception) {
-                    Log.w(TAG, "Could not get sheetId for deletions: ${e.message}")
-                    -1
+                val (onSheet, notOnSheet) = pendingDeletions.partition { idToRowMap.containsKey(it.system_row_id) }
+
+                for (row in notOnSheet) {
+                    inventoryDao.markSyncedAndDeleted(row.system_row_id)
                 }
 
-                for (row in pendingDeletions) {
-                    if (idToRowMap.containsKey(row.system_row_id)) {
-                        if (sheetId >= 0) {
-                            val sheetRowIndex = idToRowMap[row.system_row_id]!!
-                            val deleteSuccess = dataSource.deleteRow(
-                                sheetId = sheetId,
-                                rowIndex = sheetRowIndex
-                            )
-                            if (deleteSuccess) {
-                                inventoryDao.markSyncedAndDeleted(row.system_row_id)
-                            } else {
-                                Log.w(TAG, "Failed to delete row ${row.system_row_id} from Sheet")
-                                anyFailure = true
-                            }
-                        }
-                    } else {
-                        // Never made it to Sheet — safe to mark as synced locally
+                for (row in onSheet) {
+                    val rowIndex = idToRowMap[row.system_row_id]
+                    if (rowIndex == null) {
                         inventoryDao.markSyncedAndDeleted(row.system_row_id)
+                        continue
+                    }
+                    // FIX (2026-08-06): repository-level deleteRow resolves sheetId internally
+                    val deleteSuccess = sheetsRepository.deleteRow(tableName, rowIndex)
+                    if (deleteSuccess) {
+                        inventoryDao.markSyncedAndDeleted(row.system_row_id)
+                    } else {
+                        Log.w(TAG, "Failed to delete row ${row.system_row_id} from Sheet")
+                        anyFailure = true
                     }
                 }
             }
@@ -167,10 +163,5 @@ class InventoryUpsertUseCase @Inject constructor(
             Log.e(TAG, "Error in InventoryUpsertUseCase: ${e.message}", e)
             false
         }
-    }
-
-    private suspend fun getSheetIdForTab(tabName: String): Int {
-        val metadata = dataSource.getSheetMetadata()
-        return metadata[tabName] ?: throw IllegalArgumentException("Tab $tabName not found in metadata")
     }
 }

@@ -98,7 +98,13 @@ class AuthRepositoryImpl @Inject constructor(
     }
 
     override fun getAccessToken(): String? {
-        return sharedPrefs.getString(KEY_ACCESS_TOKEN, null)
+        // FIX (2026-08-06): legacy prefs first; tokenManager valid-token lookup is
+        // suspend — read its cached token synchronously when prefs is empty.
+        val fromPrefs = sharedPrefs.getString(KEY_ACCESS_TOKEN, null)
+        if (fromPrefs != null) return fromPrefs
+        return runCatching {
+            kotlinx.coroutines.runBlocking { tokenManager.getValidToken() }
+        }.getOrNull()
     }
 
     @Suppress("DEPRECATION")
@@ -129,6 +135,11 @@ class AuthRepositoryImpl @Inject constructor(
             putString(KEY_ACCESS_TOKEN, accessToken)
             if (refreshToken != null) putString(KEY_REFRESH_TOKEN, refreshToken)
         }.apply()
+        // FIX (2026-08-06): keep OAuthTokenManager (the store SheetsApiClient uses)
+        // in sync — this was the "2 token stores" bug.
+        if (refreshToken != null) {
+            runCatching { tokenManager.storeRefreshToken(refreshToken) }
+        }
     }
 
     companion object {
@@ -136,6 +147,9 @@ class AuthRepositoryImpl @Inject constructor(
         private const val KEY_REFRESH_TOKEN = "refresh_token"
         private const val KEY_APP_PIN = "app_pin"
 
-        private const val WEB_CLIENT_ID = "191290481305-3ag6k2hakgtdjkted28bulmig9eb1eaq.apps.googleusercontent.com"
+        // FIX (2026-08-06): single source of truth — WEB client ID from
+        // Constants (matches default_web_client_id). Old Android client ID
+        // caused 400 invalid_grant on token exchange.
+        private const val WEB_CLIENT_ID = com.tillzo.pos.utils.Constants.WEB_CLIENT_ID
     }
 }

@@ -17,7 +17,7 @@ hiltNavigationCompose = "1.2.0"
 rootbeer = "0.1.0"
 billing = "6.1.0"
 zxing = "3.5.3"
-securityCrypto = "1.1.0-alpha06"
+securityCrypto = "1.1.0"
 datastorePrefs = "1.1.1"
 appcompat = "1.7.0"
 googleSignIn = "21.2.0"
@@ -28,6 +28,8 @@ appauth = "0.11.1"
 camerax = "1.4.0-rc01"
 mlkitBarcode = "17.3.0"
 mlkitText = "16.0.1"
+sqlcipher = "4.5.4"
+sqliteKtx = "2.4.0"
 
 [libraries]
 # Compose BOM
@@ -110,6 +112,13 @@ camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", versi
 camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "camerax" }
 mlkit-barcode = { group = "com.google.mlkit", name = "barcode-scanning", version.ref = "mlkitBarcode" }
 mlkit-text = { group = "com.google.mlkit", name = "text-recognition", version.ref = "mlkitText" }
+
+# Logging
+timber = { group = "com.jakewharton.timber", name = "timber", version = "5.0.1" }
+
+# SQLCipher — DB encryption (FIX 2026-08-07: Issue 1 — plaintext SQLite → AES-256)
+sqlcipher = { group = "net.zetetic", name = "android-database-sqlcipher", version.ref = "sqlcipher" }
+sqlite-ktx = { group = "androidx.sqlite", name = "sqlite-ktx", version.ref = "sqliteKtx" }
 
 # Testing
 junit = { group = "junit", name = "junit", version = "4.13.2" }

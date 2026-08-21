@@ -103,23 +103,36 @@ class VendorUpsertUseCase @Inject constructor(
 
             // 3c. Delete synced deletions from remote and local
             if (pendingDeletions.isNotEmpty()) {
-                for (vendor in pendingDeletions) {
-                    try {
+                val (onSheet, notOnSheet) = pendingDeletions.partition { idToRowMap.containsKey(it.vendorId) }
+
+                for (vendor in notOnSheet) {
+                    vendorDao.hardDeleteVendor(vendor.vendorId)
+                    Log.d(TAG, "Hard deleted local-only vendor: ${vendor.vendorId}")
+                }
+
+                if (onSheet.isNotEmpty()) {
+                    val sortedDeletions = onSheet.mapNotNull { vendor ->
                         val rowIndex = idToRowMap[vendor.vendorId]
-                        if (rowIndex != null) {
+                        if (rowIndex != null) vendor to rowIndex else null
+                    }.sortedByDescending { it.second }
+
+                    for ((vendor, rowIndex) in sortedDeletions) {
+                        try {
                             if (sheetsRepository.deleteRow(TABLE_NAME, rowIndex)) {
-                                Log.d(TAG, "Deleted remote row for vendor: ${vendor.vendorId}")
+                                vendorDao.hardDeleteVendor(vendor.vendorId)
+                                Log.d(TAG, "Deleted remote row + hard deleted vendor locally: ${vendor.vendorId}")
                             } else {
-                                Log.w(TAG, "Failed to delete remote row for vendor: ${vendor.vendorId}")
+                                // FIX (2026-08-06): keep local row pending when remote
+                                // delete fails — was hard-deleting locally anyway, which
+                                // made the vendor vanish locally but stay remote (then
+                                // delta restored it → phantom re-appearance).
+                                Log.w(TAG, "Failed to delete remote row for vendor: ${vendor.vendorId} — keeping local pending")
+                                anyFailure = true
                             }
-                        } else {
-                            Log.d(TAG, "Vendor ${vendor.vendorId} not found remotely, deleting locally only")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to delete vendor ${vendor.vendorId}: ${e.message}", e)
+                            anyFailure = true
                         }
-                        vendorDao.hardDeleteVendor(vendor.vendorId)
-                        Log.d(TAG, "Hard deleted vendor locally: ${vendor.vendorId}")
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to delete vendor ${vendor.vendorId}: ${e.message}", e)
-                        anyFailure = true
                     }
                 }
             }

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TillzoPOS</string>
+    <string name="default_web_client_id" translatable="false">191290481305-3m583fdj0hq5je8mnj34frqih33lssqc.apps.googleusercontent.com</string>
+    <string name="sale">بيع</string>
+    <string name="inventory">المخزون</string>
+    <string name="khata">خاتا (دفتر)</string>
+    <string name="close_till">إغلاق الدرج</string>
+    <string name="total">المجموع</string>
+    <string name="items">البنود</string>
+    <string name="print_receipt">طباعة الإيصال</string>
+    <string name="search_hint">ابحث بالاسم أو SKU أو امسح الباركود…</string>
+    <string name="open_till">فتح الدرج</string>
+    <string name="close_day">إغلاق اليوم (تقرير Z)</string>
+</resources>

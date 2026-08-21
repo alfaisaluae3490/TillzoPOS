@@ -1,10 +1,18 @@
 package com.tillzo.pos.data.local.entity
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.util.UUID
 
-@Entity(tableName = "Inventory")
+@Entity(
+    tableName = "Inventory",
+    indices = [
+        Index(value = ["barcode_id"]),
+        Index(value = ["item_name"]),
+        Index(value = ["sku"])
+    ]
+)
 data class InventoryEntity(
     @PrimaryKey
     override val system_row_id: String = UUID.randomUUID().toString(),
@@ -74,7 +82,6 @@ data class InventoryEntity(
             "is_deleted" to (if (is_deleted) 1 else 0),
             "deleted_at" to (deleted_at ?: ""),
             "last_updated" to updated_at,
-            "sync_status" to "synced",
             "created_at" to created_at,
             "updated_at" to updated_at,
             "pos_terminal_id" to pos_terminal_id

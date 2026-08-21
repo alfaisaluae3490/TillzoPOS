@@ -21,6 +21,10 @@ data class CustomerEntity(
     val whatsapp: String? = null, // WhatsApp number (may differ from phone)
     val email: String? = null,
     val address: String? = null,
+
+    // FIX (2026-08-06): loyalty program — points balance + lifetime spend
+    val loyalty_points: Double = 0.0,
+    val lifetime_spend: Double = 0.0,
     
     override val is_deleted: Boolean = false,
     override val deleted_at: Long? = null
@@ -33,6 +37,8 @@ data class CustomerEntity(
             "whatsapp" to (whatsapp ?: ""),
             "email" to (email ?: ""),
             "address" to (address ?: ""),
+            "loyalty_points" to loyalty_points,
+            "lifetime_spend" to lifetime_spend,
             "is_deleted" to (if (is_deleted) 1 else 0),
             "deleted_at" to (deleted_at ?: ""),
             "sync_status" to "synced",

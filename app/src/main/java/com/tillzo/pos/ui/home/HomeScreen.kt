@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -101,6 +102,7 @@ fun HomeScreen(
     val saleResult by viewModel.saleResult.collectAsStateWithLifecycle()
     val currentTillSession by tillViewModel.currentSession.collectAsStateWithLifecycle()
     val hasPendingSync by viewModel.hasPendingSync.collectAsStateWithLifecycle()
+    val pendingSyncCount by viewModel.pendingSyncCount.collectAsStateWithLifecycle()
 
     var showPaymentDialog by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
@@ -110,13 +112,31 @@ fun HomeScreen(
     var cartDecimalQtyTarget by remember { mutableStateOf<com.tillzo.pos.domain.model.CartItem?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val stockWarning by viewModel.stockWarning.collectAsStateWithLifecycle()
     var showAdminPinDialog by remember { mutableStateOf(false) }
     var showUnpinConfirm by remember { mutableStateOf(false) }
     var pinTarget by remember { mutableStateOf<InventoryEntity?>(null) }
     var unpinTarget by remember { mutableStateOf<InventoryEntity?>(null) }
     var showDiscountDialog by remember { mutableStateOf(false) }
+    var showCustomItemDialog by remember { mutableStateOf(false) }
+    var showPayInDialog by remember { mutableStateOf(false) }
+    var showPayOutDialog by remember { mutableStateOf(false) }
     val inlineScannerViewModel: InlineScannerViewModel = hiltViewModel()
     val isCameraActive by inlineScannerViewModel.isCameraActive.collectAsStateWithLifecycle()
+    // FIX (2026-08-06): clear search focus + hide keyboard when a product tile
+    // is tapped, so the numeric qty picker never types into the search field
+    // ("Milkq" bug — numpad '1' was landing on the system keyboard's 'q').
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    fun dismissSearchInput() {
+        focusManager.clearFocus()
+        keyboardController?.hide()
+        // FIX (2026-08-06): also reset the query so the dropdown closes and the
+        // field can never re-steal focus/type into the system keyboard ("Milkq").
+        if (searchQuery.isNotEmpty()) {
+            viewModel.onSearchQueryChanged("")
+        }
+    }
 
     var scannerBorderColor by remember { mutableStateOf(Color(0xFF1E88E5)) }
     
@@ -160,8 +180,21 @@ fun HomeScreen(
         }
     }
 
-    // Till session gate — block POS when no active till session
-    if (currentTillSession == null) {
+    // Show snackbar when stock warning is active (negative stock block)
+    LaunchedEffect(stockWarning) {
+        stockWarning?.let { warning ->
+            scope.launch {
+                snackbarHostState.showSnackbar(
+                    message = "Cannot oversell. Stock limit reached! (${warning.itemName}: requested ${warning.requested.toInt()}, available ${warning.available.toInt()})",
+                    duration = SnackbarDuration.Short
+                )
+            }
+            viewModel.clearStockWarning()
+        }
+    }
+
+    // Till session gate — block POS when no active till session or session is closed
+    if (currentTillSession == null || currentTillSession?.status != "OPEN") {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -177,14 +210,16 @@ fun HomeScreen(
                 )
                 Spacer(Modifier.height(24.dp))
                 Text(
-                    "No Active Till Session",
+                    if (currentTillSession?.status == "RECONCILED") "Register Session Closed"
+                    else "No Active Register Session",
                     color = TextPrimary,
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Please open a till before making sales.",
+                    if (currentTillSession?.status == "RECONCILED") "This till has been reconciled. Open a new till to continue selling."
+                    else "Please open a till before making sales.",
                     color = TextSecondary,
                     fontSize = 14.sp
                 )
@@ -220,14 +255,52 @@ fun HomeScreen(
                 },
                 actions = {
                     // Sync status dot — Green = synced, Red = pending updates
-                    val syncColor = if (hasPendingSync) ErrorRed else SuccessGreen
+                    val syncColor = if (hasPendingSync) WarningAmber else SuccessGreen
                     Box(
                         modifier = Modifier
                             .size(10.dp)
                             .clip(CircleShape)
                             .background(syncColor)
                     )
-                    Spacer(Modifier.width(12.dp))
+                    if (pendingSyncCount > 0) {
+                        Box(
+                            modifier = Modifier
+                                .size(18.dp)
+                                .clip(CircleShape)
+                                .background(ErrorRed),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = minOf(pendingSyncCount, 99).toString(),
+                                color = Color.White,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    // Till management — PayIn / PayOut
+                    Box {
+                        var showTillMenu by remember { mutableStateOf(false) }
+                        IconButton(onClick = { showTillMenu = true }) {
+                            Icon(Icons.Default.AccountBalanceWallet, contentDescription = "Till", tint = AccentBlue, modifier = Modifier.size(20.dp))
+                        }
+                        DropdownMenu(
+                            expanded = showTillMenu,
+                            onDismissRequest = { showTillMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Pay In (Add Cash)") },
+                                onClick = { showTillMenu = false; showPayInDialog = true },
+                                leadingIcon = { Icon(Icons.Default.AddCircle, null, tint = SuccessGreen) }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Pay Out (Remove Cash)") },
+                                onClick = { showTillMenu = false; showPayOutDialog = true },
+                                leadingIcon = { Icon(Icons.Default.RemoveCircle, null, tint = ErrorRed) }
+                            )
+                        }
+                    }
                     IconButton(onClick = onNavigateToInventory) {
                         Icon(Icons.Default.Inventory, contentDescription = "Inventory", tint = AccentBlue)
                     }
@@ -342,7 +415,8 @@ fun HomeScreen(
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp),
+                        .padding(horizontal = 12.dp)
+                        .padding(top = 4.dp),
                     colors = CardDefaults.cardColors(containerColor = SurfaceVariant),
                     shape = RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp)
                 ) {
@@ -351,7 +425,10 @@ fun HomeScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { viewModel.addToCart(item, 1.0) }
+                                    .clickable {
+                                        dismissSearchInput()
+                                        viewModel.addToCart(item, 1.0)
+                                    }
                                     .padding(horizontal = 16.dp, vertical = 10.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
@@ -399,6 +476,7 @@ fun HomeScreen(
                             item = item,
                             currencySymbol = currencySymbol,
                             onTapped = {
+                                dismissSearchInput()
                                 if (item.unit in listOf("KG", "GM", "ML")) {
                                     decimalQtyItem = item
                                     showDecimalQtyDialog = true
@@ -462,7 +540,7 @@ fun HomeScreen(
                         // Totals
                         CartSummaryRow("Subtotal", "$currencySymbol %.2f".format(cartSubtotal))
                         if (cartTax > 0) CartSummaryRow("Tax", "$currencySymbol %.2f".format(cartTax))
-                        if (cartDiscount > 0) CartSummaryRow("Discount", "- Rs %.2f".format(cartDiscount), color = SuccessGreen)
+                        if (cartDiscount > 0) CartSummaryRow("Discount", "- $currencySymbol %.2f".format(cartDiscount), color = SuccessGreen)
                         HorizontalDivider(color = SurfaceVariant, modifier = Modifier.padding(vertical = 6.dp))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("TOTAL", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -499,6 +577,15 @@ fun HomeScreen(
 
                         // Action Buttons
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = { showCustomItemDialog = true },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentBlueLight)
+                            ) {
+                                Icon(Icons.Default.AddCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Open Item", fontSize = 12.sp)
+                            }
                             OutlinedButton(
                                 onClick = { showClearConfirm = true },
                                 modifier = Modifier.weight(1f),
@@ -583,6 +670,43 @@ fun HomeScreen(
                 showCartDecimalQtyDialog = false
                 cartDecimalQtyTarget = null
             }
+        )
+    }
+
+    // Pay In Dialog
+    if (showPayInDialog) {
+        PayInOutDialog(
+            title = "Pay In — Add Cash to Drawer",
+            description = "Enter the amount being added to the till (e.g., change from bank).",
+            onConfirm = { amount ->
+                tillViewModel.addPayIn(amount)
+                showPayInDialog = false
+            },
+            onDismiss = { showPayInDialog = false }
+        )
+    }
+
+    // Pay Out Dialog
+    if (showPayOutDialog) {
+        PayInOutDialog(
+            title = "Pay Out — Remove Cash from Drawer",
+            description = "Enter the amount being taken out (e.g., for expenses, lunch, etc.).",
+            onConfirm = { amount ->
+                tillViewModel.addPayOut(amount)
+                showPayOutDialog = false
+            },
+            onDismiss = { showPayOutDialog = false }
+        )
+    }
+
+    // Custom Item Dialog
+    if (showCustomItemDialog) {
+        CustomItemDialog(
+            onConfirm = { name, price ->
+                viewModel.addCustomItem(name, price)
+                showCustomItemDialog = false
+            },
+            onDismiss = { showCustomItemDialog = false }
         )
     }
 
@@ -674,6 +798,7 @@ fun PosSearchBar(
                 // HID scanner sends Enter after barcode — auto-submit
                 if (keyEvent.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_ENTER) {
                     onSearchSubmit()
+                    keyboardController?.hide()
                     true
                 } else false
             },
@@ -714,7 +839,7 @@ fun PosSearchBar(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun QuickGridTile(item: InventoryEntity, currencySymbol: String = "Rs", onTapped: () -> Unit, onLongClick: () -> Unit = {}) {
+private fun QuickGridTile(item: InventoryEntity, currencySymbol: String = "$", onTapped: () -> Unit, onLongClick: () -> Unit = {}) {
     Column(
         modifier = Modifier
             .clip(RoundedCornerShape(10.dp))
@@ -834,6 +959,16 @@ private fun DecimalQtyDialog(
     onDismiss: () -> Unit
 ) {
     var input by remember { mutableStateOf("1.0") }
+    // FIX (2026-08-06): give the qty field EXPLICIT focus so the system keyboard
+    // opens for the dialog, NOT for the search field. Without this, the dialog's
+    // TextField races the search field for focus and taps land on QWERTY keys
+    // ("Milkq" bug — the search QWERTY keyboard steals focus back).
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val qtyFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        qtyFocusRequester.requestFocus()
+        keyboardController?.show()
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -849,6 +984,7 @@ private fun DecimalQtyDialog(
                     label = { Text("Qty (${item.unit})", color = TextSecondary) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
+                    modifier = Modifier.focusRequester(qtyFocusRequester),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = TextPrimary,
                         unfocusedTextColor = TextPrimary,
@@ -1027,6 +1163,139 @@ private fun DiscountDialog(
         confirmButton = {
             TextButton(onClick = { onConfirm(input.toDoubleOrNull() ?: 0.0) }) {
                 Text("Apply", color = AccentBlue)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = TextSecondary)
+            }
+        }
+    )
+}
+
+// ── Pay In / Pay Out Dialog ─────────────────────────────────────────────────
+
+@Composable
+private fun PayInOutDialog(
+    title: String,
+    description: String,
+    onConfirm: (Double) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var amountInput by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SurfaceDark,
+        title = { Text(title, color = TextPrimary) },
+        text = {
+            Column {
+                Text(description, color = TextSecondary, fontSize = 13.sp)
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = amountInput,
+                    onValueChange = { amountInput = it },
+                    label = { Text("Amount (Rs)", color = TextSecondary) },
+                    placeholder = { Text("e.g. 500", color = TextDisabled) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = AccentBlue,
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedContainerColor = SurfaceVariant,
+                        unfocusedContainerColor = SurfaceVariant
+                    )
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val amount = amountInput.toDoubleOrNull() ?: 0.0
+                    if (amount > 0) onConfirm(amount)
+                },
+                enabled = (amountInput.toDoubleOrNull() ?: 0.0) > 0
+            ) {
+                Text("Confirm", color = AccentBlue)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = TextSecondary)
+            }
+        }
+    )
+}
+
+// ── Custom Item Dialog ─────────────────────────────────────────────────────
+
+@Composable
+private fun CustomItemDialog(
+    onConfirm: (String, Double) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var itemName by remember { mutableStateOf("") }
+    var itemPrice by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SurfaceDark,
+        title = { Text("Open Item / Custom Amount", color = TextPrimary) },
+        text = {
+            Column {
+                Text("Enter a custom item to add to the cart.", color = TextSecondary, fontSize = 13.sp)
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = itemName,
+                    onValueChange = { itemName = it },
+                    label = { Text("Item Name / Note", color = TextSecondary) },
+                    placeholder = { Text("e.g. Custom Shirt", color = TextDisabled) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = AccentBlue,
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedContainerColor = SurfaceVariant,
+                        unfocusedContainerColor = SurfaceVariant
+                    )
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = itemPrice,
+                    onValueChange = { itemPrice = it },
+                    label = { Text("Selling Price (Rs)", color = TextSecondary) },
+                    placeholder = { Text("e.g. 15.50", color = TextDisabled) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = AccentBlue,
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedContainerColor = SurfaceVariant,
+                        unfocusedContainerColor = SurfaceVariant
+                    )
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val price = itemPrice.toDoubleOrNull() ?: 0.0
+                    if (price > 0) {
+                        val name = itemName.ifBlank { "Custom Item" }
+                        onConfirm(name, price)
+                    }
+                },
+                enabled = (itemPrice.toDoubleOrNull() ?: 0.0) > 0
+            ) {
+                Text("Add to Cart", color = AccentBlue)
             }
         },
         dismissButton = {

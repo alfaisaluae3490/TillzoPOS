@@ -33,7 +33,9 @@ fun SettingsModule(
             SettingsScreen(
                 onBack = onNavigateBack,
                 onNavigateToBilling = { settingsNavController.navigate("billing_screen") },
-                onNavigateToSystemLogs = { settingsNavController.navigate("system_logs") }
+                onNavigateToSystemLogs = { settingsNavController.navigate("system_logs") },
+                // FIX (2026-08-06): local data viewer
+                onNavigateToDataViewer = { settingsNavController.navigate("data_viewer") }
             )
         }
 
@@ -45,6 +47,13 @@ fun SettingsModule(
 
         composable("system_logs") {
             SystemLogsScreen(
+                onBack = { settingsNavController.popBackStack() }
+            )
+        }
+
+        // FIX (2026-08-06): view all data stored on this phone
+        composable("data_viewer") {
+            com.tillzo.pos.ui.settings.options.dataviewer.LocalDataViewerScreen(
                 onBack = { settingsNavController.popBackStack() }
             )
         }

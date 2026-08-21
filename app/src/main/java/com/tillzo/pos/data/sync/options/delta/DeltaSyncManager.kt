@@ -1,17 +1,28 @@
 package com.tillzo.pos.data.sync.options.delta
 
-import android.util.Log
+import android.content.Context
+import androidx.work.BackoffPolicy
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
 import com.tillzo.pos.data.local.AppDatabase
 import com.tillzo.pos.data.local.SyncLogEntity
+import com.tillzo.pos.data.sync.options.worker.RestoreWorker
 import com.tillzo.pos.domain.sync.DataSyncInterface
+import com.tillzo.pos.utils.AppLogger
 import com.tillzo.pos.utils.Constants
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -36,14 +47,26 @@ import javax.inject.Singleton
  */
 @Singleton
 class DeltaSyncManager @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val syncInterface: DataSyncInterface,
-    private val appDatabase: AppDatabase
+    private val appDatabase: AppDatabase,
+    private val appLogger: AppLogger
 ) {
     companion object {
         private const val TAG = "DeltaSyncManager"
         /** Special "table name" used in SyncLogDao to track the delta cursor position. */
         private const val DELTA_CURSOR_KEY = "delta_cursor"
     }
+
+    sealed class RestoreState {
+        object Idle : RestoreState()
+        data class Running(val progress: Float, val status: String) : RestoreState()
+        object Success : RestoreState()
+        data class Failed(val error: String) : RestoreState()
+    }
+
+    private val _restoreState = MutableStateFlow<RestoreState>(RestoreState.Idle)
+    val restoreState: StateFlow<RestoreState> = _restoreState.asStateFlow()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var pollingJob: Job? = null
@@ -55,7 +78,7 @@ class DeltaSyncManager @Inject constructor(
     fun startPolling() {
         pollingJob?.cancel()
         pollingJob = scope.launch {
-            Log.i(TAG, "Delta sync polling started (every ${Constants.DELTA_SYNC_INTERVAL_MS / 1000}s)")
+            appLogger.logInfo(TAG, "Delta sync polling started (every ${Constants.DELTA_SYNC_INTERVAL_MS / 1000}s)")
 
             // Register delta cursor in SyncLog if not already tracked
             appDatabase.syncLogDao().ensureTableRegistered(DELTA_CURSOR_KEY)
@@ -64,7 +87,7 @@ class DeltaSyncManager @Inject constructor(
                 try {
                     pollOnce()
                 } catch (e: Exception) {
-                    Log.e(TAG, "Delta sync poll error: ${e.message}", e)
+                    appLogger.logError(TAG, "Delta sync poll error: ${e.message}", e)
                 }
                 delay(Constants.DELTA_SYNC_INTERVAL_MS)
             }
@@ -80,7 +103,7 @@ class DeltaSyncManager @Inject constructor(
             try {
                 pollOnce()
             } catch (e: Exception) {
-                Log.e(TAG, "Immediate delta sync poll error: ${e.message}", e)
+                appLogger.logError(TAG, "Immediate delta sync poll error: ${e.message}", e)
             }
         }
     }
@@ -91,67 +114,114 @@ class DeltaSyncManager @Inject constructor(
     fun stopPolling() {
         pollingJob?.cancel()
         pollingJob = null
-        Log.i(TAG, "Delta sync polling stopped")
+        appLogger.logInfo(TAG, "Delta sync polling stopped")
     }
 
     /**
      * Performs a single delta sync cycle.
      */
     private suspend fun pollOnce() {
-        // Step 1: Compare with local cursor first
         val localTimestamp = appDatabase.syncLogDao()
             .getLastSyncedAt(DELTA_CURSOR_KEY) ?: 0L
 
-        // Step 2: Fetch remote Settings for last_updated_timestamp
         val settings = syncInterface.getSettings()
         val remoteTimestamp = settings.lastUpdatedTimestamp
 
-        if (remoteTimestamp == 0L) {
-            if (localTimestamp > 0L) {
-                Log.d(TAG, "Remote timestamp=0 — Settings tab not yet populated. Skipping.")
-                return
-            }
-            // First run with zero remote — set cursor to 0 so subsequent polls detect changes
-            Log.d(TAG, "First run with remote=0 — saving cursor and allowing subsequent checks")
-            appDatabase.syncLogDao().upsertSyncLog(
-                SyncLogEntity(
-                    table_name     = DELTA_CURSOR_KEY,
-                    lastSyncedAt   = 0L,
-                    lastSyncStatus = "synced"
-                )
-            )
-            return
-        }
-
+        // Only skip if we have local data and remote hasn't changed
         if (localTimestamp > 0L && remoteTimestamp <= localTimestamp) {
-            Log.d(TAG, "No remote updates (remote=$remoteTimestamp, local=$localTimestamp)")
+            appLogger.logInfo(TAG, "No remote updates (remote=$remoteTimestamp, local=$localTimestamp)")
             return
         }
 
-        Log.i(TAG, "Remote updates detected (remote=$remoteTimestamp > local=$localTimestamp)")
+        appLogger.logInfo(TAG, "Remote updates detected (remote=$remoteTimestamp, local=$localTimestamp)")
 
-        // Step 3: Fetch delta rows (ALL terminals — M2.8 Multi-POS replica sync)
         val delta = syncInterface.fetchDelta(lastTimestamp = localTimestamp)
 
-        if (delta.rows.isEmpty()) {
-            Log.d(TAG, "Delta fetch returned 0 rows")
+        // FIX (2026-08-06): only advance the cursor on success. Previously the
+        // cursor was set unconditionally — if a per-tab upsert failed, the
+        // cursor moved past it and those rows were never retried (silent loss).
+        val upsertOk = if (delta.rows.isEmpty()) {
+            appLogger.logInfo(TAG, "Delta fetch returned 0 rows")
+            true
         } else {
-            Log.i(TAG, "Fetched ${delta.rows.size} delta rows from all terminals")
-
-            // Step 4: UPSERT delta rows into Room via system_row_id
-            // M3+: Each module registers its own UPSERT handler here
-            // e.g., saleDao.upsertBySysId(rows.filter { it["table"] == "sales" }.map { ... })
+            appLogger.logInfo(TAG, "Fetched ${delta.rows.size} delta rows from all terminals")
             upsertDeltaRows(delta.rows)
         }
 
-        // Step 5: Update local cursor to remote timestamp
-        appDatabase.syncLogDao().upsertSyncLog(
-            SyncLogEntity(
-                table_name     = DELTA_CURSOR_KEY,
-                lastSyncedAt   = remoteTimestamp,
-                lastSyncStatus = "synced"
+        if (upsertOk) {
+            appDatabase.syncLogDao().upsertSyncLog(
+                SyncLogEntity(
+                    table_name     = DELTA_CURSOR_KEY,
+                    lastSyncedAt   = remoteTimestamp,
+                    lastSyncStatus = "synced"
+                )
             )
+        } else {
+            appLogger.logWarn(TAG, "Delta upsert had failures — cursor NOT advanced, will retry")
+        }
+    }
+
+    /**
+     * Performs the initial cloud restore (Reverse Sync) for a new device.
+     * Fetches ALL data from the cloud, upserts into Room, and tracks progress
+     * via [restoreState]. Also enqueues a WorkManager [RestoreWorker] for
+     * durability in case the process is killed mid-restore.
+     */
+    suspend fun performInitialRestore() {
+        _restoreState.value = RestoreState.Running(0f, "Starting cloud restore...")
+
+        try {
+            _restoreState.value = RestoreState.Running(0.1f, "Fetching cloud data...")
+
+            val delta = syncInterface.fetchDelta(lastTimestamp = 0L)
+
+            if (delta.rows.isEmpty()) {
+                appLogger.logInfo(TAG, "Initial restore — no rows returned from cloud")
+            } else {
+                _restoreState.value = RestoreState.Running(0.6f, "Processing ${delta.rows.size} records...")
+                upsertDeltaRows(delta.rows)
+            }
+
+            _restoreState.value = RestoreState.Running(0.9f, "Finalizing...")
+
+            appDatabase.syncLogDao().upsertSyncLog(
+                SyncLogEntity(
+                    table_name     = DELTA_CURSOR_KEY,
+                    lastSyncedAt   = System.currentTimeMillis(),
+                    lastSyncStatus = "synced"
+                )
+            )
+
+            _restoreState.value = RestoreState.Success
+            appLogger.logInfo(TAG, "Initial restore completed successfully (${delta.rows.size} rows)")
+        } catch (e: Exception) {
+            appLogger.logError(TAG, "Initial restore failed: ${e.message}", e)
+            _restoreState.value = RestoreState.Failed(e.message ?: "Unknown error")
+        }
+    }
+
+    /**
+     * Enqueues a durable WorkManager [RestoreWorker] so that if the process
+     * is killed mid-restore, it will be resumed by WorkManager.
+     */
+    fun scheduleRestoreWorker() {
+        val workManager = WorkManager.getInstance(context)
+        val restoreRequest = OneTimeWorkRequestBuilder<RestoreWorker>()
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
+            .build()
+        workManager.enqueueUniqueWork(
+            RestoreWorker.WORK_NAME,
+            ExistingWorkPolicy.REPLACE,
+            restoreRequest
         )
+        appLogger.logInfo(TAG, "RestoreWorker enqueued for durable execution")
+    }
+
+    /**
+     * Resets [restoreState] back to Idle so the user can retry.
+     */
+    fun resetRestoreState() {
+        _restoreState.value = RestoreState.Idle
     }
 
     /**
@@ -167,8 +237,9 @@ class DeltaSyncManager @Inject constructor(
      * NOTE: M3+ modules inject their DAOs here.
      * For M2 with no entity DAOs yet, this is a framework with log output only.
      */
-    private suspend fun upsertDeltaRows(rows: List<Map<String, Any>>) {
+    suspend fun upsertDeltaRows(rows: List<Map<String, Any>>): Boolean {
         val grouped = rows.groupBy { it["_sheet"] as? String }
+        var anyFailed = false
         for ((tabName, tabRows) in grouped) {
             if (tabName == null) continue
             try {
@@ -208,7 +279,18 @@ class DeltaSyncManager @Inject constructor(
                                 deleted_at = (row["deleted_at"] as? String)?.toLongOrNull()
                             )
                         }
-                        items.forEach { appDatabase.inventoryDao().insertItem(it) }
+                        // FIX (2026-08-06) echo-clobber: a locally PENDING item (edited
+                        // on this device, awaiting upload) must not be overwritten by a
+                        // stale remote copy fetched by delta — that cleared its pending
+                        // flag and silently lost the local change. Only insert rows that
+                        // are not locally pending.
+                        val invDao = appDatabase.inventoryDao()
+                        items.forEach { item ->
+                            val local = invDao.getItemById(item.system_row_id)
+                            if (local == null || local.sync_status != "pending") {
+                                invDao.insertItem(item)
+                            }
+                        }
                     }
                     tabName == "Categories" -> {
                         val categories = tabRows.map { row ->
@@ -308,6 +390,7 @@ class DeltaSyncManager @Inject constructor(
                                 address = row["address"] as? String ?: "",
                                 city = row["city"] as? String ?: "",
                                 creditLimit = (row["credit_limit"] as? String)?.toDoubleOrNull() ?: (row["creditLimit"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                isActive = (row["is_active"] as? String)?.toIntOrNull() == 1 || (row["isActive"] as? String)?.toIntOrNull() == 1 || (row["isActive"] as? String)?.toBoolean() ?: true,
                                 isDeleted = (row["is_deleted"] as? String)?.toIntOrNull() == 1 || (row["isDeleted"] as? String)?.toIntOrNull() == 1 || (row["isDeleted"] as? String)?.toBoolean() ?: false,
                                 syncStatus = "synced",
                                 createdAt = (row["created_at"] as? String)?.toLongOrNull() ?: (row["createdAt"] as? String)?.toLongOrNull() ?: System.currentTimeMillis(),
@@ -367,7 +450,16 @@ class DeltaSyncManager @Inject constructor(
                                 deleted_at = (row["deleted_at"] as? String)?.toLongOrNull()
                             )
                         }
-                        sales.forEach { appDatabase.saleDao().insertSale(it) }
+                        // FIX (2026-08-06) echo-clobber: never overwrite a locally
+                        // pending sale (made offline on this device) with the stale
+                        // remote copy — that would clear its pending flag and lose it.
+                        val saleDao = appDatabase.saleDao()
+                        sales.forEach { sale ->
+                            val local = saleDao.getSaleById(sale.system_row_id)
+                            if (local == null || local.sync_status != "pending") {
+                                saleDao.insertSale(sale)
+                            }
+                        }
                     }
                     tabName == "BarcodeGeneralConfigs" || tabName == "BarcodeFieldConfigs" -> {
                         // Barcode config migrated to SharedPreferences — skip delta sync
@@ -391,10 +483,185 @@ class DeltaSyncManager @Inject constructor(
                         }
                         users.forEach { appDatabase.userDao().insertUser(it) }
                     }
+                    tabName == "Purchase_Orders" -> {
+                        val pos = tabRows.map { row ->
+                            com.tillzo.pos.data.local.entity.PurchaseOrderEntity(
+                                poId = row["po_id"] as? String ?: java.util.UUID.randomUUID().toString(),
+                                poNumber = row["po_number"] as? String ?: "",
+                                vendorId = row["vendor_id"] as? String ?: "",
+                                vendorName = row["vendor_name"] as? String ?: "",
+                                status = row["status"] as? String ?: "DRAFT",
+                                notes = row["notes"] as? String ?: "",
+                                totalAmount = (row["total_amount"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                currency = row["currency"] as? String ?: "PKR",
+                                expectedDeliveryDate = row["expected_delivery_date"] as? String ?: "",
+                                createdBy = row["created_by"] as? String ?: "",
+                                syncStatus = "synced",
+                                isDeleted = (row["is_deleted"] as? String)?.toIntOrNull() == 1 || (row["isDeleted"] as? String)?.toBoolean() ?: false,
+                                deletedAt = (row["deleted_at"] as? String)?.toLongOrNull(),
+                                posTerminalId = row["pos_terminal_id"] as? String ?: "terminal_1",
+                                createdAt = (row["created_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis(),
+                                updatedAt = (row["updated_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis()
+                            )
+                        }
+                        pos.forEach { appDatabase.purchaseOrderDao().insertPO(it) }
+                    }
+                    tabName == "PO_Items" -> {
+                        val poItems = tabRows.map { row ->
+                            com.tillzo.pos.data.local.entity.PurchaseOrderItemEntity(
+                                poItemId = row["po_item_id"] as? String ?: java.util.UUID.randomUUID().toString(),
+                                poId = row["po_id"] as? String ?: "",
+                                productId = row["product_id"] as? String ?: "",
+                                productName = row["product_name"] as? String ?: "",
+                                sku = row["sku"] as? String ?: "",
+                                barcodeId = row["barcode_id"] as? String ?: "",
+                                orderedQty = (row["ordered_qty"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                receivedQty = (row["received_qty"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                unitCostPrice = (row["unit_cost_price"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                totalCost = (row["total_cost"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                unit = row["unit"] as? String ?: "PC",
+                                syncStatus = "synced",
+                                createdAt = (row["created_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis(),
+                                updatedAt = (row["updated_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis()
+                            )
+                        }
+                        appDatabase.purchaseOrderDao().insertPOItems(poItems)
+                    }
+                    tabName == "GRN_Headers" -> {
+                        val grns = tabRows.map { row ->
+                            com.tillzo.pos.data.local.entity.GrnHeaderEntity(
+                                grnId = row["grn_id"] as? String ?: java.util.UUID.randomUUID().toString(),
+                                grnNumber = row["grn_number"] as? String ?: "",
+                                poId = row["po_id"] as? String ?: "",
+                                poNumber = row["po_number"] as? String ?: "",
+                                vendorId = row["vendor_id"] as? String ?: "",
+                                vendorName = row["vendor_name"] as? String ?: "",
+                                vendorPhone = row["vendor_phone"] as? String ?: "",
+                                status = row["status"] as? String ?: "DRAFT",
+                                notes = row["notes"] as? String ?: "",
+                                receivedBy = row["received_by"] as? String ?: "",
+                                receivedByName = row["received_by_name"] as? String ?: "",
+                                totalItems = (row["total_items"] as? String)?.toIntOrNull() ?: 0,
+                                totalReceivedQty = (row["total_received_qty"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                totalAmount = (row["total_amount"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                syncStatus = "synced",
+                                isDeleted = (row["is_deleted"] as? String)?.toIntOrNull() == 1 || (row["isDeleted"] as? String)?.toBoolean() ?: false,
+                                deletedAt = (row["deleted_at"] as? String)?.toLongOrNull(),
+                                posTerminalId = row["pos_terminal_id"] as? String ?: "terminal_1",
+                                attachedFileId = row["attached_file_id"] as? String ?: "",
+                                attachedFileUrl = row["attached_file_url"] as? String ?: "",
+                                createdAt = (row["created_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis(),
+                                updatedAt = (row["updated_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis()
+                            )
+                        }
+                        grns.forEach { appDatabase.grnDao().insertGrnHeader(it) }
+                    }
+                    tabName == "GRN_Items" -> {
+                        val grnItems = tabRows.map { row ->
+                            com.tillzo.pos.data.local.entity.GrnItemEntity(
+                                grnItemId = row["grn_item_id"] as? String ?: java.util.UUID.randomUUID().toString(),
+                                grnId = row["grn_id"] as? String ?: "",
+                                poItemId = row["po_item_id"] as? String ?: "",
+                                productId = row["product_id"] as? String ?: "",
+                                batchId = row["batch_id"] as? String ?: "",
+                                productName = row["product_name"] as? String ?: "",
+                                barcodeId = row["barcode_id"] as? String ?: "",
+                                sku = row["sku"] as? String ?: "",
+                                categoryId = row["category_id"] as? String ?: "",
+                                brand = row["brand"] as? String ?: "",
+                                orderedQty = (row["ordered_qty"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                receivedQty = (row["received_qty"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                unitCostPrice = (row["unit_cost_price"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                sellingPrice = (row["selling_price"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                totalCost = (row["total_cost"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                unit = row["unit"] as? String ?: "PC",
+                                batchNumber = row["batch_number"] as? String ?: "",
+                                manufacturingDate = row["manufacturing_date"] as? String ?: "",
+                                expiryDate = row["expiry_date"] as? String ?: "",
+                                inventoryAction = row["inventory_action"] as? String ?: "PENDING",
+                                isNewProduct = (row["is_new_item"] as? String)?.toIntOrNull() == 1 || (row["is_new_item"] as? String)?.toBoolean() ?: false,
+                                lowStockThreshold = (row["low_stock_threshold"] as? String)?.toDoubleOrNull() ?: 5.0,
+                                syncStatus = "synced",
+                                createdAt = (row["created_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis(),
+                                updatedAt = (row["updated_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis()
+                            )
+                        }
+                        appDatabase.grnDao().insertGrnItems(grnItems)
+                    }
+                    tabName == "Wastage_Ledger" -> {
+                        val wastage = tabRows.map { row ->
+                            com.tillzo.pos.data.local.entity.WastageEntity(
+                                wastageId = row["wastage_id"] as? String ?: java.util.UUID.randomUUID().toString(),
+                                productId = row["product_id"] as? String ?: "",
+                                productName = row["product_name"] as? String ?: "",
+                                batchId = row["batch_id"] as? String ?: "",
+                                batchNumber = row["batch_number"] as? String ?: "",
+                                quantity = (row["quantity"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                unit = row["unit"] as? String ?: "PC",
+                                costPrice = (row["cost_price"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                totalLoss = (row["total_loss"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                reason = row["reason"] as? String ?: "OTHER",
+                                notes = row["notes"] as? String ?: "",
+                                loggedBy = row["logged_by"] as? String ?: "",
+                                wastageDate = row["wastage_date"] as? String ?: "",
+                                syncStatus = "synced",
+                                posTerminalId = row["pos_terminal_id"] as? String ?: "terminal_1",
+                                createdAt = (row["created_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis(),
+                                updatedAt = (row["updated_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis()
+                            )
+                        }
+                        wastage.forEach { appDatabase.wastageDao().insertWastage(it) }
+                    }
+                    tabName == "Stock_Adjustments" -> {
+                        val adjustments = tabRows.map { row ->
+                            com.tillzo.pos.data.local.entity.StockAdjustmentEntity(
+                                adjustmentId = row["adjustment_id"] as? String ?: java.util.UUID.randomUUID().toString(),
+                                productId = row["product_id"] as? String ?: "",
+                                adjustmentType = row["adjustment_type"] as? String ?: "SET",
+                                quantityChanged = (row["quantity_changed"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                reason = row["reason"] as? String ?: "",
+                                adjustedBy = row["adjusted_by"] as? String ?: "",
+                                syncStatus = "synced",
+                                createdAt = (row["created_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis()
+                            )
+                        }
+                        adjustments.forEach { appDatabase.stockAdjustmentDao().insertStockAdjustment(it) }
+                    }
+                    tabName == "Till_Sessions" -> {
+                        val sessions = tabRows.map { row ->
+                            com.tillzo.pos.data.local.entity.TillSessionEntity(
+                                sessionId = row["session_id"] as? String ?: java.util.UUID.randomUUID().toString(),
+                                cashierId = row["cashier_id"] as? String ?: "",
+                                cashierName = row["cashier_name"] as? String ?: "",
+                                posTerminalId = row["pos_terminal_id"] as? String ?: "terminal_1",
+                                openingCash = (row["opening_cash"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                closingCash = (row["closing_cash"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                expectedCash = (row["expected_cash"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                totalCashSales = (row["total_cash_sales"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                totalCardSales = (row["total_card_sales"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                totalWalletSales = (row["total_wallet_sales"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                totalUdhaarSales = (row["total_udhaar_sales"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                totalSalesCount = (row["total_sales_count"] as? String)?.toIntOrNull() ?: 0,
+                                totalRefunds = (row["total_refunds"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                netCash = (row["net_cash"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                status = row["status"] as? String ?: "CLOSED",
+                                notes = row["notes"] as? String ?: "",
+                                shiftDate = row["shift_date"] as? String ?: "",
+                                openedAt = (row["opened_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis(),
+                                closedAt = (row["closed_at"] as? String)?.toLongOrNull(),
+                                syncStatus = "synced",
+                                createdAt = (row["created_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis(),
+                                updatedAt = (row["updated_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis()
+                            )
+                        }
+                        sessions.forEach { appDatabase.tillSessionDao().insertSession(it) }
+                    }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error upserting delta rows for tab $tabName: ${e.message}", e)
+                appLogger.logError(TAG, "Error upserting delta rows for tab $tabName: ${e.message}", e)
+                anyFailed = true
             }
         }
+        return !anyFailed
     }
 }

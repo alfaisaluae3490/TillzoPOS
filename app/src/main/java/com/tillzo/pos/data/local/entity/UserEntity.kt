@@ -27,7 +27,10 @@ data class UserEntity(
             "email" to email,
             "name" to name,
             "role" to role,
-            "password_hash" to (password_hash ?: ""),
+            // FIX (2026-08-06): SECURITY — never upload password_hash to the
+            // shared Google Sheet (plaintext hash exposure). Empty placeholder
+            // keeps column alignment.
+            "password_hash" to "",
             "permissions_json" to (permissions_json ?: ""),
             "is_deleted" to (if (is_deleted) 1 else 0),
             "deleted_at" to (deleted_at ?: ""),
