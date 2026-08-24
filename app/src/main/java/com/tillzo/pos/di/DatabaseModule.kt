@@ -20,6 +20,7 @@ import com.tillzo.pos.data.local.dao.ProductUnitDao
 import com.tillzo.pos.data.local.dao.TillSessionDao
 import com.tillzo.pos.data.local.dao.WastageDao
 import com.tillzo.pos.data.local.dao.LogDao
+import com.tillzo.pos.data.local.dao.ReturnsDao
 import com.tillzo.pos.utils.LocalBackupManager
 import dagger.Module
 import dagger.Provides
@@ -92,7 +93,9 @@ object DatabaseModule {
                 AppDatabase.MIGRATION_27_28,
                 AppDatabase.MIGRATION_28_29,
                 AppDatabase.MIGRATION_29_30,
-                AppDatabase.MIGRATION_30_31
+                AppDatabase.MIGRATION_30_31,
+                AppDatabase.MIGRATION_31_32, // GAP-3 (2026-08-23): returns_log table
+                AppDatabase.MIGRATION_32_33  // AP (2026-08-24): vendor_payments table & GRN payment fields
             )
             // fallbackToDestructiveMigration() ← dev-only safety net, commented out in favor of real migration
             .build()
@@ -166,9 +169,6 @@ object DatabaseModule {
     @Singleton
     fun provideTillSessionDao(db: AppDatabase): TillSessionDao = db.tillSessionDao()
 
-    @Provides
-    @Singleton
-    fun provideTimeClockDao(db: AppDatabase): com.tillzo.pos.data.local.dao.TimeClockDao = db.timeClockDao()
 
     @Provides
     @Singleton
@@ -177,6 +177,18 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideLogDao(db: AppDatabase): LogDao = db.logDao()
+
+    // FIX (2026-08-23, RUN #11): ReturnsDao @Provides — GAP-3
+    // ReturnsViewModel injection (ReturnsEntity/DAO/upload/pull already in)
+    // ke baad build Dagger MissingBinding par toot gaya tha. Provider add
+    // karne se graph complete.
+    @Provides
+    @Singleton
+    fun provideReturnsDao(db: AppDatabase): ReturnsDao = db.returnsDao()
+
+    @Provides
+    @Singleton
+    fun provideVendorPaymentDao(db: AppDatabase): com.tillzo.pos.data.local.dao.VendorPaymentDao = db.vendorPaymentDao()
 
     @Provides
     @Singleton

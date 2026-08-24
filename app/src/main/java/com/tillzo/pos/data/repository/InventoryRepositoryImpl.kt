@@ -25,11 +25,25 @@ class InventoryRepositoryImpl @Inject constructor(
 
     override suspend fun recalculateTotalStock(productId: String) {
         val batches = productBatchDao.getAllBatchesForProduct(productId)
-        val total = batches.filter { it.isActive && !it.isDeleted }
-            .sumOf { it.stockQty }
+        val activeBatches = batches.filter { it.isActive && !it.isDeleted }
+        val total = activeBatches.sumOf { it.stockQty }
         val product = inventoryDao.getItemById(productId)
         if (product != null) {
-            inventoryDao.updateItem(product.copy(totalStock = total, current_stock = total, sync_status = "pending"))
+            // FIX (2026-08-22, DEF-41): hasBatches was ONLY set at product
+            // creation (stock>0 heuristic). GRN ADD_BATCH / UPDATE_BATCH,
+            // stock adjustments and this recalc never flipped it — so a product
+            // created with 0 stock then GRN'd +10 kept hasBatches=false, sales
+            // SKIPPED batch FIFO deduction, and the next recalc "restored" the
+            // phantom batch sum → silent stock inflation. Now any active batch
+            // forces hasBatches=true.
+            inventoryDao.updateItem(
+                product.copy(
+                    totalStock = total,
+                    current_stock = total,
+                    hasBatches = activeBatches.isNotEmpty() || product.hasBatches,
+                    sync_status = "pending"
+                )
+            )
         }
     }
 
@@ -38,7 +52,8 @@ class InventoryRepositoryImpl @Inject constructor(
     }
 
     override suspend fun getItemByBarcode(barcode: String): InventoryEntity? {
-        return inventoryDao.getItemByBarcode(barcode)
+        // DEF-64 FIX (2026-08-22): GTIN fallback — auto-GTINs ItemGtins mein hain
+        return inventoryDao.getItemByBarcode(barcode) ?: inventoryDao.getItemByGtin(barcode)
     }
 
     override fun getAllItems(): Flow<List<InventoryEntity>> {

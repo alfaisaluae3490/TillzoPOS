@@ -34,6 +34,9 @@ fun ZReportScreen(
     tillViewModel: TillViewModel = hiltViewModel()
 ) {
     val totalSales by viewModel.totalSalesToday.collectAsStateWithLifecycle()
+    val netSales by viewModel.netSalesToday.collectAsStateWithLifecycle()
+    val totalTax by viewModel.totalTaxToday.collectAsStateWithLifecycle()
+    val taxLabel = viewModel.taxLabel
     val totalExpenses by viewModel.totalExpensesToday.collectAsStateWithLifecycle()
     val netDrawer by viewModel.netCashDrawer.collectAsStateWithLifecycle()
     val pendingSync by viewModel.pendingSyncCount.collectAsStateWithLifecycle()
@@ -113,17 +116,29 @@ fun ZReportScreen(
             ) {
                 Column(modifier = Modifier.padding(24.dp)) {
                     Text("Today's Summary", style = MaterialTheme.typography.titleLarge)
-                    Divider(modifier = Modifier.padding(vertical = 12.dp))
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Gross Sales:")
                         Text("$currencySymbol ${String.format("%.2f", totalSales)}", fontWeight = FontWeight.SemiBold)
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Net Sales (Excl. Tax):", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("$currencySymbol ${String.format("%.2f", netSales)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (totalTax > 0) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Total $taxLabel Collected:", color = MaterialTheme.colorScheme.primary)
+                            Text("$currencySymbol ${String.format("%.2f", totalTax)}", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                        }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Expenses:")
                         Text("- $currencySymbol ${String.format("%.2f", totalExpenses)}", color = Color.Red, fontWeight = FontWeight.SemiBold)
                     }
-                    Divider(modifier = Modifier.padding(vertical = 12.dp))
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Expected Cash in Drawer:", fontWeight = FontWeight.Bold)
                         Text(

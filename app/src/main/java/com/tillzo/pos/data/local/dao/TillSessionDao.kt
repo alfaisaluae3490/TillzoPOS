@@ -23,6 +23,13 @@ interface TillSessionDao {
     @Query("SELECT * FROM till_sessions WHERE status = 'OPEN' LIMIT 1")
     fun getOpenSessionFlow(): Flow<TillSessionEntity?>
 
+    // FIX (2026-08-22, DEF-48): terminal-scoped variant — TillViewModel and
+    // ZReportViewModel read the open session for THIS terminal; the unfiltered
+    // query above returned whatever terminal's session happened to be first
+    // (multi-terminal day-close reconciled the WRONG session).
+    @Query("SELECT * FROM till_sessions WHERE status = 'OPEN' AND posTerminalId = :terminalId LIMIT 1")
+    fun getOpenSessionFlowForTerminal(terminalId: String): Flow<TillSessionEntity?>
+
     @Query("SELECT * FROM till_sessions ORDER BY openedAt DESC")
     fun getAllSessions(): Flow<List<TillSessionEntity>>
 

@@ -36,6 +36,13 @@ interface SheetsApiService {
         @Path("range", encoded = false) range: String
     ): Response<Map<String, @JvmSuppressWildcards Any>>
 
+    /** Batch read multiple ranges in a single HTTP request. */
+    @GET("spreadsheets/{spreadsheetId}/values:batchGet")
+    suspend fun batchGetValues(
+        @Path("spreadsheetId") spreadsheetId: String,
+        @Query("ranges") ranges: List<String>
+    ): Response<Map<String, @JvmSuppressWildcards Any>>
+
     /**
      * Append rows to a sheet.
      * valueInputOption=RAW → values stored as-is (no formula parsing).

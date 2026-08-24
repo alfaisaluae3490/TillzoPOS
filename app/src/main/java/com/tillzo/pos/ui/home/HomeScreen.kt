@@ -82,9 +82,11 @@ import kotlinx.coroutines.launch
 @Composable
 fun HomeScreen(
     onOpenMenu: () -> Unit,
+    onNavigateToAnalytics: () -> Unit = {},
     onNavigateToInventory: () -> Unit = {},
     onNavigateToReceipt: (String) -> Unit = {},
     onNavigateToTill: () -> Unit = {},
+    onNavigateToFullScanner: () -> Unit = {},
     viewModel: PosViewModel = hiltViewModel(),
     lowStockViewModel: LowStockViewModel = hiltViewModel(),
     tillViewModel: TillViewModel = hiltViewModel()
@@ -195,6 +197,17 @@ fun HomeScreen(
 
     // Till session gate — block POS when no active till session or session is closed
     if (currentTillSession == null || currentTillSession?.status != "OPEN") {
+        // DEF-119 FIX: cold-start WAL replay race par Room flow null re-emit
+        // nahi karta (static OPEN row) — bounded auto-retry with one-shot
+        // re-query clears the stale gate within ~9s instead of ~10 min.
+        LaunchedEffect(Unit) {
+            var attempts = 0
+            while (tillViewModel.currentSession.value?.status != "OPEN" && attempts < 6) {
+                delay(1500)
+                tillViewModel.refreshSession()
+                attempts++
+            }
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -300,6 +313,9 @@ fun HomeScreen(
                                 leadingIcon = { Icon(Icons.Default.RemoveCircle, null, tint = ErrorRed) }
                             )
                         }
+                    }
+                    IconButton(onClick = onNavigateToAnalytics) {
+                        Icon(Icons.Default.AutoGraph, contentDescription = "Analytics", tint = AccentBlueLight)
                     }
                     IconButton(onClick = onNavigateToInventory) {
                         Icon(Icons.Default.Inventory, contentDescription = "Inventory", tint = AccentBlue)

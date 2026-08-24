@@ -33,6 +33,8 @@ interface CustomerDao : BaseDao<CustomerEntity> {
     suspend fun markSyncedAndDeleted(id: String)
 
     // FIX (2026-08-06): loyalty — update points + lifetime spend atomically
-    @Query("UPDATE Customers SET loyalty_points = :points, lifetime_spend = :spend, updated_at = :ts WHERE system_row_id = :id")
+    // FIX (2026-08-22, DEF-47): sync_status was NOT set → loyalty points and
+    // lifetime spend never reached the sheet on other devices. Now pending.
+    @Query("UPDATE Customers SET loyalty_points = :points, lifetime_spend = :spend, sync_status = 'pending', updated_at = :ts WHERE system_row_id = :id")
     suspend fun updateLoyalty(id: String, points: Double, spend: Double, ts: Long)
 }

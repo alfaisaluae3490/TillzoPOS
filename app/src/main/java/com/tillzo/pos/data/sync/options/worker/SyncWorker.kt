@@ -28,11 +28,13 @@ import com.tillzo.pos.domain.sync.usecase.ProductUnitUpsertUseCase
 import com.tillzo.pos.domain.sync.usecase.VendorUpsertUseCase
 import com.tillzo.pos.domain.sync.usecase.CustomerUpsertUseCase
 import com.tillzo.pos.domain.sync.usecase.ExpenseUpsertUseCase
+import com.tillzo.pos.utils.ts
 import com.tillzo.pos.utils.AppLogger
 import com.tillzo.pos.utils.NotificationHelper
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
 /**
@@ -74,6 +76,12 @@ class SyncWorker @AssistedInject constructor(
 
     companion object {
         private const val TAG = "SyncWorker"
+
+        // FIX (2026-08-22, DEF-30): process-wide flag — prevents concurrent
+        // SyncWorker executions (periodic + manual) from double-uploading the
+        // same pending rows. Access must be synchronized on SyncWorker::class.java.
+        @Volatile
+        private var syncInProgress = false
     }
 
     private val gson = Gson()
@@ -90,17 +98,43 @@ class SyncWorker @AssistedInject constructor(
         // FIX (2026-08-06): Users_Permissions was never registered → local user
         // changes (roles, new users) never uploaded to the Sheet. Now tracked.
         syncLogDao.ensureTableRegistered("Users")
-        syncLogDao.ensureTableRegistered("Time_Clock")
     }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        // FIX (2026-08-22, DEF-30): single-flight guard — WorkManager can run the
+        // periodic sync and the manual Force Sync CONCURRENTLY (different unique
+        // work names). Both workers then read the same pending rows and both
+        // append them → duplicate rows in the sheet (observed: HERMES-VENDOR-001
+        // appended twice, identical vendor_id/created_at). Serializing uploads
+        // process-wide guarantees each pending row is uploaded exactly once.
+        val shouldRun = synchronized(SyncWorker::class.java) {
+            if (syncInProgress) {
+                Log.i(TAG, "Another SyncWorker is already running — skipping this run")
+                appLogger.logInfo("SYNC_PROCESS", "SyncWorker skipped (another run in progress)")
+                false
+            } else {
+                syncInProgress = true
+                true
+            }
+        }
+        if (!shouldRun) return@withContext Result.success()
+
+        try {
+            val result = doWorkInternal()
+            result
+        } finally {
+            synchronized(SyncWorker::class.java) { syncInProgress = false }
+        }
+    }
+
+    private suspend fun doWorkInternal(): Result {
         Log.d(TAG, "SyncWorker started (attempt #${runAttemptCount + 1})")
         appLogger.logInfo("SYNC_PROCESS", "SyncWorker started (attempt #${runAttemptCount + 1})")
 
         if (appSetupPrefs.spreadsheetId.isBlank()) {
             Log.w(TAG, "spreadsheetId not configured — skipping sync. Setup not completed.")
             appLogger.logWarn("SYNC_PROCESS", "spreadsheetId not configured — skipping sync")
-            return@withContext Result.success()
+            return Result.success()
         }
 
         try {
@@ -118,13 +152,16 @@ class SyncWorker @AssistedInject constructor(
             ensureCoreTables(syncLogDao)
 
             // ── Step 1: Get all tracked tables ──────────────────────────────
-            val tables = syncLogDao.getAllTrackedTables()
+            // DEF-87 FIX: delta_cursor sync-log meta-key ko table upload loop se
+            // exclude karo — "Unknown table name for sync: delta_cursor" log noise
+            // (harmless tha, par har sync par warning log hoti thi).
+            val tables = syncLogDao.getAllTrackedTables().filterNot { it == "delta_cursor" }
 
             if (tables.isEmpty()) {
                 Log.d(TAG, "No tables registered yet — skipping upload.")
                 appLogger.logInfo("SYNC_PROCESS", "No tables registered — skipping upload")
                 verifyAndHideSysDbTab()
-                return@withContext Result.success()
+                return Result.success()
             }
 
             var anyFailure = false
@@ -132,10 +169,15 @@ class SyncWorker @AssistedInject constructor(
             // M11 Explicit Sync Methods
             uploadPendingPurchaseOrders()
             uploadPendingGRNs()
+            if (!uploadPendingVendorPayments()) anyFailure = true
             if (!uploadPendingProductBatches()) anyFailure = true
+            // DEF-92 FIX (2026-08-23): ItemGtins upload — GTIN rows ab sheet par
+            // jate hain (reinstall par lookup intact).
+            if (!uploadPendingGtins()) anyFailure = true
             uploadPendingStockAdjustments()
             uploadPendingTillSessions()
             uploadPendingWastage()
+            uploadPendingReturns() // GAP-3 (2026-08-23): Returns ledger → Returns tab
 
             // ── Step 2: Upload pending rows per table ────────────────────────
             for (tableName in tables) {
@@ -165,7 +207,7 @@ class SyncWorker @AssistedInject constructor(
             if (anyFailure) {
                 Log.w(TAG, "Some tables failed — scheduling retry with exponential backoff")
                 appLogger.logWarn("SYNC_PROCESS", "Some tables failed — scheduling retry")
-                Result.retry()
+                return Result.retry()
             } else {
                 Log.d(TAG, "SyncWorker completed successfully")
                 appLogger.logInfo("SYNC_PROCESS", "SyncWorker completed successfully")
@@ -174,13 +216,13 @@ class SyncWorker @AssistedInject constructor(
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to update Settings timestamp: ${e.message}")
                 }
-                Result.success()
+                return Result.success()
             }
 
         } catch (e: Exception) {
             Log.e(TAG, "SyncWorker unexpected error: ${e.message}", e)
             appLogger.logError("SYNC_PROCESS", "SyncWorker unexpected error: ${e.message}", e)
-            if (runAttemptCount < 4) Result.retry() else Result.failure()
+            return if (runAttemptCount < 4) Result.retry() else Result.failure()
         }
     }
 
@@ -276,7 +318,6 @@ class SyncWorker @AssistedInject constructor(
             // `else` branch (silently "passed" without uploading anything). Now
             // pending users (new/role-changed) are appended to the Users_Permissions tab.
             "Users", "Users_Permissions" -> uploadPendingUsers()
-            "Time_Clock" -> uploadPendingTimeClock()
             else -> {
                 Log.w(TAG, "Unknown table name for sync: $tableName")
                 true
@@ -313,29 +354,71 @@ class SyncWorker @AssistedInject constructor(
         }
     }
 
-    // FIX (2026-08-06): employee time-tracking cloud sync
-    private suspend fun uploadPendingTimeClock(): Boolean {
+
+    // DEF-92 FIX (2026-08-23): ItemGtins (auto/user GTINs) ab sheet par sync
+    // hote hain — reinstall ke baad GTIN lookup intact rehta hai. GTIN rows
+    // immutable hain (edit par delete+reinsert with NEW gtin_id), isliye dedupe
+    // sirf gtin_id se (Product_Batches pattern). Pre-DEF-92 sheets par tab
+    // missing ho to self-heal: tab create + header row + retry once.
+    private suspend fun uploadPendingGtins(): Boolean {
         return try {
-            val pending = appDatabase.timeClockDao().getPendingPunches()
-            if (pending.isEmpty()) return true
-            val rows = pending.map { p ->
-                listOf(
-                    p.system_row_id, p.employee_email, p.employee_name, p.event_type,
-                    p.timestamp, p.note ?: "", p.pos_terminal_id, p.created_at,
-                    p.updated_at, "synced"
-                )
+            // DEF-92 backfill: purane items (pre-DEF-92) ka primary GTIN sirf
+            // Inventory.barcode_id mein hota hai — ItemGtins table kabhi
+            // populated nahi hua. Barcode_id = primary GTIN (InventoryCrudVM:
+            // primaryBarcode = finalGtins.first()), isliye har active item ke
+            // liye barcode_id se GTIN row backfill karo (agar pehle se nahi hai).
+            // Iske bina sheet par upload karne ko kuch hota hi nahi aur
+            // reinstall par GTIN lookup JOIN hamesha empty rehta.
+            val items = appDatabase.inventoryDao().getAllItems().first()
+            val existingGtinPairs = appDatabase.inventoryDao().getAllGtins()
+                .map { it.item_id to it.gtin }.toHashSet()
+            val backfill = items
+                .filter { it.barcode_id.isNotBlank() && (it.system_row_id to it.barcode_id) !in existingGtinPairs }
+                .map {
+                    com.tillzo.pos.data.local.entity.ItemGtinEntity(
+                        item_id = it.system_row_id,
+                        gtin = it.barcode_id
+                    )
+                }
+            if (backfill.isNotEmpty()) {
+                appDatabase.inventoryDao().insertGtins(backfill)
+                Log.d(TAG, "ItemGtins backfill: ${backfill.size} barcode_id → GTIN rows")
             }
-            val result = sheetsRepository.uploadBatch("Time_Clock", rows)
+
+            val gtins = appDatabase.inventoryDao().getAllGtins()
+            if (gtins.isEmpty()) return true
+            val existingIds = sheetsRepository.getExistingUuids("ItemGtins").toHashSet()
+            val newGtins = gtins.filter { it.gtin_id !in existingIds }
+            if (newGtins.isEmpty()) return true
+            val now = System.currentTimeMillis().toString()
+            val rows = newGtins.map { listOf(it.gtin_id, it.item_id, it.gtin, now, now) }
+            var result = sheetsRepository.uploadBatch("ItemGtins", rows)
+            if (result !is SyncResult.Success) {
+                val meta = sheetsRemoteDataSource.getSheetMetadata()
+                if (!meta.containsKey("ItemGtins")) {
+                    val created = sheetsRemoteDataSource.addSheet("ItemGtins")
+                    if (created) {
+                        Log.i(TAG, "ItemGtins tab missing — created + header self-heal")
+                        sheetsRemoteDataSource.batchWrite(
+                            listOf(mapOf(
+                                "range" to "ItemGtins!A1",
+                                "majorDimension" to "ROWS",
+                                "values" to listOf(com.tillzo.pos.utils.SheetColumns.ITEM_GTINS)
+                            ))
+                        )
+                    }
+                }
+                result = sheetsRepository.uploadBatch("ItemGtins", rows)
+            }
             if (result is SyncResult.Success) {
-                pending.forEach { p -> appDatabase.timeClockDao().markSynced(p.system_row_id) }
-                Log.d(TAG, "Time_Clock uploaded: ${pending.size}")
+                Log.d(TAG, "ItemGtins uploaded: ${newGtins.size}")
                 true
             } else {
-                Log.w(TAG, "Time_Clock upload failed")
+                Log.w(TAG, "ItemGtins upload failed")
                 false
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Time_Clock upload error", e)
+            Log.e(TAG, "ItemGtins upload error", e)
             false
         }
     }
@@ -392,6 +475,17 @@ class SyncWorker @AssistedInject constructor(
                         Log.w(TAG, "PO header upload failed for ${po.poId} — keeping pending")
                         continue
                     }
+                } else {
+                    // FIX (2026-08-22, DEF-44 follow-up): header already exists on
+                    // the sheet but its status/notes changed (e.g. GRN receipt
+                    // flipped SENT → RECEIVED). Previously the existing header was
+                    // silently skipped and then marked synced, so the sheet kept
+                    // the old status forever. Update it in place.
+                    val updated = sheetsRepository.updateRowByUuid("Purchase_Orders", po.poId, po.toSheetRow())
+                    if (!updated) {
+                        Log.w(TAG, "PO header update failed for ${po.poId} — keeping pending")
+                        continue
+                    }
                 }
 
                 // 3. Both items and header succeeded
@@ -432,12 +526,59 @@ class SyncWorker @AssistedInject constructor(
                         Log.w(TAG, "GRN header upload failed for ${grn.grnId} — keeping pending")
                         continue
                     }
+                } else {
+                    // FIX (2026-08-22, DEF-44 follow-up): same as PO — an existing
+                    // GRN header whose status changed (DRAFT → CONFIRMED) was
+                    // silently skipped then marked synced; update in place.
+                    val updated = sheetsRepository.updateRowByUuid("GRN_Headers", grn.grnId, grn.toSheetRow())
+                    if (!updated) {
+                        Log.w(TAG, "GRN header update failed for ${grn.grnId} — keeping pending")
+                        continue
+                    }
                 }
 
                 // 3. Both items and header succeeded
                 grnDao.markGrnSynced(grn.grnId, System.currentTimeMillis())
             }
         } catch (e: Exception) { Log.e(TAG, "GRN Upload failed", e) }
+    }
+
+    private suspend fun uploadPendingVendorPayments(): Boolean {
+        return try {
+            val vendorPaymentDao = appDatabase.vendorPaymentDao()
+            val pendingPayments = vendorPaymentDao.getUnsyncedPayments()
+            if (pendingPayments.isEmpty()) return true
+
+            val existingIds = sheetsRepository.getExistingUuids("Vendor_Payments").toHashSet()
+            val newPayments = pendingPayments.filter { it.paymentId !in existingIds }
+            val updatePayments = pendingPayments.filter { it.paymentId in existingIds }
+
+            var ok = true
+            if (newPayments.isNotEmpty()) {
+                val result = sheetsRepository.uploadBatch("Vendor_Payments", newPayments.map { it.toSheetRow() })
+                if (result is SyncResult.Success) {
+                    newPayments.forEach { vendorPaymentDao.updateSyncStatus(it.paymentId, "synced") }
+                } else {
+                    Log.w(TAG, "Vendor_Payments upload failed — keeping pending")
+                    ok = false
+                }
+            }
+            if (updatePayments.isNotEmpty()) {
+                for (payment in updatePayments) {
+                    val updated = sheetsRepository.updateRowByUuid("Vendor_Payments", payment.paymentId, payment.toSheetRow())
+                    if (updated) {
+                        vendorPaymentDao.updateSyncStatus(payment.paymentId, "synced")
+                    } else {
+                        Log.w(TAG, "Vendor_Payments update failed for ${payment.paymentId} — keeping pending")
+                        ok = false
+                    }
+                }
+            }
+            ok
+        } catch (e: Exception) {
+            Log.e(TAG, "Vendor_Payments Upload failed", e)
+            false
+        }
     }
 
     private suspend fun uploadPendingProductBatches(): Boolean {
@@ -448,20 +589,38 @@ class SyncWorker @AssistedInject constructor(
             
             val existingIds = sheetsRepository.getExistingUuids("Product_Batches")
             val newBatches = pendingBatches.filter { it.batchId !in existingIds }
+            // FIX (2026-08-22, DEF-43): batches whose stockQty changed after the
+            // initial append (FIFO deduction, batch edit, stock adjustment) were
+            // silently DROPPED — the old code uploaded only NEW batches and then
+            // marked ALL pending synced, so the sheet kept the original stockQty
+            // forever and cross-terminal stock went permanently stale.
+            val updateBatches = pendingBatches.filter { it.batchId in existingIds }
             
-            val result = if (newBatches.isNotEmpty()) {
-                sheetsRepository.uploadBatch("Product_Batches", newBatches.map { it.toSheetRow() })
-            } else {
-                SyncResult.Success(0)
+            var ok = true
+            if (newBatches.isNotEmpty()) {
+                val result = sheetsRepository.uploadBatch("Product_Batches", newBatches.map { it.toSheetRow() })
+                if (result is SyncResult.Success) {
+                    newBatches.forEach { productBatchDao.markSynced(it.batchId) }
+                } else {
+                    Log.w(TAG, "Product Batches append failed — keeping new batches pending")
+                    ok = false
+                }
             }
             
-            if (result is SyncResult.Success) {
-                pendingBatches.forEach { productBatchDao.markSynced(it.batchId) }
-                true
-            } else {
-                Log.w(TAG, "Product Batches upload failed — keeping pending")
-                false
+            if (updateBatches.isNotEmpty()) {
+                var allUpdated = true
+                for (batch in updateBatches) {
+                    val updated = sheetsRepository.updateRowByUuid("Product_Batches", batch.batchId, batch.toSheetRow())
+                    if (updated) {
+                        productBatchDao.markSynced(batch.batchId)
+                    } else {
+                        Log.w(TAG, "Batch update failed for ${batch.batchId} — keeping pending")
+                        allUpdated = false
+                    }
+                }
+                if (!allUpdated) ok = false
             }
+            ok
         } catch (e: Exception) {
             Log.e(TAG, "Batch Upload failed", e)
             false
@@ -547,60 +706,112 @@ class SyncWorker @AssistedInject constructor(
         try {
             val wastageDao = appDatabase.wastageDao()
             val pendingWastage = wastageDao.getPendingWastage()
-            if (pendingWastage.isEmpty()) return
-            
-            val existingIds = sheetsRepository.getExistingUuids("Wastage_Ledger")
-            val newWastage = pendingWastage.filter { it.wastageId !in existingIds }
-            
-            val result = if (newWastage.isNotEmpty()) {
-                sheetsRepository.uploadBatch("Wastage_Ledger", newWastage.map { it.toSheetRow() })
-            } else {
-                SyncResult.Success(0)
+            if (pendingWastage.isNotEmpty()) {
+                val existingIds = sheetsRepository.getExistingUuids("Wastage_Ledger")
+                val newWastage = pendingWastage.filter { it.wastageId !in existingIds }
+
+                val result = if (newWastage.isNotEmpty()) {
+                    sheetsRepository.uploadBatch("Wastage_Ledger", newWastage.map { it.toSheetRow() })
+                } else {
+                    SyncResult.Success(0)
+                }
+
+                if (result is SyncResult.Success) {
+                    pendingWastage.forEach { wastageDao.markSynced(it.wastageId) }
+                    Log.d(TAG, "Wastage records synced: ${pendingWastage.size}")
+                }
             }
-            
-            if (result is SyncResult.Success) {
-                pendingWastage.forEach { wastageDao.markSynced(it.wastageId) }
-                Log.d(TAG, "Wastage records synced: ${pendingWastage.size}")
+
+            // DEF-90 FIX (2026-08-23): soft-deleted entries ko sheet par
+            // sync_status='deleted' mark karo (row DELETE nahi — audit trail intact).
+            // Iske bina reinstall/restore par deleted wastage entry wapas aa jati thi
+            // (sheet par koi deletion marker nahi tha → restore ne use phir import kar
+            // liya → Month Loss galat). updateRowByUuid row ko in-place update karta hai.
+            val deletedWastage = wastageDao.getPendingDeletedWastage()
+            var deletedOk = true
+            for (w in deletedWastage) {
+                // toSheetRow index 13 = syncStatus column (col N)
+                val markedRow = w.toSheetRow().mapIndexed { i, v -> if (i == 13) "deleted" else v }
+                if (!sheetsRepository.updateRowByUuid("Wastage_Ledger", w.wastageId, markedRow)) {
+                    deletedOk = false
+                    Log.w(TAG, "Wastage delete marker upload FAILED for ${w.wastageId.take(8)} (sheet row missing — never uploaded?)")
+                }
+            }
+            if (deletedOk && deletedWastage.isNotEmpty()) {
+                Log.d(TAG, "Wastage delete markers synced: ${deletedWastage.size}")
             }
         } catch (e: Exception) { Log.e(TAG, "Wastage Upload failed", e) }
+    }
+
+    // GAP-3 FIX (2026-08-23): Returns ledger upload — Returns sheet tab was
+    // never populated because no sync path existed. Same pattern as wastage:
+    // pending rows → batch append → mark synced.
+    private suspend fun uploadPendingReturns() {
+        try {
+            val returnsDao = appDatabase.returnsDao()
+            val pendingReturns = returnsDao.getPendingReturns()
+            if (pendingReturns.isNotEmpty()) {
+                val existingIds = sheetsRepository.getExistingUuids("Returns")
+                val newReturns = pendingReturns.filter { it.returnId !in existingIds }
+                val result = if (newReturns.isNotEmpty()) {
+                    sheetsRepository.uploadBatch("Returns", newReturns.map { it.toSheetRow() })
+                } else {
+                    SyncResult.Success(0)
+                }
+                if (result is SyncResult.Success) {
+                    pendingReturns.forEach { returnsDao.markSynced(it.returnId) }
+                    Log.d(TAG, "Returns ledger synced: ${pendingReturns.size}")
+                }
+            }
+        } catch (e: Exception) { Log.e(TAG, "Returns Upload failed", e) }
     }
 } // end SyncWorker class
 
 // ── Extension functions for toSheetRow() ────────────────────────────────────
+// OVERNIGHT-AUDIT Phase 2a (2026-08-23): all timestamps sheet-bound ab
+// .ts() se format hote hain — UNIX millis -> "2026-08-17 04:00 PM".
+
 fun com.tillzo.pos.data.local.entity.PurchaseOrderEntity.toSheetRow() = listOf(
     poId, poNumber, vendorId, vendorName, status, notes, totalAmount, currency,
-    expectedDeliveryDate, createdBy, syncStatus, posTerminalId, createdAt, updatedAt
+    expectedDeliveryDate, createdBy, syncStatus, posTerminalId, createdAt.ts(), updatedAt.ts()
 )
 fun com.tillzo.pos.data.local.entity.PurchaseOrderItemEntity.toSheetRow() = listOf(
     poItemId, poId, productId, productName, sku, barcodeId,
     orderedQty, receivedQty, unitCostPrice, totalCost, unit,
-    syncStatus, createdAt, updatedAt
+    syncStatus, createdAt.ts(), updatedAt.ts()
 )
 fun com.tillzo.pos.data.local.entity.GrnHeaderEntity.toSheetRow() = listOf(
     grnId, grnNumber, poId, vendorId, vendorName, status, notes,
-    receivedBy, totalAmount, syncStatus, posTerminalId,
-    attachedFileId, attachedFileUrl, createdAt, updatedAt
+    receivedBy, totalAmount, paymentStatus, paidAmount, dueBalance, paymentMethod,
+    paymentDueDate, if (reminderEnabled) 1 else 0, reminderIntervalDays,
+    syncStatus, posTerminalId, attachedFileId, attachedFileUrl, createdAt.ts(), updatedAt.ts()
 )
 fun com.tillzo.pos.data.local.entity.GrnItemEntity.toSheetRow() = listOf(
     grnItemId, grnId, poItemId, productId, productName, barcodeId, sku,
     receivedQty, unitCostPrice, totalCost, unit, batchNumber,
     manufacturingDate, expiryDate, inventoryAction, if (isNewProduct) 1 else 0,
-    syncStatus, createdAt, updatedAt
+    syncStatus, createdAt.ts(), updatedAt.ts()
+)
+fun com.tillzo.pos.data.local.entity.VendorPaymentEntity.toSheetRow() = listOf(
+    paymentId, vendorId, vendorName, grnId, poId, type,
+    amount, paymentMethod, paidBy, note, dueDate,
+    syncStatus, if (isDeleted) 1 else 0, deletedAt ?: "", posTerminalId,
+    createdAt.ts(), updatedAt.ts()
 )
 fun com.tillzo.pos.data.local.entity.VendorEntity.toSheetRow() = listOf(
     vendorId, name, phone, whatsapp, email, address,
     city, creditLimit,
     if (isActive) 1 else 0,
-    if (isDeleted) 1 else 0, syncStatus, createdAt, updatedAt
+    if (isDeleted) 1 else 0, syncStatus, createdAt.ts(), updatedAt.ts()
 )
 fun com.tillzo.pos.data.local.entity.ProductBatchEntity.toSheetRow() = listOf(
     batchId, productId, barcodeId, batchNumber, manufacturingDate, expiryDate,
     stockQty, costPrice, sellingPrice, if (isActive) 1 else 0,
-    if (isDeleted) 1 else 0, deletedAt ?: "", syncStatus, posTerminalId, createdAt, updatedAt
+    if (isDeleted) 1 else 0, deletedAt ?: "", syncStatus, posTerminalId, createdAt.ts(), updatedAt.ts()
 )
 fun com.tillzo.pos.data.local.entity.StockAdjustmentEntity.toSheetRow(posTerminalId: String = "TERM_1") = listOf(
     adjustmentId, productId, adjustmentType, quantityChanged, reason, adjustedBy, syncStatus,
-    posTerminalId, createdAt, updatedAt
+    posTerminalId, createdAt.ts(), updatedAt.ts()
 )
 
 

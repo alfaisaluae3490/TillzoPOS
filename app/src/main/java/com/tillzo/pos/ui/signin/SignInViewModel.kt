@@ -113,7 +113,10 @@ class SignInViewModel @Inject constructor(
                 val idToken     = account.idToken ?: "null"
                 val serverAuthCode = account.serverAuthCode
 
-                Log.d("SignInViewModel", "Sign-in success: email=$email, idToken present=${account.idToken != null}, serverAuthCode present=${serverAuthCode != null}")
+                // FIX (2026-08-23, DEF-99): email PII logcat se hata diya — raw
+                // user email kisi bhi log channel mein nahi aana chahiye. Debug
+                // diagnostics ke liye sirf booleans + masked domain rakhe hain.
+                Log.d("SignInViewModel", "Sign-in success: idToken present=${account.idToken != null}, serverAuthCode present=${serverAuthCode != null}")
 
                 // Exchange server auth code for offline access + refresh tokens
                 if (!serverAuthCode.isNullOrBlank()) {

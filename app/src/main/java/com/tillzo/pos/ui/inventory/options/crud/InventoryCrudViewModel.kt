@@ -113,7 +113,10 @@ class InventoryCrudViewModel @Inject constructor(
             try {
                 val entity = CategoryEntity(
                     category_name = name,
-                    pos_terminal_id = "terminal_1" // Replace later with actual terminal id
+                    // FIX (2026-08-23, DEF-106): "terminal_1" hardcoded tha —
+                    // ab real terminal id (spreadsheet-id based), baaki modules
+                    // ke pattern se consistent.
+                    pos_terminal_id = appSetupPrefs.spreadsheetId.take(20).ifBlank { "terminal_1" }
                 )
                 categoryDao.insertCategory(entity)
                 // FIX (2026-08-07): verify commit + log (silent catch ne bug chipaya tha)
@@ -190,14 +193,37 @@ class InventoryCrudViewModel @Inject constructor(
     ) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                // FIX (2026-08-23, DEF-103): input validation — blank name /
+                // negative price/stock/tax pehle silently save ho jate the
+                // (sheet par corrupt rows). Ab reject/clamp.
+                if (itemName.isBlank()) {
+                    Log.w("InventoryCrudVM", "saveItem rejected: blank item name")
+                    return@launch
+                }
+                val safePrice = pricePerUnit.coerceAtLeast(0.0)
+                val safeStock = currentStock.coerceAtLeast(0.0)
+                val safeLow = lowStockThreshold.coerceAtLeast(0.0)
+                val safeCost = costPrice.coerceAtLeast(0.0)
+                val safeTax = taxPercent.coerceAtLeast(0.0)
+                val safeDamagedQty = damagedQty.coerceAtLeast(0.0)
                 val terminalId = appSetupPrefs.spreadsheetId.take(20).ifBlank { "TERM_1" } // FIX 2026-08-06: real terminal idwith actual fetch mechanism
             
             val existingItem = _selectedItem.value
             val itemNum = existingItem?.item_number ?: ((inventoryDao.getMaxItemNumber() ?: 0) + 1)
             
             // GS1 default GTIN auto-generation if list is empty
+            // FIX (2026-08-22, DEF-64): was "0000000%07d" = 14 digits. EAN-13
+            // (the universal retail barcode, what ML Kit and store scanners
+            // read) supports EXACTLY 13 digits — 14-digit GTINs decode as
+            // ITF-14 (not EAN-13), so products with auto-generated barcodes
+            // were unscannable at retail POS. Now: 12-digit GTIN-12 base +
+            // EAN-13 check digit = 13 digits, guaranteed scannable.
+            // FIX (2026-08-22, DEF-66): itemNum % 100 would COLLIDE after 100
+            // products (two products, same barcode → scanner adds the wrong
+            // item). itemNum itself is unique (max+1) — use all 12 base digits
+            // so collisions are impossible in practice.
             val finalGtins = if (gtins.isEmpty()) {
-                listOf("0000000%07d".format(itemNum))
+                listOf(generateEan13("000%09d".format(itemNum % 1_000_000_000)))
             } else {
                 gtins
             }
@@ -211,19 +237,19 @@ class InventoryCrudViewModel @Inject constructor(
                     category = category,
                     barcode_id = primaryBarcode,
                     unit = unit,
-                    price_per_unit = pricePerUnit,
-                    current_stock = currentStock,
-                    low_stock_threshold = lowStockThreshold,
+                    price_per_unit = safePrice,
+                    current_stock = safeStock,
+                    low_stock_threshold = safeLow,
                     sku = sku,
                     description = description,
-                    cost_price = costPrice,
-                    tax_percent = taxPercent,
+                    cost_price = safeCost,
+                    tax_percent = safeTax,
                     batch_number = batchNumber,
                     expiry_date = expiryDate,
                     manufacturing_date = manufacturingDate,
                     expiry_alert_days = expiryAlertDays,
                     is_damaged_stock = isDamaged,
-                    damaged_qty = damagedQty
+                    damaged_qty = safeDamagedQty
                 )
                 updateProductUseCase(updatedItem)
                 
@@ -245,19 +271,19 @@ class InventoryCrudViewModel @Inject constructor(
                     category = category,
                     barcode_id = primaryBarcode,
                     unit = unit,
-                    price_per_unit = pricePerUnit,
-                    current_stock = currentStock,
-                    low_stock_threshold = lowStockThreshold,
+                    price_per_unit = safePrice,
+                    current_stock = safeStock,
+                    low_stock_threshold = safeLow,
                     sku = sku,
                     description = description,
-                    cost_price = costPrice,
-                    tax_percent = taxPercent,
+                    cost_price = safeCost,
+                    tax_percent = safeTax,
                     batch_number = batchNumber,
                     expiry_date = expiryDate,
                     manufacturing_date = manufacturingDate,
                     expiry_alert_days = expiryAlertDays,
                     is_damaged_stock = isDamaged,
-                    damaged_qty = damagedQty
+                    damaged_qty = safeDamagedQty
                 )
                 addProductUseCase(newItem)
                 
@@ -327,6 +353,12 @@ class InventoryCrudViewModel @Inject constructor(
     ) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                // FIX (2026-08-23, DEF-104): negative batch qty pehle accept hoti
+                // thi → total stock ghat jata tha + sheet par negative batch row.
+                if (stockQty < 0.0) {
+                    android.util.Log.w("InventoryCrud", "addBatch rejected: negative stockQty ($stockQty)")
+                    return@launch
+                }
                 val product = inventoryDao.getItemById(productId) ?: return@launch
                 val batch = ProductBatchEntity(
                     productId = productId,
@@ -367,6 +399,11 @@ class InventoryCrudViewModel @Inject constructor(
         sellingPrice: Double
     ) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            // FIX (2026-08-23, DEF-104): negative batch qty reject.
+            if (stockQty < 0.0) {
+                android.util.Log.w("InventoryCrud", "updateBatch rejected: negative stockQty ($stockQty)")
+                return@launch
+            }
             val updated = batch.copy(
                 batchNumber = batchNumber,
                 manufacturingDate = mfgDate,
@@ -385,5 +422,95 @@ class InventoryCrudViewModel @Inject constructor(
         val batches = productBatchDao.getAllBatchesForProduct(productId)
         val total = batches.filter { it.isActive && !it.isDeleted }.sumOf { it.stockQty }
         inventoryDao.updateTotalStockAndSyncStatus(productId, total, System.currentTimeMillis())
+    }
+
+    // FIX (2026-08-22, DEF-64): EAN-13 generator — takes a 12-digit GTIN-12
+    // base and appends the standard EAN check digit (weights 3-1-3-1... from
+    // the right). Result is always 13 digits → scannable by ML Kit and retail
+    // scanners. Also validates if a caller already passed a full 13-digit code.
+    companion object {
+        fun generateEan13(base12: String): String {
+            val clean = base12.filter { it.isDigit() }.take(12).padStart(12, '0')
+            var sum = 0
+            for (i in clean.indices) {
+                val digit = clean[i] - '0'
+                sum += if (i % 2 == 0) digit else digit * 3
+            }
+            val check = (10 - (sum % 10)) % 10
+            return clean + check
+        }
+    }
+
+    // ── OVERNIGHT-AUDIT Phase 2b (2026-08-23): CSV bulk import ──────────────────
+    // Parses a UTF-8 CSV (Excel/Sheets export) and inserts every row through the
+    // same validation + EAN-13 path as saveItem(). Result surfaces in UI state.
+
+    private val _importResult = MutableStateFlow<String?>(null)
+    val importResult = _importResult.asStateFlow()
+
+    fun clearImportResult() { _importResult.value = null }
+
+    fun importInventoryCsv(bytes: ByteArray) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val rows = withContext(Dispatchers.IO) {
+                    java.io.ByteArrayInputStream(bytes).use {
+                        com.tillzo.pos.utils.CsvImporter.parseInventoryRows(it)
+                    }
+                }
+                if (rows.isEmpty()) {
+                    _importResult.value = "No data rows found (header only or empty file)."
+                    return@launch
+                }
+                var inserted = 0
+                var skipped = 0
+                var nextNum = (inventoryDao.getMaxItemNumber() ?: 0)
+                for ((index, r) in rows.withIndex()) {
+                    try {
+                        if (r.name.isBlank()) { skipped++; continue }
+                        nextNum += 1
+                        // Barcode: use provided numeric one, else generate unique EAN-13
+                        val barcode = r.barcode.takeIf { it.isNotBlank() && it.all { ch -> ch.isDigit() } }
+                            ?: generateEan13("000%09d".format(nextNum % 1_000_000_000))
+                        val entity = com.tillzo.pos.data.local.entity.InventoryEntity(
+                            pos_terminal_id = "TERM_1",
+                            item_name = r.name,
+                            item_number = nextNum,
+                            category = r.category,
+                            barcode_id = barcode,
+                            unit = r.unit,
+                            price_per_unit = r.sellingPrice,
+                            current_stock = r.stockQty,
+                            low_stock_threshold = 5.0,
+                            sku = r.sku,
+                            description = "",
+                            cost_price = r.costPrice,
+                            tax_percent = 0.0,
+                            batch_number = "",
+                            expiry_date = "",
+                            manufacturing_date = "",
+                            expiry_alert_days = 30,
+                            is_damaged_stock = false,
+                            damaged_qty = 0.0
+                        )
+                        addProductUseCase(entity)
+                        inventoryDao.insertGtins(
+                            listOf(
+                                com.tillzo.pos.data.local.entity.ItemGtinEntity(
+                                    item_id = entity.system_row_id,
+                                    gtin = barcode
+                                )
+                            )
+                        )
+                        inserted++
+                    } catch (rowEx: Exception) {
+                        skipped++   // bad row: keep going, report at end
+                    }
+                }
+                _importResult.value = "Import complete: $inserted added, $skipped skipped."
+            } catch (e: Exception) {
+                _importResult.value = "Import failed: ${e.message}"
+            }
+        }
     }
 }

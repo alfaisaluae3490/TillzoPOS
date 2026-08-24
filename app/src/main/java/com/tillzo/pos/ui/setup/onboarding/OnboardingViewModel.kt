@@ -56,6 +56,25 @@ class OnboardingViewModel @Inject constructor(
     private val _logoPath = MutableStateFlow("")
     val logoPath: StateFlow<String> get() = _logoPath
 
+    // ── Country & Tax State ────────────────────────────────────────────────
+    private val _countryCode = MutableStateFlow("AE")
+    val countryCode: StateFlow<String> get() = _countryCode
+
+    private val _taxNumber = MutableStateFlow("")
+    val taxNumber: StateFlow<String> get() = _taxNumber
+
+    private val _taxLabel = MutableStateFlow("VAT")
+    val taxLabel: StateFlow<String> get() = _taxLabel
+
+    private val _defaultTaxRate = MutableStateFlow(5.0)
+    val defaultTaxRate: StateFlow<Double> get() = _defaultTaxRate
+
+    private val _taxInclusive = MutableStateFlow(true)
+    val taxInclusive: StateFlow<Boolean> get() = _taxInclusive
+
+    private val _enableZatcaQr = MutableStateFlow(true)
+    val enableZatcaQr: StateFlow<Boolean> get() = _enableZatcaQr
+
     private val _saving = MutableStateFlow(false)
     val saving: StateFlow<Boolean> get() = _saving
 
@@ -70,6 +89,18 @@ class OnboardingViewModel @Inject constructor(
     fun setBusinessWebsite(v: String) { _businessWebsite.value = v }
     fun setBusinessPortal(v: String) { _businessPortal.value = v }
     fun setBusinessAppLink(v: String) { _businessAppLink.value = v }
+    fun setTaxNumber(v: String) { _taxNumber.value = v }
+    fun setTaxRate(v: Double) { _defaultTaxRate.value = v.coerceAtLeast(0.0) }
+    fun setTaxInclusive(v: Boolean) { _taxInclusive.value = v }
+
+    fun selectCountry(code: String) {
+        val preset = com.tillzo.pos.utils.TaxUtils.getPreset(code)
+        _countryCode.value = preset.code
+        _taxLabel.value = preset.taxLabel
+        _defaultTaxRate.value = preset.defaultTaxRate
+        _taxInclusive.value = preset.taxInclusive
+        _enableZatcaQr.value = preset.enableZatcaQr
+    }
 
     /**
      * Copies a picked logo into app-private storage (survives URI expiry)
@@ -106,6 +137,18 @@ class OnboardingViewModel @Inject constructor(
             if (_logoPath.value.isNotBlank()) {
                 appSetupPrefs.saveBusinessLogoPath(_logoPath.value)
             }
+            // Save Country & Tax Preset
+            val preset = com.tillzo.pos.utils.TaxUtils.getPreset(_countryCode.value)
+            appSetupPrefs.applyCountryPreset(
+                preset.copy(
+                    taxLabel = _taxLabel.value.trim().ifBlank { preset.taxLabel },
+                    defaultTaxRate = _defaultTaxRate.value,
+                    taxInclusive = _taxInclusive.value,
+                    enableZatcaQr = _enableZatcaQr.value
+                )
+            )
+            appSetupPrefs.taxNumber = _taxNumber.value.trim()
+
             _saving.value = false
             _saved.value = true
             withContext(Dispatchers.Main) { onSaved() }
@@ -122,5 +165,11 @@ class OnboardingViewModel @Inject constructor(
         _businessPortal.value = appSetupPrefs.businessPortal
         _businessAppLink.value = appSetupPrefs.businessAppLink
         _logoPath.value = appSetupPrefs.businessLogoPath
+        _countryCode.value = appSetupPrefs.countryCode
+        _taxNumber.value = appSetupPrefs.taxNumber
+        _taxLabel.value = appSetupPrefs.taxLabel
+        _defaultTaxRate.value = appSetupPrefs.defaultTaxRate
+        _taxInclusive.value = appSetupPrefs.taxInclusive
+        _enableZatcaQr.value = appSetupPrefs.enableZatcaQr
     }
 }

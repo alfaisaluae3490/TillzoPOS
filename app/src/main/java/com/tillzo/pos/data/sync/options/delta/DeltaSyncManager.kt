@@ -20,6 +20,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
@@ -149,6 +150,17 @@ class DeltaSyncManager @Inject constructor(
         }
 
         if (upsertOk) {
+            // FIX (2026-08-22, DEF-32): purge corrupt local sales on EVERY
+            // successful poll, not only when the delta contained new Sales
+            // rows. Previously deleteCorruptSales() sat inside the Sales
+            // upsert branch, so it never ran when the delta had 0 rows —
+            // ghost "$0.00" history entries from the pre-DEF-27 scattered
+            // column era stayed forever.
+            try {
+                appDatabase.saleDao().deleteCorruptSales()
+            } catch (e: Exception) {
+                appLogger.logWarn(TAG, "Corrupt-sales cleanup failed: ${e.message}")
+            }
             appDatabase.syncLogDao().upsertSyncLog(
                 SyncLogEntity(
                     table_name     = DELTA_CURSOR_KEY,
@@ -306,7 +318,13 @@ class DeltaSyncManager @Inject constructor(
                                 deleted_at = (row["deleted_at"] as? String)?.toLongOrNull()
                             )
                         }
-                        categories.forEach { appDatabase.categoryDao().insertCategory(it) }
+                        // FIX (2026-08-22, DEF-45): echo-clobber — never overwrite
+                        // locally PENDING rows (awaiting upload) with the sheet's
+                        // stale copy. Pending IDs are fetched once and applied to
+                        // every table branch below.
+                        val pendingCategoryIds = appDatabase.categoryDao().getPendingSyncCategories().map { it.system_row_id }.toSet()
+                        categories.filter { it.system_row_id !in pendingCategoryIds }
+                            .forEach { appDatabase.categoryDao().insertCategory(it) }
                     }
                     tabName == "Customers" -> {
                         val customers = tabRows.map { row ->
@@ -325,7 +343,9 @@ class DeltaSyncManager @Inject constructor(
                                 deleted_at = (row["deleted_at"] as? String)?.toLongOrNull()
                             )
                         }
-                        customers.forEach { appDatabase.customerDao().insert(it) }
+                        val pendingCustomerIds = appDatabase.customerDao().getPendingCustomers().map { it.system_row_id }.toSet()
+                        customers.filter { it.system_row_id !in pendingCustomerIds }
+                            .forEach { appDatabase.customerDao().insert(it) }
                     }
                     tabName == "Expenses" -> {
                         val expenses = tabRows.map { row ->
@@ -344,7 +364,9 @@ class DeltaSyncManager @Inject constructor(
                                 deleted_at = (row["deleted_at"] as? String)?.toLongOrNull()
                             )
                         }
-                        expenses.forEach { appDatabase.expenseDao().insert(it) }
+                        val pendingExpenseIds = appDatabase.expenseDao().getPendingExpenses().map { it.system_row_id }.toSet()
+                        expenses.filter { it.system_row_id !in pendingExpenseIds }
+                            .forEach { appDatabase.expenseDao().insert(it) }
                     }
                     tabName == "Khata_Events" -> {
                         val events = tabRows.map { row ->
@@ -363,7 +385,9 @@ class DeltaSyncManager @Inject constructor(
                                 deleted_at = (row["deleted_at"] as? String)?.toLongOrNull()
                             )
                         }
-                        events.forEach { appDatabase.khataEventDao().insert(it) }
+                        val pendingEventIds = appDatabase.khataEventDao().getPendingKhataEvents().map { it.system_row_id }.toSet()
+                        events.filter { it.system_row_id !in pendingEventIds }
+                            .forEach { appDatabase.khataEventDao().insert(it) }
                     }
                     tabName == "Product_Units" -> {
                         val units = tabRows.map { row ->
@@ -377,7 +401,8 @@ class DeltaSyncManager @Inject constructor(
                                 updatedAt = (row["updatedAt"] as? String)?.toLongOrNull() ?: System.currentTimeMillis()
                             )
                         }
-                        appDatabase.productUnitDao().insertAll(units)
+                        val pendingUnitIds = appDatabase.productUnitDao().getPendingSyncUnits().map { it.unitId }.toSet()
+                        appDatabase.productUnitDao().insertAll(units.filter { it.unitId !in pendingUnitIds })
                     }
                     tabName == "Vendors" -> {
                         val vendors = tabRows.map { row ->
@@ -397,7 +422,20 @@ class DeltaSyncManager @Inject constructor(
                                 updatedAt = (row["updated_at"] as? String)?.toLongOrNull() ?: (row["updatedAt"] as? String)?.toLongOrNull() ?: System.currentTimeMillis()
                             )
                         }
-                        vendors.forEach { appDatabase.vendorDao().insertVendor(it) }
+                        val pendingVendorIds = appDatabase.vendorDao().getPendingVendors().map { it.vendorId }.toSet()
+                        // FIX (2026-08-22, DEF-31b): a vendor deleted on this
+                        // device was hard-deleted locally but its sheet row can
+                        // linger (duplicate rows / orphan rows from earlier
+                        // pull imports). The plain insertVendor below would
+                        // RE-IMPORT that ghost on the next pull, resurrecting a
+                        // deleted vendor. Guard: skip any sheet vendor whose
+                        // (name+phone) already exists locally as a NON-deleted
+                        // vendor — duplicates and ghosts can never come back.
+                        val existingVendors = appDatabase.vendorDao().getAllVendorsAsList()
+                        val existingKeys = existingVendors.map { "${it.name.lowercase()}|${it.phone.lowercase()}" }.toSet()
+                        vendors.filter { it.vendorId !in pendingVendorIds }
+                            .filter { "${it.name.lowercase()}|${it.phone.lowercase()}" !in existingKeys }
+                            .forEach { appDatabase.vendorDao().insertVendor(it) }
                     }
                     tabName == "Product_Batches" -> {
                         val batches = tabRows.map { row ->
@@ -420,7 +458,22 @@ class DeltaSyncManager @Inject constructor(
                                 updatedAt = (row["updated_at"] as? String)?.toLongOrNull() ?: (row["updatedAt"] as? String)?.toLongOrNull() ?: System.currentTimeMillis()
                             )
                         }
-                        batches.forEach { appDatabase.productBatchDao().insertBatch(it) }
+                        val pendingBatchIds = appDatabase.productBatchDao().getPendingBatches().map { it.batchId }.toSet()
+                        // FIX (2026-08-23, DEF-88): orphan-batch guard. Product delete hone
+                        // ke baad bhi uske batch rows sheet mein reh sakte hain (sheet rows
+                        // kabhi cleanup nahi hote). FK constraint (product_batches.productId
+                        // → Inventory.system_row_id) unhe insert hone nahi deta → POORA tab
+                        // group fail → cursor advance nahi hota → saare VALID batches bhi
+                        // restore nahi hote + har 60s retry loop (log noise). Parent-missing
+                        // batches skip karo, valid batches insert karo.
+                        val validProductIds = appDatabase.inventoryDao().getAllItems().first().map { it.system_row_id }.toSet()
+                        val (validBatches, orphanBatches) = batches
+                            .filter { it.batchId !in pendingBatchIds }
+                            .partition { it.productId in validProductIds }
+                        if (orphanBatches.isNotEmpty()) {
+                            appLogger.logWarn("DELTA_SYNC", "Skipping ${orphanBatches.size} orphan batch row(s) with missing parent product (deleted item): ${orphanBatches.joinToString { it.batchId.take(8) }}")
+                        }
+                        validBatches.forEach { appDatabase.productBatchDao().insertBatch(it) }
                     }
                     tabName.startsWith("Sales_") -> {
                         val sales = tabRows.map { row ->
@@ -453,13 +506,28 @@ class DeltaSyncManager @Inject constructor(
                         // FIX (2026-08-06) echo-clobber: never overwrite a locally
                         // pending sale (made offline on this device) with the stale
                         // remote copy — that would clear its pending flag and lose it.
+                        // FIX (2026-08-22, DEF-32): skip rows with a blank
+                        // sync_uuid/invoice_id — scattered legacy rows (pre-DEF-27
+                        // column-shift leftovers) have data in columns 20-100 but an
+                        // EMPTY column A; importing them creates corrupt local sales
+                        // (empty invoice, total 0.0) that pollute history.
                         val saleDao = appDatabase.saleDao()
                         sales.forEach { sale ->
+                            if (sale.sync_uuid.isBlank()) {
+                                appLogger.logWarn("DELTA_SYNC", "Skipping sales row with blank invoice id: ${sale.system_row_id}")
+                                return@forEach
+                            }
                             val local = saleDao.getSaleById(sale.system_row_id)
                             if (local == null || local.sync_status != "pending") {
                                 saleDao.insertSale(sale)
                             }
                         }
+                        // FIX (2026-08-22, DEF-32): purge any previously-imported
+                        // corrupt rows (blank invoice id) so history no longer
+                        // shows ghost "$0.00" entries. (Also runs on every poll —
+                        // see pollOnce — so legacy garbage is cleaned even when
+                        // the delta contains no new Sales rows.)
+                        saleDao.deleteCorruptSales()
                     }
                     tabName == "BarcodeGeneralConfigs" || tabName == "BarcodeFieldConfigs" -> {
                         // Barcode config migrated to SharedPreferences — skip delta sync
@@ -504,7 +572,9 @@ class DeltaSyncManager @Inject constructor(
                                 updatedAt = (row["updated_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis()
                             )
                         }
-                        pos.forEach { appDatabase.purchaseOrderDao().insertPO(it) }
+                        val pendingPoIds = appDatabase.purchaseOrderDao().getPendingPOs().map { it.poId }.toSet()
+                        pos.filter { it.poId !in pendingPoIds }
+                            .forEach { appDatabase.purchaseOrderDao().insertPO(it) }
                     }
                     tabName == "PO_Items" -> {
                         val poItems = tabRows.map { row ->
@@ -525,7 +595,8 @@ class DeltaSyncManager @Inject constructor(
                                 updatedAt = (row["updated_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis()
                             )
                         }
-                        appDatabase.purchaseOrderDao().insertPOItems(poItems)
+                        val pendingPoItemIds = appDatabase.purchaseOrderDao().getPendingPOItems().map { it.poItemId }.toSet()
+                        appDatabase.purchaseOrderDao().insertPOItems(poItems.filter { it.poItemId !in pendingPoItemIds })
                     }
                     tabName == "GRN_Headers" -> {
                         val grns = tabRows.map { row ->
@@ -544,6 +615,13 @@ class DeltaSyncManager @Inject constructor(
                                 totalItems = (row["total_items"] as? String)?.toIntOrNull() ?: 0,
                                 totalReceivedQty = (row["total_received_qty"] as? String)?.toDoubleOrNull() ?: 0.0,
                                 totalAmount = (row["total_amount"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                paymentStatus = row["payment_status"] as? String ?: "UNPAID",
+                                paidAmount = (row["paid_amount"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                dueBalance = (row["due_balance"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                paymentMethod = row["payment_method"] as? String ?: "CREDIT",
+                                paymentDueDate = row["payment_due_date"] as? String ?: "",
+                                reminderEnabled = (row["reminder_enabled"] as? String)?.toIntOrNull() == 1 || (row["reminder_enabled"] as? String)?.toBoolean() ?: false,
+                                reminderIntervalDays = (row["reminder_interval_days"] as? String)?.toIntOrNull() ?: 1,
                                 syncStatus = "synced",
                                 isDeleted = (row["is_deleted"] as? String)?.toIntOrNull() == 1 || (row["isDeleted"] as? String)?.toBoolean() ?: false,
                                 deletedAt = (row["deleted_at"] as? String)?.toLongOrNull(),
@@ -554,7 +632,9 @@ class DeltaSyncManager @Inject constructor(
                                 updatedAt = (row["updated_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis()
                             )
                         }
-                        grns.forEach { appDatabase.grnDao().insertGrnHeader(it) }
+                        val pendingGrnIds = appDatabase.grnDao().getPendingGrns().map { it.grnId }.toSet()
+                        grns.filter { it.grnId !in pendingGrnIds }
+                            .forEach { appDatabase.grnDao().insertGrnHeader(it) }
                     }
                     tabName == "GRN_Items" -> {
                         val grnItems = tabRows.map { row ->
@@ -586,7 +666,8 @@ class DeltaSyncManager @Inject constructor(
                                 updatedAt = (row["updated_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis()
                             )
                         }
-                        appDatabase.grnDao().insertGrnItems(grnItems)
+                        val pendingGrnItemIds = appDatabase.grnDao().getPendingGrnItems().map { it.grnItemId }.toSet()
+                        appDatabase.grnDao().insertGrnItems(grnItems.filter { it.grnItemId !in pendingGrnItemIds })
                     }
                     tabName == "Wastage_Ledger" -> {
                         val wastage = tabRows.map { row ->
@@ -604,13 +685,42 @@ class DeltaSyncManager @Inject constructor(
                                 notes = row["notes"] as? String ?: "",
                                 loggedBy = row["logged_by"] as? String ?: "",
                                 wastageDate = row["wastage_date"] as? String ?: "",
-                                syncStatus = "synced",
+                                // DEF-90 FIX: sheet ka sync_status marker preserve karo —
+                                // 'deleted' rows import hokar DAO filters (syncStatus != 'deleted')
+                                // se list/totals mein automatically exclude ho jati hain.
+                                syncStatus = row["sync_status"] as? String ?: "synced",
                                 posTerminalId = row["pos_terminal_id"] as? String ?: "terminal_1",
                                 createdAt = (row["created_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis(),
                                 updatedAt = (row["updated_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis()
                             )
                         }
-                        wastage.forEach { appDatabase.wastageDao().insertWastage(it) }
+                        val pendingWastageIds = appDatabase.wastageDao().getPendingWastage().map { it.wastageId }.toSet()
+                        wastage.filter { it.wastageId !in pendingWastageIds }
+                            .forEach { appDatabase.wastageDao().insertWastage(it) }
+                    }
+                    tabName == "Returns" -> {
+                        // GAP-3 FIX (2026-08-23): Returns pull import — Returns tab
+                        // ab populate hota hai (upload path added). Import + echo-clobber
+                        // guard: pending (local, unsynced) rows kabhi overwrite nahi hote.
+                        val returns = tabRows.map { row ->
+                            com.tillzo.pos.data.local.entity.ReturnsEntity(
+                                returnId = row["return_id"] as? String ?: java.util.UUID.randomUUID().toString(),
+                                systemRowId = row["system_row_id"] as? String ?: java.util.UUID.randomUUID().toString(),
+                                originalInvoiceId = row["original_invoice_id"] as? String ?: "",
+                                itemId = row["item_id"] as? String ?: "",
+                                qtyReturned = (row["qty_returned"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                condition = row["condition"] as? String ?: "RESTOCK",
+                                refundMethod = row["refund_method"] as? String ?: "CASH",
+                                amount = (row["amount"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                lastUpdated = (row["last_updated"] as? String)?.toLongOrNull() ?: System.currentTimeMillis(),
+                                syncStatus = row["sync_status"] as? String ?: "synced",
+                                posTerminalId = row["pos_terminal_id"] as? String ?: "",
+                                createdAt = (row["created_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis()
+                            )
+                        }
+                        val pendingReturnIds = appDatabase.returnsDao().getPendingReturns().map { it.returnId }.toSet()
+                        returns.filter { it.returnId !in pendingReturnIds }
+                            .forEach { appDatabase.returnsDao().insertReturn(it) }
                     }
                     tabName == "Stock_Adjustments" -> {
                         val adjustments = tabRows.map { row ->
@@ -625,9 +735,19 @@ class DeltaSyncManager @Inject constructor(
                                 createdAt = (row["created_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis()
                             )
                         }
-                        adjustments.forEach { appDatabase.stockAdjustmentDao().insertStockAdjustment(it) }
+                        val pendingAdjIds = appDatabase.stockAdjustmentDao().getPendingAdjustments().map { it.adjustmentId }.toSet()
+                        adjustments.filter { it.adjustmentId !in pendingAdjIds }
+                            .forEach { appDatabase.stockAdjustmentDao().insertStockAdjustment(it) }
                     }
                     tabName == "Till_Sessions" -> {
+                        // FIX (2026-08-21, DEF-26): import ONLY CLOSED sessions from the
+                        // sheet. insertSession() uses OnConflictStrategy.REPLACE, so pulling
+                        // an OPEN session row would overwrite this device's live expectedCash
+                        // / totals with the sheet's (possibly stale) values — then the upload
+                        // worker pushed that corrupted value back to the sheet (circular
+                        // overwrite, observed: expected_cash 549.99 vs true ~2049.99).
+                        // Live OPEN session state is device-local and is pushed on upload;
+                        // sheet rows are authoritative only once a session is CLOSED.
                         val sessions = tabRows.map { row ->
                             com.tillzo.pos.data.local.entity.TillSessionEntity(
                                 sessionId = row["session_id"] as? String ?: java.util.UUID.randomUUID().toString(),
@@ -654,7 +774,68 @@ class DeltaSyncManager @Inject constructor(
                                 updatedAt = (row["updated_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis()
                             )
                         }
-                        sessions.forEach { appDatabase.tillSessionDao().insertSession(it) }
+                        sessions
+                            .filter { it.status != "OPEN" }
+                            .forEach { appDatabase.tillSessionDao().insertSession(it) }
+                    }
+                    // FIX (2026-08-23, DEF-92): ItemGtins kabhi restore nahi hote
+                    // the → reinstall par GTIN lookup (secondary GTINs / scanner
+                    // JOIN) toot jata tha. Ab ItemGtins tab fetch + upsert hota
+                    // hai. Guards (Product_Batches DEF-88 pattern ke jaise):
+                    //  1. orphan parent (item sheet par delete → GTIN rows linger)
+                    //     → FK violation se POORA tab group fail na ho;
+                    //  2. blank gtin; 3. duplicate gtin VALUE (unique index —
+                    //     legacy dup rows insertGtins crash kar deti hain).
+                    tabName == "ItemGtins" -> {
+                        val gtins = tabRows.map { row ->
+                            com.tillzo.pos.data.local.entity.ItemGtinEntity(
+                                gtin_id = row["gtin_id"] as? String ?: row["gtinId"] as? String ?: java.util.UUID.randomUUID().toString(),
+                                item_id = row["item_id"] as? String ?: "",
+                                gtin = row["gtin"] as? String ?: ""
+                            )
+                        }
+                        val validItemIds = appDatabase.inventoryDao().getAllItems().first().map { it.system_row_id }.toSet()
+                        val existingGtinValues = appDatabase.inventoryDao().getAllGtins().map { it.gtin }.toHashSet()
+                        var inserted = 0
+                        var skipped = 0
+                        for (g in gtins) {
+                            if (g.item_id !in validItemIds || g.gtin.isBlank() || g.gtin in existingGtinValues) {
+                                skipped++
+                                continue
+                            }
+                            appDatabase.inventoryDao().insertGtins(listOf(g))
+                            existingGtinValues.add(g.gtin)
+                            inserted++
+                        }
+                        appLogger.logInfo("DELTA_SYNC", "ItemGtins restore: $inserted inserted, $skipped skipped (orphan/blank/dup)")
+                    }
+                    tabName == "Vendor_Payments" -> {
+                        val payments = tabRows.map { row ->
+                            com.tillzo.pos.data.local.entity.VendorPaymentEntity(
+                                paymentId = row["payment_id"] as? String ?: java.util.UUID.randomUUID().toString(),
+                                vendorId = row["vendor_id"] as? String ?: "",
+                                vendorName = row["vendor_name"] as? String ?: "",
+                                grnId = row["grn_id"] as? String ?: "",
+                                poId = row["po_id"] as? String ?: "",
+                                type = row["type"] as? String ?: "BILL",
+                                amount = (row["amount"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                paymentMethod = row["payment_method"] as? String ?: "CASH",
+                                paidBy = row["paid_by"] as? String ?: "",
+                                note = row["note"] as? String ?: "",
+                                dueDate = row["due_date"] as? String ?: "",
+                                syncStatus = "synced",
+                                isDeleted = (row["is_deleted"] as? String)?.toIntOrNull() == 1 || (row["isDeleted"] as? String)?.toBoolean() ?: false,
+                                deletedAt = (row["deleted_at"] as? String)?.toLongOrNull(),
+                                posTerminalId = row["pos_terminal_id"] as? String ?: "terminal_1",
+                                createdAt = (row["created_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis(),
+                                updatedAt = (row["updated_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis()
+                            )
+                        }
+                        val pendingPaymentIds = appDatabase.vendorPaymentDao().getUnsyncedPayments().map { it.paymentId }.toSet()
+                        val toInsert = payments.filter { it.paymentId !in pendingPaymentIds }
+                        if (toInsert.isNotEmpty()) {
+                            appDatabase.vendorPaymentDao().insertPayments(toInsert)
+                        }
                     }
                 }
             } catch (e: Exception) {

@@ -2,6 +2,7 @@ package com.tillzo.pos.ui.inventory.module_b
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -52,7 +53,10 @@ fun PODetailScreen(
     val order = po!!
     val dateStr = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(order.createdAt))
     val canSend = order.status == "DRAFT"
-    val canReceive = order.status in listOf("SENT", "PARTIALLY_RECEIVED")
+    // OVERNIGHT-AUDIT FIX (2026-08-24, D7-2): hide Receive when all items fully
+    // received — pehle status SENT par hi button zinda reh jata tha → duplicate GRNs.
+    val canReceive = order.status in listOf("SENT", "PARTIALLY_RECEIVED") &&
+        items.none { it.receivedQty >= it.orderedQty }
 
     Scaffold(
         topBar = {
@@ -125,6 +129,24 @@ fun PODetailScreen(
                         Icon(Icons.Default.Inventory, null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("Receive Goods", fontWeight = FontWeight.Bold)
+                    }
+                }
+                // FIX (2026-08-22, DEF-03): CANCELLED was unreachable — no UI
+                // path ever set it, so a mis-created PO stayed in the list
+                // forever. Cancel is allowed while the PO is not yet received.
+                if (order.status != "RECEIVED" && order.status != "CANCELLED") {
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.updateStatus("CANCELLED")
+                        },
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFF44336)),
+                        border = BorderStroke(1.dp, Color(0xFFF44336)),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.Close, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Cancel PO", fontWeight = FontWeight.Bold)
                     }
                 }
                 if (!canSend && !canReceive) {

@@ -11,9 +11,12 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
 import com.tillzo.pos.data.local.dao.InventoryDao
+import com.tillzo.pos.data.local.dao.KhataEventDao
+import com.tillzo.pos.data.local.entity.KhataEventEntity
 import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import com.tillzo.pos.data.local.dao.ProductBatchDao
 import com.tillzo.pos.data.local.dao.WastageDao
+import com.tillzo.pos.data.local.dao.ReturnsDao // GAP-3 (2026-08-23)
 import com.tillzo.pos.data.local.entity.WastageEntity
 import kotlinx.coroutines.Dispatchers
 import java.text.SimpleDateFormat
@@ -26,6 +29,8 @@ class ReturnsViewModel @Inject constructor(
     private val inventoryDao: InventoryDao,
     private val productBatchDao: ProductBatchDao,
     private val wastageDao: WastageDao,
+    private val khataEventDao: KhataEventDao,
+    private val returnsDao: ReturnsDao, // GAP-3 (2026-08-23)
     private val appSetupPrefs: AppSetupPrefs
 ) : ViewModel() {
 
@@ -43,8 +48,11 @@ class ReturnsViewModel @Inject constructor(
         viewModelScope.launch {
             if (query.isNotBlank()) {
                 val pastSale = saleRepository.getSaleById(query)
-                // If not found by system_row_id, try by invoice ID (QR code content)
-                _foundInvoice.value = pastSale ?: saleRepository.getSaleByInvoiceId(query)
+                // If not found by system_row_id, try by invoice ID (QR code content),
+                // then partial case-insensitive prefix (receipt 8-char ID) — DEF-86
+                _foundInvoice.value = pastSale
+                    ?: saleRepository.getSaleByInvoiceId(query)
+                    ?: saleRepository.getSaleByInvoiceIdPrefix(query.trim())
             } else {
                 _foundInvoice.value = null
             }
@@ -62,6 +70,14 @@ class ReturnsViewModel @Inject constructor(
     fun processFullReturn(reason: String) {
         val originalSale = _foundInvoice.value ?: return
         viewModelScope.launch(Dispatchers.IO) {
+            // DEF-46b FIX (2026-08-23): double-refund guard — same invoice
+            // dobara refund karna ab BLOCK hai (pehle user search karke
+            // unlimited baar refund kar sakta tha; har refund ek nayi
+            // negative-sale row banata tha → revenue double-dipped).
+            if (saleRepository.hasRefundForInvoice(originalSale.invoiceId)) {
+                _returnStatus.value = "Error: This invoice has already been refunded."
+                return@launch
+            }
             val returnInvoiceId = UUID.randomUUID().toString()
             val cashierId = appSetupPrefs.userEmail.ifBlank { "cashier" }
             
@@ -81,7 +97,36 @@ class ReturnsViewModel @Inject constructor(
             )
             
             saleRepository.processCheckout(returnSale)
-            
+
+            // GAP-3 FIX (2026-08-23): Returns sheet tab was vestigial — never
+            // populated. Now every processed return writes one ReturnsEntity
+            // row per returned item → synced to the Returns tab. Condition
+            // mirrors the reason (RESTOCK / DAMAGED); refund method comes from
+            // the ORIGINAL sale's payment method.
+            try {
+                val condition = when {
+                    reason.equals("Restock", ignoreCase = true) -> "RESTOCK"
+                    else -> "DAMAGED"
+                }
+                val refundMethod = originalSale.paymentMethod.ifBlank { "CASH" }
+                originalSale.items.forEach { saleItem ->
+                    returnsDao.insertReturn(
+                        com.tillzo.pos.data.local.entity.ReturnsEntity(
+                            systemRowId = UUID.randomUUID().toString(),
+                            originalInvoiceId = originalSale.invoiceId,
+                            itemId = saleItem.itemId,
+                            qtyReturned = saleItem.quantity,
+                            condition = condition,
+                            refundMethod = refundMethod,
+                            amount = saleItem.total,
+                            posTerminalId = appSetupPrefs.spreadsheetId.take(20).ifBlank { "TERM_1" }
+                        )
+                    )
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ReturnsVM", "Returns ledger insert failed: ${e.message}")
+            }
+
             val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
 
             when {
@@ -97,7 +142,7 @@ class ReturnsViewModel @Inject constructor(
                             if (item.hasBatches) {
                                 val batches = productBatchDao.getAllBatchesForProduct(item.system_row_id)
                                 val activeBatch = batches.filter { it.isActive && !it.isDeleted }
-                                                                 .maxByOrNull { it.createdAt }
+                                                                .maxByOrNull { it.createdAt }
                                 activeBatch?.let { batch ->
                                     productBatchDao.updateBatchStock(
                                         batch.batchId,
@@ -105,15 +150,25 @@ class ReturnsViewModel @Inject constructor(
                                         now
                                     )
                                 }
-                                // Recalculate total stock from all active batches
-                                val total = batches.filter { it.isActive && !it.isDeleted }.sumOf { it.stockQty }
+                                // FIX (2026-08-22, DEF-83): `batches` list upar update se
+                                // PEHLE fetch hui thi — stale stockQty se sum nikalta tha, isliye
+                                // +1 restock ke baad bhi totalStock purani (kam) value par
+                                // overwrite ho jata tha (sale+return ke baad stock 1 unit
+                                // hamesha kam rehta tha). Ab batch update ke BAAD re-fetch
+                                // karke hi total sum karo.
+                                val refreshed = productBatchDao.getAllBatchesForProduct(item.system_row_id)
+                                val total = refreshed.filter { it.isActive && !it.isDeleted }.sumOf { it.stockQty }
                                 inventoryDao.updateTotalStockAndSyncStatus(item.system_row_id, total, now)
                             }
                         }
                     }
                 }
 
-                reason.equals("Damaged", ignoreCase = true) -> {
+                // FIX (2026-08-22, DEF-01): UI sends "Damaged/Wastage" but the
+                // ViewModel checked only "Damaged" — the whole wastage branch
+                // was dead code and damaged returns silently restocked (and
+                // double-counted stock). Accept both labels.
+                reason.equals("Damaged", ignoreCase = true) || reason.equals("Damaged/Wastage", ignoreCase = true) || reason.equals("Wastage", ignoreCase = true) -> {
                     // DAMAGED: log to wastage, do NOT add back to stock
                     originalSale.items.forEach { saleItem ->
                         val item = inventoryDao.getItemById(saleItem.itemId)
@@ -135,6 +190,28 @@ class ReturnsViewModel @Inject constructor(
                 }
             }
             
+            // FIX (2026-08-22, DEF-46): refund was never recorded in the
+            // customer's Khata — a customer who paid cash and then got a
+            // refund saw NO credit on their account, and the khata balance
+            // stayed overstated. Now a JAMA (credit) event is created for
+            // customer-linked sales.
+            if (originalSale.customerId != null) {
+                try {
+                    khataEventDao.insert(
+                        KhataEventEntity(
+                            customer_id = originalSale.customerId,
+                            event_type = "JAMA",
+                            amount = originalSale.total,
+                            note = "Refund of ${originalSale.invoiceId} ($reason)",
+                            reference_sale_id = returnInvoiceId,
+                            pos_terminal_id = appSetupPrefs.spreadsheetId.take(20).ifBlank { "TERM_1" }
+                        )
+                    )
+                } catch (e: Exception) {
+                    android.util.Log.e("ReturnsVM", "Khata refund event failed: ${e.message}")
+                }
+            }
+
             _returnStatus.value = "Refund Processed Successfully."
             _foundInvoice.value = null
             _searchQuery.value = ""

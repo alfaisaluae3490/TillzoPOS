@@ -127,10 +127,23 @@ class CompleteSaleUseCase @Inject constructor(
         try {
             val openSession = tillSessionDao.getOpenSession(posId)
             openSession?.let { session ->
+                // FIX (2026-08-22, DEF-39): cash over-tender change was never
+                // netted — addSaleToSession credited the FULL tendered amount
+                // (e.g. 200 for a 100 sale) to totalCashSales/expectedCash, so
+                // the Z-report "Expected Cash" was overstated by the change on
+                // every over-tender sale. For pure-cash sales the drawer only
+                // keeps (tendered - change) = the sale total. SPLIT payments
+                // carry no change (each method pays its exact portion).
+                val change = if (paymentMethod == "CASH") {
+                    (cashAmount - total).coerceAtLeast(0.0)
+                } else {
+                    0.0
+                }
+                val netCashIn = (cashAmount - change).coerceAtLeast(0.0)
                 tillSessionDao.addSaleToSession(
                     sessionId = session.sessionId,
                     totalAmount = total,
-                    cashIn = cashAmount,
+                    cashIn = netCashIn,
                     cardIn = cardAmount,
                     walletIn = walletAmount,
                     udhaarIn = udhaarAmount,

@@ -19,6 +19,13 @@ data class GrnHeaderEntity(
     val totalItems: Int = 0,
     val totalReceivedQty: Double = 0.0,
     val totalAmount: Double,
+    val paymentStatus: String = "UNPAID",      // PAID | PARTIALLY_PAID | UNPAID
+    val paidAmount: Double = 0.0,
+    val dueBalance: Double = 0.0,
+    val paymentMethod: String = "CREDIT",      // CASH | BANK_TRANSFER | CHEQUE | CARD | CREDIT
+    val paymentDueDate: String = "",           // YYYY-MM-DD
+    val reminderEnabled: Boolean = false,
+    val reminderIntervalDays: Int = 1,
     val syncStatus: String = "pending",
     val isDeleted: Boolean = false,
     val deletedAt: Long? = null,
@@ -44,6 +51,13 @@ data class GrnHeaderEntity(
             "total_items" to totalItems,
             "total_received_qty" to totalReceivedQty,
             "total_amount" to totalAmount,
+            "payment_status" to paymentStatus,
+            "paid_amount" to paidAmount,
+            "due_balance" to dueBalance,
+            "payment_method" to paymentMethod,
+            "payment_due_date" to paymentDueDate,
+            "reminder_enabled" to (if (reminderEnabled) 1 else 0),
+            "reminder_interval_days" to reminderIntervalDays,
             "sync_status" to "synced",
             "is_deleted" to (if (isDeleted) 1 else 0),
             "deleted_at" to (deletedAt ?: ""),

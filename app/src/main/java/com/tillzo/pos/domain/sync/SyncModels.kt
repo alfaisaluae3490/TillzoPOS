@@ -45,5 +45,14 @@ data class AppSettings(
     val minAppVersion: Int,
     val backupSheetUrl: String,
     val shopName: String,
-    val shopPhone: String
+    val shopPhone: String,
+    val businessFolderId: String = "",
+    val businessFolderName: String = "",
+    val grnFolderId: String = "",
+    val grnFolderName: String = "",
+    val countryCode: String = "OTHER",
+    val taxNumber: String = "",
+    val taxLabel: String = "VAT",
+    val defaultTaxRate: Double = 0.0,
+    val taxInclusive: Boolean = true
 )

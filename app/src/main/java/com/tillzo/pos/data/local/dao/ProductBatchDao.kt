@@ -28,6 +28,10 @@ interface ProductBatchDao {
     @Query("SELECT * FROM product_batches WHERE productId = :productId AND batchNumber = :batchNumber AND isDeleted = 0 LIMIT 1")
     suspend fun getBatchByNumber(productId: String, batchNumber: String): ProductBatchEntity?
 
+    // DEF-115 (2026-08-23): ALL batches (incl. inactive/deleted) for backup export
+    @Query("SELECT * FROM product_batches ORDER BY createdAt ASC")
+    suspend fun getAllBatchesForBackup(): List<ProductBatchEntity>
+
     @Query("SELECT * FROM product_batches WHERE syncStatus = 'pending' AND isDeleted = 0")
     suspend fun getPendingBatches(): List<ProductBatchEntity>
 

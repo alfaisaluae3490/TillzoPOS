@@ -4,6 +4,7 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -22,6 +23,8 @@ import com.tillzo.pos.ui.inventory.InventoryModule
 import com.tillzo.pos.ui.store.StoreModule
 import com.tillzo.pos.ui.settings.SettingsModule
 import com.tillzo.pos.ui.security.RootBlockedScreen
+import com.tillzo.pos.ui.security.RbacViewModel
+import com.tillzo.pos.domain.auth.SessionGuardUseCase
 import com.tillzo.pos.ui.till.TillOpenScreen
 import com.tillzo.pos.ui.hardware.HardwareDiagnosticScreen
 import com.tillzo.pos.ui.inventory.options.alerts.StockAlertsScreen
@@ -40,6 +43,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.TextButton
 import androidx.hilt.navigation.compose.hiltViewModel
 
 /**
@@ -125,10 +129,26 @@ fun AppNavHost(
         // M4: Main POS Screen
         composable("home") {
             val homeViewModel: HomeViewModel = hiltViewModel()
-            val posViewModel: PosViewModel = hiltViewModel()
+            // FIX (2026-08-22, GAP-2): PosViewModel is now ACTIVITY-scoped so
+            // the full-screen barcode scanner route can add to the SAME cart.
+            val activity = LocalContext.current as? androidx.activity.ComponentActivity
+            val posViewModel: PosViewModel = if (activity != null) {
+                hiltViewModel(viewModelStoreOwner = activity)
+            } else {
+                hiltViewModel()
+            }
+            // FIX (2026-08-22, DEF-32): RBAC gate — SessionGuardUseCase was
+            // never called anywhere; wire admin-only menu routes through it.
+            val rbacViewModel: RbacViewModel = hiltViewModel()
 
             val homeState by homeViewModel.uiState.collectAsStateWithLifecycle()
             val homeContext = LocalContext.current
+
+            LaunchedEffect(Unit) {
+                rbacViewModel.denied.collect { msg ->
+                    android.widget.Toast.makeText(homeContext, msg, android.widget.Toast.LENGTH_LONG).show()
+                }
+            }
 
             LaunchedEffect(homeState.syncStatus, homeState.syncMessage) {
                 val message = homeState.syncMessage
@@ -163,37 +183,67 @@ fun AppNavHost(
 
             HomeScreen(
                 onOpenMenu = onOpenMenu,
+                onNavigateToAnalytics = { navController.navigate("analytics_screen") },
                 onNavigateToInventory = { navController.navigate("inventory_module") },
                 onNavigateToReceipt = { invoiceId -> navController.navigate("receipt/$invoiceId") },
                 onNavigateToTill = { navController.navigate("till_open") },
+                // FIX (2026-08-22, GAP-2): full-screen barcode scanner route
+                onNavigateToFullScanner = { navController.navigate("barcode_scanner") },
                 viewModel = posViewModel
             )
 
             if (showAdvancedMenu) {
                 AdvancedMenuSheet(
                     onDismiss = onMenuDismiss,
+                    onNavigateToAnalytics = { onMenuDismiss(); navController.navigate("analytics_screen") },
                     onNavigateToInventory = { navController.navigate("inventory_module") },
                     onNavigateToCrm = { navController.navigate("store_module/crm_screen") },
                     onNavigateToReturns = { navController.navigate("store_module/returns_screen") },
                     onNavigateToHistory = { navController.navigate("store_module/history_screen") },
                     onNavigateToZReport = { navController.navigate("store_module/zreport_screen") },
-                    onNavigateToExpense = { navController.navigate("store_module/expense_screen") },
-                    onNavigateToSettings = { navController.navigate("settings_module") },
+                    onNavigateToExpense = {
+                        rbacViewModel.requireAccess(SessionGuardUseCase.MODULE_EXPENSES) {
+                            navController.navigate("store_module/expense_screen")
+                        }
+                    },
+                    onNavigateToSettings = {
+                        rbacViewModel.requireAccess(SessionGuardUseCase.MODULE_SETTINGS) {
+                            navController.navigate("settings_module")
+                        }
+                    },
                     onNavigateToPoList = { navController.navigate("po_list") },
                     onNavigateToGrnList = { navController.navigate("grn_list") },
                     onNavigateToVendors = { onMenuDismiss(); navController.navigate("vendor_management") },
                     onNavigateToStockAdjustment = { onMenuDismiss(); navController.navigate("stock_adjustment") },
                     onNavigateToTill = { onMenuDismiss(); navController.navigate("till_open") },
-                    onNavigateToTimeClock = { onMenuDismiss(); navController.navigate("time_clock") },
                     onNavigateToVerifyQr = { onMenuDismiss(); navController.navigate("verify_qr") },
                     onNavigateToWastage = { onMenuDismiss(); navController.navigate("wastage_log") },
                     onNavigateToStockAlerts = { onMenuDismiss(); navController.navigate("stock_alerts") },
                     onNavigateToHardwareDiagnostics = { onMenuDismiss(); navController.navigate("hardware_diagnostics") },
-                    // FIX (2026-08-06): Admin Dashboard menu item had NO route — dead.
-                    onNavigateToAdmin = { onMenuDismiss(); navController.navigate("admin_dashboard") },
                     onNavigateToSync = {
-                        homeViewModel.forceSync()
-                        onMenuDismiss()
+                        // OVERNIGHT-AUDIT Phase 2d: cooldown guard + confirm dialog
+                        homeViewModel.requestSyncWithCooldown()
+                    }
+                )
+            }
+
+            // OVERNIGHT-AUDIT Phase 2d — 1h cooldown confirm popup (exact copy).
+            val showSyncCooldown by homeViewModel.showSyncCooldownDialog.collectAsState()
+            if (showSyncCooldown) {
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { homeViewModel.dismissSyncCooldownDialog() },
+                    title = { Text("Sync") },
+                    text = { Text(com.tillzo.pos.ui.home.HomeViewModel.COOLDOWN_DIALOG_TEXT) },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            homeViewModel.forceSyncNow()
+                            onMenuDismiss()
+                        }) { Text("Force Sync") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { homeViewModel.dismissSyncCooldownDialog() }) {
+                            Text("Cancel")
+                        }
                     }
                 )
             }
@@ -372,13 +422,6 @@ fun AppNavHost(
             )
         }
 
-        // FIX (2026-08-06): employee time-tracking
-        composable("time_clock") {
-            com.tillzo.pos.ui.store.options.timeclock.PunchClockScreen(
-                onBack = { navController.popBackStack() }
-            )
-        }
-
         // FIX (2026-08-06): receipt QR verification
         composable("verify_qr") {
             com.tillzo.pos.ui.store.options.verifyqr.VerifyQrScreen(
@@ -413,18 +456,37 @@ fun AppNavHost(
             )
         }
 
-        // FIX (2026-08-06): Admin Dashboard + User Management — newly developed
-        // (previously the menu item was dead, no route existed).
-        composable("admin_dashboard") {
-            com.tillzo.pos.ui.security.AdminDashboardScreen(
-                onBack = { navController.popBackStack() },
-                onNavigateToUsers = { navController.navigate("user_management") }
-            )
-        }
-        composable("user_management") {
-            com.tillzo.pos.ui.security.UserManagementScreen(
+        // Business Analytics & Intelligence Dashboard
+        composable("analytics_screen") {
+            com.tillzo.pos.ui.analytics.AnalyticsScreen(
                 onBack = { navController.popBackStack() }
             )
         }
+
+
+        // FIX (2026-08-22, GAP-2): full-screen ML Kit barcode scanner was
+        // ORPHANED — the screen existed but no route referenced it, so the
+        // dedicated scan UX was unreachable. Wired from Home scanner card
+        // ("Full Screen" button). Scanned product → added to cart directly,
+        // then back to POS.
+        composable("barcode_scanner") {
+            // FIX (2026-08-22, GAP-2): activity-scoped PosViewModel — same
+            // instance as the home route, so scanned products land in the
+            // SAME cart (entry-scoped would create a fresh empty cart).
+            val activity = LocalContext.current as? androidx.activity.ComponentActivity
+            val scannerPosViewModel: PosViewModel = if (activity != null) {
+                hiltViewModel(viewModelStoreOwner = activity)
+            } else {
+                hiltViewModel()
+            }
+            com.tillzo.pos.ui.hardware.scanner.BarcodeScannerScreen(
+                onProductScanned = { product ->
+                    scannerPosViewModel.addToCart(product, qty = 1.0)
+                    navController.popBackStack()
+                },
+                onDismiss = { navController.popBackStack() }
+            )
+        }
+
     }
 }

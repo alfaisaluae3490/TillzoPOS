@@ -50,6 +50,14 @@ class SaleRepositoryImpl @Inject constructor(
         return saleDao.getSaleByInvoiceId(invoiceId)?.toDomainModel()
     }
 
+    override suspend fun getSaleByInvoiceIdPrefix(prefix: String): Sale? {
+        return saleDao.getSaleByInvoiceIdPrefix(prefix)?.toDomainModel()
+    }
+
+    override suspend fun hasRefundForInvoice(invoiceId: String): Boolean {
+        return saleDao.countRefundsByInvoice("REFUND_OF_$invoiceId") > 0
+    }
+
     override suspend fun processCheckout(sale: Sale) {
         // Enforces M4.4 Blind Selling saving locally with pending sync
         val entity = sale.toEntity()

@@ -20,13 +20,29 @@ class ManualStockAdjustmentUseCase @Inject constructor(
     ) {
         val product = inventoryRepository.getItemById(systemRowId) ?: return
 
+        // DEF-65 FIX (2026-08-23): negative adjustment with no existing batch
+        // created a NEGATIVE-stock "ADJ-BATCH" row (stockQty = negative change),
+        // and a negative change that would push a batch below zero was allowed —
+        // inventory could go permanently negative/invisible. Guard both cases.
+        if (quantityChange == 0.0) return
+
         val now = System.currentTimeMillis()
         val existingBatch = productBatchDao.getNewestActiveBatch(systemRowId)
 
         if (existingBatch != null) {
             val newQty = existingBatch.stockQty + quantityChange
-            productBatchDao.updateBatchStock(existingBatch.batchId, newQty, now)
+            if (newQty < 0.0) {
+                // Clamp at 0 — never let an adjustment drive stock negative.
+                productBatchDao.updateBatchStock(existingBatch.batchId, 0.0, now)
+            } else {
+                productBatchDao.updateBatchStock(existingBatch.batchId, newQty, now)
+            }
         } else {
+            if (quantityChange < 0.0) {
+                // No batch exists and we'd be removing stock that isn't there —
+                // reject rather than mint a negative batch.
+                return
+            }
             val newBatch = ProductBatchEntity(
                 productId = systemRowId,
                 batchNumber = "ADJ-BATCH",

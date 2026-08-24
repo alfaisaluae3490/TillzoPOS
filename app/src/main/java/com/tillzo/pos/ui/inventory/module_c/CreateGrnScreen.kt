@@ -45,6 +45,13 @@ fun CreateGrnScreen(
     val attachedFileUri by viewModel.attachedFileUri.collectAsState()
     val attachedFileName by viewModel.attachedFileName.collectAsState()
 
+    val paymentOption by viewModel.paymentOption.collectAsState()
+    val paidAmountInput by viewModel.paidAmountInput.collectAsState()
+    val paymentMethod by viewModel.paymentMethod.collectAsState()
+    val paymentDueDate by viewModel.paymentDueDate.collectAsState()
+    val reminderEnabled by viewModel.reminderEnabled.collectAsState()
+    val reminderIntervalDays by viewModel.reminderIntervalDays.collectAsState()
+
     val context = LocalContext.current
     val currencySymbol = remember { AppSetupPrefs(context).currencySymbol.ifBlank { "$" } }
     val filePickerLauncher = rememberLauncherForActivityResult(
@@ -64,6 +71,21 @@ fun CreateGrnScreen(
     var notes by remember { mutableStateOf("") }
     var expandedItemId by remember { mutableStateOf<String?>(null) }
 
+    val totalGrnAmount = remember(items) { items.sumOf { it.totalCost } }
+    val paidAmountVal = when (paymentOption) {
+        "FULL_PAID" -> totalGrnAmount
+        "PARTIAL" -> paidAmountInput.toDoubleOrNull()?.coerceIn(0.0, totalGrnAmount) ?: 0.0
+        else -> 0.0
+    }
+    val dueBalanceVal = (totalGrnAmount - paidAmountVal).coerceAtLeast(0.0)
+
+    fun getFutureDate(days: Int): String {
+        val cal = java.util.Calendar.getInstance()
+        cal.add(java.util.Calendar.DAY_OF_YEAR, days)
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+        return sdf.format(cal.time)
+    }
+
     LaunchedEffect(poId) {
         viewModel.loadPO(poId)
     }
@@ -81,7 +103,7 @@ fun CreateGrnScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Receive Goods") },
+                title = { Text("Receive Goods & AP") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
@@ -105,80 +127,290 @@ fun CreateGrnScreen(
                 CircularProgressIndicator(color = Color(0xFF1E88E5))
             }
         } else {
-            Column(
+            LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
                     .padding(16.dp)
-                    .navigationBarsPadding()
+                    .navigationBarsPadding(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 // Header Info
-                Text("PO: ${po?.poNumber ?: "-"}", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
-                Text("Vendor: ${po?.vendorName ?: "Unknown"}", color = Color.White, style = MaterialTheme.typography.titleMedium)
-                
-                Spacer(modifier = Modifier.height(16.dp))
-
-                OutlinedTextField(
-                    value = notes,
-                    onValueChange = { notes = it },
-                    label = { Text("Delivery Notes") },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFF1E88E5),
-                        unfocusedBorderColor = Color.Gray
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                
-                Spacer(modifier = Modifier.height(16.dp))
-
-                OutlinedButton(
-                    onClick = { filePickerLauncher.launch("*/*") },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF1E88E5))
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (attachedFileName.isNotEmpty()) attachedFileName else "Attach Document")
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF242424)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Text("PO: ${po?.poNumber ?: "-"}", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+                            Text("Vendor: ${po?.vendorName ?: "Unknown"}", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = notes,
+                                onValueChange = { notes = it },
+                                label = { Text("Delivery Notes") },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    focusedBorderColor = Color(0xFF1E88E5),
+                                    unfocusedBorderColor = Color.Gray
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedButton(
+                                onClick = { filePickerLauncher.launch("*/*") },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF1E88E5))
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(if (attachedFileName.isNotEmpty()) attachedFileName else "Attach Document")
+                            }
+                            if (attachedFileUri != null) {
+                                Spacer(Modifier.height(4.dp))
+                                Text("File selected", color = Color(0xFF4CAF50), fontSize = 12.sp)
+                            }
+                        }
+                    }
                 }
-                if (attachedFileUri != null) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "File selected",
-                        color = Color(0xFF4CAF50),
-                        fontSize = 12.sp
+
+                // ── PAYMENT TERMS & CREDIT (AP) CARD ─────────────────────────────
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF2C2518)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Payment Terms (AP)", color = Color(0xFFFFB74D), style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    "Total: $currencySymbol%.2f".format(totalGrnAmount),
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Payment Type Selector (Full / Partial / Credit)
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                val options = listOf(
+                                    "FULL_PAID" to "Paid in Full",
+                                    "PARTIAL" to "Partial Pay",
+                                    "CREDIT" to "100% Credit"
+                                )
+                                options.forEach { (opt, label) ->
+                                    val isSelected = paymentOption == opt
+                                    Button(
+                                        onClick = { viewModel.setPaymentOption(opt) },
+                                        modifier = Modifier.weight(1f),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = if (isSelected) Color(0xFFE65100) else Color(0xFF3E3E3E),
+                                            contentColor = Color.White
+                                        ),
+                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text(label, fontSize = 11.sp, maxLines = 1)
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Partial Payment Amount Input
+                            if (paymentOption == "PARTIAL") {
+                                OutlinedTextField(
+                                    value = paidAmountInput,
+                                    onValueChange = { viewModel.setPaidAmountInput(it) },
+                                    label = { Text("Amount Paid Now ($currencySymbol)") },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = Color.White,
+                                        unfocusedTextColor = Color.White,
+                                        focusedBorderColor = Color(0xFFFFB74D),
+                                        unfocusedBorderColor = Color.Gray
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+
+                            // Payment Method
+                            if (paymentOption != "CREDIT") {
+                                Text("Payment Method", color = Color.Gray, fontSize = 12.sp)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf("CASH", "BANK_TRANSFER", "CHEQUE", "CARD").forEach { method ->
+                                        val isSelected = paymentMethod == method
+                                        FilterChip(
+                                            selected = isSelected,
+                                            onClick = { viewModel.setPaymentMethod(method) },
+                                            label = { Text(method.replace("_", " "), fontSize = 10.sp) },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = Color(0xFF1E88E5),
+                                                selectedLabelColor = Color.White,
+                                                labelColor = Color.LightGray
+                                            )
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(10.dp))
+                            }
+
+                            // If there is Due Balance (Partial or Credit)
+                            if (dueBalanceVal > 0.0) {
+                                Card(
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF3B1E1E)),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text("Pending Due to Vendor:", color = Color(0xFFFF8A80), fontSize = 13.sp)
+                                            Text(
+                                                "$currencySymbol%.2f".format(dueBalanceVal),
+                                                color = Color(0xFFFF5252),
+                                                style = MaterialTheme.typography.titleMedium
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text("Payment Due Date:", color = Color.LightGray, fontSize = 12.sp)
+                                        Spacer(modifier = Modifier.height(4.dp))
+
+                                        OutlinedTextField(
+                                            value = paymentDueDate,
+                                            onValueChange = { viewModel.setPaymentDueDate(it) },
+                                            placeholder = { Text("YYYY-MM-DD (e.g. 2026-09-01)", color = Color.Gray) },
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedTextColor = Color.White,
+                                                unfocusedTextColor = Color.White,
+                                                focusedBorderColor = Color(0xFFFF8A80),
+                                                unfocusedBorderColor = Color.Gray
+                                            ),
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+
+                                        // Quick Date Pills (+7d, +15d, +30d, +60d)
+                                        Row(modifier = Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            listOf(7 to "+7 Days", 15 to "+15 Days", 30 to "+30 Days", 60 to "+60 Days").forEach { (d, label) ->
+                                                val targetDate = getFutureDate(d)
+                                                val isSelected = paymentDueDate == targetDate
+                                                OutlinedButton(
+                                                    onClick = { viewModel.setPaymentDueDate(targetDate) },
+                                                    colors = ButtonDefaults.outlinedButtonColors(
+                                                        containerColor = if (isSelected) Color(0xFFFF5252) else Color.Transparent,
+                                                        contentColor = if (isSelected) Color.White else Color(0xFFFF8A80)
+                                                    ),
+                                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                                    modifier = Modifier.weight(1f)
+                                                ) {
+                                                    Text(label, fontSize = 10.sp)
+                                                }
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Divider(color = Color(0xFF5C2929))
+                                        Spacer(modifier = Modifier.height(8.dp))
+
+                                        // Reminder Switch & Interval
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text("Automated Daily Reminders", color = Color.White, fontSize = 13.sp)
+                                                Text("Loop alarm until balance is 100% paid", color = Color.Gray, fontSize = 11.sp)
+                                            }
+                                            Switch(
+                                                checked = reminderEnabled,
+                                                onCheckedChange = { viewModel.setReminderEnabled(it) },
+                                                colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFFFF5252))
+                                            )
+                                        }
+
+                                        if (reminderEnabled) {
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                listOf(1 to "Daily Loop", 3 to "Every 3 Days", 7 to "Weekly").forEach { (days, text) ->
+                                                    val isSel = reminderIntervalDays == days
+                                                    FilterChip(
+                                                        selected = isSel,
+                                                        onClick = { viewModel.setReminderIntervalDays(days) },
+                                                        label = { Text(text, fontSize = 10.sp) },
+                                                        colors = FilterChipDefaults.filterChipColors(
+                                                            selectedContainerColor = Color(0xFFE65100),
+                                                            selectedLabelColor = Color.White
+                                                            )
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Received Items Header
+                item {
+                    Text("Received Items (${items.size})", style = MaterialTheme.typography.titleMedium, color = Color(0xFF1E88E5))
+                }
+
+                items(items, key = { it.grnItemId }) { item ->
+                    val batches by viewModel.getBatchesForProduct(item.productId)
+                        .collectAsState(initial = emptyList())
+                    GrnItemAccordion(
+                        item = item,
+                        batches = batches,
+                        isExpanded = expandedItemId == item.grnItemId,
+                        onToggle = { 
+                            expandedItemId = if (expandedItemId == item.grnItemId) null else item.grnItemId 
+                        },
+                        onQtyChange = { viewModel.updateItemReceivedQty(item.grnItemId, it) },
+                        onBatchInfoChange = { batch, mfg, exp -> viewModel.updateItemBatchInfo(item.grnItemId, batch, mfg, exp) },
+                        onActionChange = { action, isNew -> viewModel.updateItemInventoryAction(item.grnItemId, action, isNew) },
+                        onCategoryBrandChange = { cat, brand -> viewModel.updateItemCategoryAndBrand(item.grnItemId, cat, brand) },
+                        onSellingPriceChange = { price -> viewModel.updateItemSellingPrice(item.grnItemId, price) },
+                        onBatchSelected = { batchId, batchNumber, mfg, exp ->
+                            viewModel.updateItemBatchSelection(item.grnItemId, batchId, batchNumber, mfg, exp)
+                        }
                     )
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
-                Divider(color = Color.DarkGray)
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text("Received Items (${items.size})", style = MaterialTheme.typography.titleMedium, color = Color(0xFF1E88E5))
-                Spacer(modifier = Modifier.height(8.dp))
-
-                LazyColumn(Modifier.fillMaxSize()) {
-                    items(items, key = { it.grnItemId }) { item ->
-                        val batches by viewModel.getBatchesForProduct(item.productId)
-                            .collectAsState(initial = emptyList())
-                        GrnItemAccordion(
-                            item = item,
-                            batches = batches,
-                            isExpanded = expandedItemId == item.grnItemId,
-                            onToggle = { 
-                                expandedItemId = if (expandedItemId == item.grnItemId) null else item.grnItemId 
-                            },
-                            onQtyChange = { viewModel.updateItemReceivedQty(item.grnItemId, it) },
-                            onBatchInfoChange = { batch, mfg, exp -> viewModel.updateItemBatchInfo(item.grnItemId, batch, mfg, exp) },
-                            onActionChange = { action, isNew -> viewModel.updateItemInventoryAction(item.grnItemId, action, isNew) },
-                            onCategoryBrandChange = { cat, brand -> viewModel.updateItemCategoryAndBrand(item.grnItemId, cat, brand) },
-                            onSellingPriceChange = { price -> viewModel.updateItemSellingPrice(item.grnItemId, price) },
-                            onBatchSelected = { batchId, batchNumber, mfg, exp ->
-                                viewModel.updateItemBatchSelection(item.grnItemId, batchId, batchNumber, mfg, exp)
-                            }
+                // Confirm GRN Button at the bottom
+                item {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = { viewModel.saveAndConfirmGRN(notes) },
+                        enabled = !isLoading && items.isNotEmpty(),
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E88E5)),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text(
+                            if (dueBalanceVal > 0.0) "Confirm GRN & Save AP Bill ($currencySymbol%.2f)".format(totalGrnAmount)
+                            else "Confirm & Receive Goods ($currencySymbol%.2f)".format(totalGrnAmount),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Color.White
                         )
                     }
+                    Spacer(modifier = Modifier.height(24.dp))
                 }
             }
         }

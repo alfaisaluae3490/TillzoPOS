@@ -64,8 +64,10 @@ class VendorUpsertUseCase @Inject constructor(
 
             for (vendor in pendingVendors) {
                 val values = vendor.toSheetRowValues()
-                if (idToRowMap.containsKey(vendor.vendorId)) {
-                    val rowIndex = idToRowMap[vendor.vendorId]!!
+                // OVERNIGHT-AUDIT D0 FIX: safe-call instead of !! — race with concurrent
+                // deletion could null the map entry between containsKey and read.
+                val rowIndex = idToRowMap[vendor.vendorId]
+                if (rowIndex != null) {
                     itemsToUpdate.add(mapOf(
                         "range" to "$TABLE_NAME!A$rowIndex:M$rowIndex",
                         "majorDimension" to "ROWS",

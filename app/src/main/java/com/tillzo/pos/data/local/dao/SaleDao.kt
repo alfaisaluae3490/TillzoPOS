@@ -28,6 +28,23 @@ interface SaleDao {
     @Query("SELECT * FROM Sales WHERE sync_uuid = :invoiceId AND is_deleted = 0")
     suspend fun getSaleByInvoiceId(invoiceId: String): SaleEntity?
 
+    // DEF-86 FIX: partial / case-insensitive invoice lookup — receipt par 8-char
+    // invoice ID dikhta hai; exact-match lookup se manual entry fail ho jati thi.
+    @Query("SELECT * FROM Sales WHERE lower(sync_uuid) LIKE lower(:prefix) || '%' AND is_deleted = 0 ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getSaleByInvoiceIdPrefix(prefix: String): SaleEntity?
+
+    // DEF-46b (2026-08-23): double-refund guard — count existing refund rows
+    // referencing an invoice (REFUND_OF_<invoiceId>_<reason>).
+    @Query("SELECT COUNT(*) FROM Sales WHERE reference_id LIKE :refPrefix || '%' AND is_deleted = 0")
+    suspend fun countRefundsByInvoice(refPrefix: String): Int
+
+    // FIX (2026-08-22, DEF-32): purge corrupt local sales imported from
+    // scattered legacy sheet rows (blank invoice id → empty history entries,
+    // total 0.0). Called after a pull; safe because a real sale ALWAYS has an
+    // invoice id — a row without one is data garbage, not a valid sale.
+    @Query("DELETE FROM Sales WHERE sync_uuid = '' OR sync_uuid IS NULL")
+    suspend fun deleteCorruptSales()
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSale(sale: SaleEntity)
 

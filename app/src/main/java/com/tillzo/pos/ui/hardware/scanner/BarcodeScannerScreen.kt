@@ -116,7 +116,18 @@ fun BarcodeScannerScreen(
         viewModel.startScanning()
     }
 
+    // FIX (2026-08-22, GAP-2): this LaunchedEffect raced the initial
+    // composition — collectAsState()'s FIRST value is Idle (the async StateFlow
+    // collect hasn't seen startScanning() yet), so the effect fired onDismiss()
+    // immediately and the scanner closed the moment it opened. Skip the first
+    // composition; only Idle AFTER scanning started (30s timeout / user stop)
+    // should dismiss.
+    var firstComposition by remember { mutableStateOf(true) }
     LaunchedEffect(scannerState) {
+        if (firstComposition) {
+            firstComposition = false
+            return@LaunchedEffect
+        }
         if (scannerState is ScannerState.Idle) {
             onDismiss()
         }

@@ -122,6 +122,16 @@ class HistoryViewModel @Inject constructor(
                     append("Invoice ID: ${saleForPrint.invoiceId.take(8)}\n")
                     append("Time: ${java.util.Date(saleForPrint.timestamp)}\n")
                     append("--------------------------------\n")
+                    // FIX (2026-08-23, DEF-116): item lines pehle print nahi
+                    // hote the (sirf header). Ab sale.items (items_json se
+                    // parsed, ReprintReceiptUseCase DEF-116 fix) chhapte hain.
+                    saleForPrint.items.forEach { item ->
+                        append("▪ ${item.name}\n")
+                        val qtyStr = if (item.unit in listOf("KG", "GM", "ML")) "%.3f %s".format(item.quantity, item.unit)
+                                      else "${item.quantity.toInt()} ${item.unit}"
+                        append("   $qtyStr × $currencySymbol %.2f = $currencySymbol %.2f\n".format(item.pricePerUnit, item.total))
+                    }
+                    append("--------------------------------\n")
                     append("TOTAL: $currencySymbol ${String.format("%.2f", saleForPrint.total)}\n")
                     append("PAID VIA: ${saleForPrint.paymentMethod}\n")
                     if (saleForPrint.total < 0) {

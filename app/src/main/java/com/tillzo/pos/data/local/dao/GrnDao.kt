@@ -35,14 +35,22 @@ interface GrnDao {
     @Query("UPDATE grn_headers SET status = :status, updatedAt = :time, syncStatus = 'pending' WHERE grnId = :grnId")
     suspend fun updateGrnStatus(grnId: String, status: String, time: Long)
 
-    @Query("SELECT COUNT(*) FROM grn_headers")
-    suspend fun getTotalGrnCount(): Int
+    // FIX (2026-08-23, DEF-61): MAX-based sequence instead of COUNT(*)+1.
+    // COUNT(*) includes soft-deleted rows → after a delete the next number could
+    // collide with an existing one; read-then-insert also raced. MAX of the
+    // numeric suffix +1 gives the true next sequence.
+    @Query("SELECT COALESCE(MAX(CAST(SUBSTR(grnNumber, -4) AS INTEGER)), 0) + 1 FROM grn_headers")
+    suspend fun getNextGrnSequence(): Int
 
     @Query("SELECT * FROM grn_headers WHERE syncStatus = 'pending' AND isDeleted = 0")
     suspend fun getPendingGrns(): List<GrnHeaderEntity>
 
     @Query("SELECT * FROM grn_items WHERE syncStatus = 'pending'")
     suspend fun getPendingGrnItems(): List<GrnItemEntity>
+
+    // DEF-115 (2026-08-23): ALL GRN items for backup export
+    @Query("SELECT * FROM grn_items ORDER BY createdAt ASC")
+    suspend fun getAllGrnItemsForBackup(): List<GrnItemEntity>
 
     @Query("UPDATE grn_headers SET syncStatus = 'synced', updatedAt = :time WHERE grnId = :id")
     suspend fun markGrnSynced(id: String, time: Long)
@@ -55,4 +63,13 @@ interface GrnDao {
 
     @Query("UPDATE grn_items SET batchId = :batchId WHERE grnItemId = :grnItemId")
     suspend fun updateGrnItemBatchId(grnItemId: String, batchId: String)
+
+    @Query("UPDATE grn_headers SET paidAmount = :paid, dueBalance = :due, paymentStatus = :status, updatedAt = :time, syncStatus = 'pending' WHERE grnId = :grnId")
+    suspend fun updateGrnPayment(grnId: String, paid: Double, due: Double, status: String, time: Long = System.currentTimeMillis())
+
+    @Query("SELECT * FROM grn_headers WHERE isDeleted = 0 AND dueBalance > 0 AND paymentDueDate != '' ORDER BY paymentDueDate ASC")
+    suspend fun getUnpaidGrnsWithDueDate(): List<GrnHeaderEntity>
+
+    @Query("SELECT * FROM grn_headers WHERE isDeleted = 0 AND vendorId = :vendorId ORDER BY createdAt DESC")
+    fun getGrnsForVendor(vendorId: String): Flow<List<GrnHeaderEntity>>
 }

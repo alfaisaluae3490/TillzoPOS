@@ -57,6 +57,7 @@ class SyncOrchestrator @Inject constructor(
         try {
             scheduleSyncWorkers()
             scheduleExpiryCheckWorker()
+            scheduleVendorPaymentReminderWorker()
             scheduleMonthlyShardWorker()
             scheduleNightlyBackupWorker()
             scheduleAutoLocalBackupWorker()
@@ -150,6 +151,18 @@ class SyncOrchestrator @Inject constructor(
             .build()
         workManager.enqueueUniquePeriodicWork(
             ExpiryCheckWorker.WORK_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            request
+        )
+    }
+
+    // ── VendorPaymentReminderWorker — Daily AP payment reminders (Vendor Credit) ──
+    private fun scheduleVendorPaymentReminderWorker() {
+        val request = PeriodicWorkRequestBuilder<com.tillzo.pos.data.sync.options.worker.VendorPaymentReminderWorker>(1, TimeUnit.DAYS)
+            .setInitialDelay(calculateDelayToMidnight(), TimeUnit.MILLISECONDS)
+            .build()
+        workManager.enqueueUniquePeriodicWork(
+            com.tillzo.pos.data.sync.options.worker.VendorPaymentReminderWorker.WORK_NAME,
             ExistingPeriodicWorkPolicy.KEEP,
             request
         )

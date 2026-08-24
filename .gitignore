@@ -35,3 +35,18 @@ client_secret_*.json
 
 # Binary packages
 *.apk
+
+# Knowledge graph cache
+graphify-out/
+
+# UI Automator test dumps & scratch files in root
+/ui*.xml
+/v*.xml
+/uw*.xml
+/uir*.xml
+/uis*.xml
+/uiv*.xml
+/s*.png
+/sc*.png
+/*.xlsx
+/*.csv

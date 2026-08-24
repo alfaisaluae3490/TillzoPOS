@@ -41,9 +41,25 @@ class SheetsRepository @Inject constructor(
             return SheetSetupResult(success = true, spreadsheetId = spreadsheetId)
         }
 
+        return createNewSpreadsheet(shopName)
+    }
+
+    /**
+     * DEF-53 FIX (2026-08-23): creates a FULL workspace (canonical tab list +
+     * headers + Settings seed) WITHOUT the already-provisioned early-return,
+     * so "Create New Sheet" from Settings (and any future caller) produces a
+     * sheet identical to onboarding. Previously SettingsViewModel built its
+     * own 19-tab list missing Product_Units/Stock_Adjustments/Till_Sessions/
+     * Time_Clock/ItemGtins/Barcode tabs AND wrote no headers — sync silently
+     * broke for those tables on Settings-created sheets.
+     */
+    suspend fun createNewSpreadsheet(shopName: String): SheetSetupResult {
         val curTab = currentSalesTab()
 
         // Blueprint M2.1 tabs — including SYS_DB_DO_NOT_TOUCH (hidden system tab)
+        // FIX (2026-08-22, DEF-53/DEF-60): Time_Clock aur Sales_* tabs missing
+        // the — naye workspace par Time Clock punches aur monthly sales kabhi
+        // sync nahi hote the. Ab sab active tables included.
         val sheetDefs = listOf(
             curTab, "Inventory", "Customers", "Khata_Events",
             "Expenses", "Categories", "Returns", "Wastage_Ledger", "Users_Permissions",
@@ -53,6 +69,9 @@ class SheetsRepository @Inject constructor(
             "Product_Units",
             "Till_Sessions",
             "Stock_Adjustments",
+            // DEF-92 FIX (2026-08-23): naye workspace par bhi ItemGtins tab ho
+            "ItemGtins",
+            "Vendor_Payments",
             "BarcodeGeneralConfigs", "BarcodeFieldConfigs",
             "Settings", "Sync_Log", "Dashboard", "SYS_DB_DO_NOT_TOUCH"
         ).mapIndexed { idx, title ->
@@ -82,7 +101,12 @@ class SheetsRepository @Inject constructor(
         val initialSettings = listOf(
             listOf("last_updated_timestamp", "0"),
             listOf("min_app_version", "1"),
-            listOf("shop_name", shopName)
+            listOf("shop_name", shopName),
+            listOf("country_code", appSetupPrefs.countryCode),
+            listOf("tax_number", appSetupPrefs.taxNumber),
+            listOf("tax_label", appSetupPrefs.taxLabel),
+            listOf("default_tax_rate", appSetupPrefs.defaultTaxRate.toString()),
+            listOf("tax_inclusive", appSetupPrefs.taxInclusive.toString())
         )
         dataSource.appendRows("Settings!A:B", initialSettings)
 
@@ -149,30 +173,49 @@ class SheetsRepository @Inject constructor(
             "Inventory", "Customers", "Khata_Events", "Expenses", "Returns", "Users_Permissions",
             "Categories", "Product_Units", "Till_Sessions", "Vendors", "Product_Batches",
             "Purchase_Orders", "PO_Items", "GRN_Headers", "GRN_Items", "Wastage_Ledger", "Stock_Adjustments",
-            "BarcodeGeneralConfigs", "BarcodeFieldConfigs"
+            "BarcodeGeneralConfigs", "BarcodeFieldConfigs",
+            // DEF-92 FIX (2026-08-23): ItemGtins tab fetch (restore side)
+            "ItemGtins",
+            "Vendor_Payments"
         )
         
         val tabs = salesTabs + standardTabs
+        val ranges = tabs.map { "$it!A:ZZ" }
+        val batchResults = dataSource.batchReadRanges(ranges)
 
         for (tab in tabs) {
-            val raw = dataSource.readRange("$tab!A:ZZ")
-            if (raw.size < 2) continue
+            val raw = batchResults[tab] ?: batchResults["$tab!A:ZZ"] ?: emptyList()
+            if (raw.isEmpty()) continue
 
-            val rawHeaders = raw[0].map { it.toString().trim() }
-            val headers = rawHeaders.map { it.lowercase() }
+            val rawHeaders = raw[0].map { it.trim() }
+
+            // FIX (2026-08-22, DEF-34): monthly Sales_MMM_YYYY shards (created
+            // via MonthlyShardWorker.createTab / first-sale appends) have NO
+            // header row — row 1 is already data. Column-name mapping then
+            // produced garbage on restore (empty invoice_id, 0.00 totals,
+            // now-timestamps). Detect header-less tabs against the canonical
+            // SheetColumns order and fall back to POSITIONAL mapping.
+            val canonicalCols = canonicalColumnsFor(tab)
+            val hasHeaderRow = canonicalCols.isEmpty() || rawHeaders.any { h ->
+                canonicalCols.any { it.equals(h, ignoreCase = true) }
+            }
+            val effectiveHeaders = if (hasHeaderRow) rawHeaders else canonicalCols
+            val dataStartRow = if (hasHeaderRow) 1 else 0
+
+            val headers = effectiveHeaders.map { it.lowercase() }
             val tsIndex = headers.indexOfFirst {
                 it == "updated_at" || it == "updatedat" || it == "last_updated" ||
                 it == "timestamp" || it == "created_at" || it == "createdat" ||
                 it.contains("updated") || it.contains("timestamp")
             }
 
-            for (i in 1 until raw.size) {
+            for (i in dataStartRow until raw.size) {
                 val row    = raw[i]
                 val rowTs  = if (tsIndex >= 0 && tsIndex < row.size)
-                    row[tsIndex].toLongOrNull() ?: 0L else 0L
+                    parseTimestampCell(row[tsIndex]) else 0L
                 if (lastTimestamp == 0L || rowTs > lastTimestamp) {
                     val obj = mutableMapOf<String, Any>("_sheet" to tab)
-                    rawHeaders.forEachIndexed { idx, origH ->
+                    effectiveHeaders.forEachIndexed { idx, origH ->
                         if (idx < row.size) {
                             val h = origH.lowercase()
                             obj[h] = row[idx]
@@ -191,20 +234,107 @@ class SheetsRepository @Inject constructor(
         return DeltaResult(rows = allRows)
     }
 
+    /** Canonical positional column order per tab (SheetColumns) — used as the
+     *  header fallback for header-less tabs (DEF-34). Empty list = unknown tab
+     *  → keep the legacy header-row-only behavior. */
+    private fun canonicalColumnsFor(tab: String): List<String> {
+        return when {
+            tab.startsWith("Sales_") -> com.tillzo.pos.utils.SheetColumns.SALES
+            tab == "Inventory" -> com.tillzo.pos.utils.SheetColumns.INVENTORY
+            tab == "Customers" -> com.tillzo.pos.utils.SheetColumns.CUSTOMERS
+            tab == "Khata_Events" -> com.tillzo.pos.utils.SheetColumns.KHATA_EVENTS
+            tab == "Expenses" -> com.tillzo.pos.utils.SheetColumns.EXPENSES
+            tab == "Categories" -> com.tillzo.pos.utils.SheetColumns.CATEGORIES
+            tab == "Users_Permissions" -> com.tillzo.pos.utils.SheetColumns.USERS
+            tab == "Purchase_Orders" -> com.tillzo.pos.utils.SheetColumns.PURCHASE_ORDERS
+            tab == "PO_Items" -> com.tillzo.pos.utils.SheetColumns.PO_ITEMS
+            tab == "GRN_Headers" -> com.tillzo.pos.utils.SheetColumns.GRN_HEADERS
+            tab == "GRN_Items" -> com.tillzo.pos.utils.SheetColumns.GRN_ITEMS
+            tab == "Vendors" -> com.tillzo.pos.utils.SheetColumns.VENDORS
+            tab == "Product_Batches" -> com.tillzo.pos.utils.SheetColumns.PRODUCT_BATCHES
+            tab == "Product_Units" -> com.tillzo.pos.utils.SheetColumns.PRODUCT_UNITS
+            tab == "Till_Sessions" -> com.tillzo.pos.utils.SheetColumns.TILL_SESSIONS
+            tab == "ItemGtins" -> com.tillzo.pos.utils.SheetColumns.ITEM_GTINS
+            tab == "Vendor_Payments" -> com.tillzo.pos.utils.SheetColumns.VENDOR_PAYMENTS
+            tab == "Wastage_Ledger" -> com.tillzo.pos.utils.SheetColumns.WASTAGE_LEDGER
+            tab == "Stock_Adjustments" -> com.tillzo.pos.utils.SheetColumns.STOCK_ADJUSTMENTS
+            tab == "Returns" -> com.tillzo.pos.utils.SheetColumns.RETURNS
+            else -> emptyList()
+        }
+    }
+
     suspend fun getSettings(): AppSettings {
         val rows = dataSource.readRange("Settings!A:B")
         val map  = mutableMapOf<String, String>()
-        for (i in 1 until rows.size) {
+        // FIX (2026-08-22, DEF-33): the Settings tab can accumulate DUPLICATE
+        // last_updated_timestamp rows (old app versions appended instead of
+        // updating; observed two rows: 1787415467149 and 1787331352085).
+        // TWO bugs here: (1) the loop started at i=1, silently SKIPPING row 1 —
+        // exactly where updateLastUpdatedTimestamp() writes the fresh value —
+        // so the reader ALWAYS saw a stale/duplicate row below it; (2) with
+        // duplicates, map[row[0]] = row[1] made the LAST row win while the
+        // writer updated the FIRST row → reader and writer permanently
+        // disagreed → delta poll ALWAYS skipped ("No remote updates") →
+        // multi-device sync silently dead.
+        // Fix: read from row 0 (Settings has no header) and take the MAX
+        // timestamp across duplicate keys.
+        for (i in 0 until rows.size) {
             val row = rows[i]
-            if (row.size >= 2) map[row[0]] = row[1]
+            if (row.size >= 2 && row[0] == "last_updated_timestamp") {
+                val ts = parseTimestampCell(row[1])
+                if (ts > 0L) {
+                    val current = parseTimestampCell(map["last_updated_timestamp"])
+                    if (ts > current) map["last_updated_timestamp"] = ts.toString()
+                }
+            } else if (row.size >= 2) {
+                map[row[0]] = row[1]
+            }
         }
         return AppSettings(
-            lastUpdatedTimestamp = map["last_updated_timestamp"]?.toLongOrNull() ?: 0L,
+            lastUpdatedTimestamp = parseTimestampCell(map["last_updated_timestamp"]),
             minAppVersion        = map["min_app_version"]?.toIntOrNull() ?: 1,
             backupSheetUrl       = map["backup_sheet_url"] ?: "",
             shopName             = map["shop_name"] ?: "",
-            shopPhone            = map["shop_phone"] ?: ""
+            shopPhone            = map["shop_phone"] ?: "",
+            businessFolderId     = map["business_folder_id"] ?: map["grn_folder_id"] ?: "",
+            businessFolderName   = map["business_folder_name"] ?: map["grn_folder_name"] ?: "",
+            grnFolderId          = map["grn_folder_id"] ?: map["business_folder_id"] ?: "",
+            grnFolderName        = map["grn_folder_name"] ?: map["business_folder_name"] ?: "",
+            countryCode          = map["country_code"] ?: "OTHER",
+            taxNumber            = map["tax_number"] ?: "",
+            taxLabel             = map["tax_label"] ?: "VAT",
+            defaultTaxRate       = map["default_tax_rate"]?.toDoubleOrNull() ?: 0.0,
+            taxInclusive         = map["tax_inclusive"]?.toBooleanStrictOrNull() ?: true
         )
+    }
+
+    /**
+     * Updates or appends a key-value setting in the Settings tab (Settings!A:B).
+     */
+    suspend fun updateSetting(key: String, value: String): Boolean {
+        return try {
+            val rows = dataSource.readRange("Settings!A:B")
+            var rowIndex = -1
+            for (i in 0 until rows.size) {
+                if (rows[i].getOrNull(0) == key) {
+                    rowIndex = i + 1
+                    break
+                }
+            }
+            val values = listOf(listOf(key, value))
+            if (rowIndex != -1) {
+                dataSource.batchWrite(listOf(mapOf(
+                    "range" to "Settings!A$rowIndex:B$rowIndex",
+                    "majorDimension" to "ROWS",
+                    "values" to values
+                )))
+            } else {
+                dataSource.appendRows("Settings!A:B", values).success
+            }
+        } catch (e: Exception) {
+            appLogger.logWarn("SheetsRepository", "Failed to update setting $key: ${e.message}")
+            false
+        }
     }
 
     /**
@@ -212,24 +342,7 @@ class SheetsRepository @Inject constructor(
      * Called by SyncWorker after a successful full sync cycle.
      */
     suspend fun updateLastUpdatedTimestamp(timestamp: Long): Boolean {
-        val rows = dataSource.readRange("Settings!A:B")
-        var rowIndex = -1
-        for (i in 0 until rows.size) {
-            if (rows[i].getOrNull(0) == "last_updated_timestamp") {
-                rowIndex = i + 1
-                break
-            }
-        }
-        val values = listOf(listOf("last_updated_timestamp", timestamp.toString()))
-        return if (rowIndex != -1) {
-            dataSource.batchWrite(listOf(mapOf(
-                "range" to "Settings!A$rowIndex:B$rowIndex",
-                "majorDimension" to "ROWS",
-                "values" to values
-            )))
-        } else {
-            dataSource.appendRows("Settings!A:B", values).success
-        }
+        return updateSetting("last_updated_timestamp", timestamp.toString())
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -279,6 +392,21 @@ class SheetsRepository @Inject constructor(
         } catch (e: Exception) { 0L }
     }
 
+    /**
+     * DEF-63 FIX (2026-08-23): Google Sheets large numbers ko exponent
+     * notation (e.g. "1.75234E12") mein render kar sakta hai — toLongOrNull()
+     * par null → 0 → row delta sync se hamesha ke liye EXCLUDE ho jati thi
+     * (timestamp 0 kabhi lastTimestamp se badi nahi hoti). Robust parse:
+     * plain long → decimal/exponent double → fallback 0.
+     */
+    private fun parseTimestampCell(cell: Any?): Long {
+        if (cell == null) return 0L
+        val s = cell.toString().trim()
+        if (s.isEmpty()) return 0L
+        s.toLongOrNull()?.let { return it }
+        return s.toDoubleOrNull()?.toLong() ?: 0L
+    }
+
     private fun currentSalesTab(): String {
         val months = arrayOf("Jan","Feb","Mar","Apr","May","Jun",
                              "Jul","Aug","Sep","Oct","Nov","Dec")
@@ -311,7 +439,8 @@ class SheetsRepository @Inject constructor(
         "Product_Batches" to com.tillzo.pos.utils.SheetColumns.PRODUCT_BATCHES,
         "Product_Units" to com.tillzo.pos.utils.SheetColumns.PRODUCT_UNITS,
         "Till_Sessions" to com.tillzo.pos.utils.SheetColumns.TILL_SESSIONS,
-        "Time_Clock" to com.tillzo.pos.utils.SheetColumns.TIME_CLOCK,
+        "ItemGtins" to com.tillzo.pos.utils.SheetColumns.ITEM_GTINS,
+        "Vendor_Payments" to com.tillzo.pos.utils.SheetColumns.VENDOR_PAYMENTS,
         "Settings" to listOf("setting_key","setting_value"),
         "Sync_Log" to listOf("sync_uuid","pos_id","status","timestamp","error_msg"),
         "SYS_DB_DO_NOT_TOUCH" to listOf("schema_version","last_verified","integrity_check")

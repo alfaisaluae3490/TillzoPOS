@@ -33,9 +33,11 @@ class GrnRepositoryImpl @Inject constructor(
     }
 
     override suspend fun generateGrnNumber(): String {
-        val count = grnDao.getTotalGrnCount() + 1
+        // FIX (2026-08-23, DEF-61): MAX-based sequence — COUNT(*)+1 raced and
+        // reused numbers after soft-deletes. getNextGrnSequence is atomic.
+        val seq = grnDao.getNextGrnSequence()
         val year = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
-        return "GRN-$year-${count.toString().padStart(4, '0')}"
+        return "GRN-$year-${seq.toString().padStart(4, '0')}"
     }
 
     override suspend fun updateGrnStatus(grnId: String, status: String) =

@@ -37,6 +37,7 @@ class SheetPickerViewModel @Inject constructor(
             val isSearching: Boolean = false
         ) : UiState()
         object CreatingNewSheet : UiState()
+        data class CreationSuccess(val sheetName: String, val folderName: String) : UiState()
         data class Error(val msg: String) : UiState()
     }
 
@@ -61,12 +62,6 @@ class SheetPickerViewModel @Inject constructor(
             try {
                 val sheets = driveSearchHelper.searchPosSheets("")
                 _uiState.emit(UiState.Ready(sheets, isSearching = false))
-                // FIX (2026-08-07): exactly ONE business found on this Gmail →
-                // auto-select it (simple login + cloud restore). User ko manual
-                // pick ki zaroorat nahi — existing business wapas mil gaya.
-                if (sheets.size == 1) {
-                    selectSheet(sheets.first())
-                }
             } catch (e: Exception) {
                 _uiState.emit(UiState.Ready(emptyList(), isSearching = false))
             }
@@ -77,7 +72,7 @@ class SheetPickerViewModel @Inject constructor(
         selectedSheetId = sheet.spreadsheetId
         viewModelScope.launch(Dispatchers.IO) {
             appSetupPrefs.saveProvisioningResult(sheet.spreadsheetId)
-            ensureBusinessFolder()
+            resolveAndLinkBusinessFolder(sheet.spreadsheetId, sheet.name)
             // FIX (2026-08-06): navigate IMMEDIATELY — do not wait for the
             // restore worker. RestoreWorker (scheduleRestoreWorker path) never
             // sets RestoreState.Success (it only logs + upserts), so any
@@ -105,9 +100,32 @@ class SheetPickerViewModel @Inject constructor(
 
                 if (result.success) {
                     val newId = result.spreadsheetId
-                    sheetsRemoteDataSource.tagSheetAsPosSheet(newId, shopName)
                     appSetupPrefs.saveProvisioningResult(newId)
-                    ensureBusinessFolder()
+
+                    // Pair existing or create new business/GRN folder
+                    val existing = driveSearchHelper.findBusinessFolderForSheet(newId, shopName)
+                    val folderId = if (existing != null) {
+                        existing.spreadsheetId
+                    } else {
+                        driveSearchHelper.createFolder("$shopName Folder", newId, shopName)
+                    }
+                    val folderName = existing?.name ?: "$shopName Folder"
+
+                    if (!folderId.isNullOrBlank()) {
+                        appSetupPrefs.saveBusinessFolder(folderId)
+                        appSetupPrefs.saveGrnFolder(folderId, folderName)
+                        driveSearchHelper.tagFolder(folderId, newId, shopName)
+                        sheetsRemoteDataSource.tagSheetAsPosSheet(newId, shopName, folderId)
+                        sheetsRepository.updateSetting("business_folder_id", folderId)
+                        sheetsRepository.updateSetting("business_folder_name", folderName)
+                        sheetsRepository.updateSetting("grn_folder_id", folderId)
+                        sheetsRepository.updateSetting("grn_folder_name", folderName)
+                    } else {
+                        sheetsRemoteDataSource.tagSheetAsPosSheet(newId, shopName)
+                    }
+
+                    _uiState.emit(UiState.CreationSuccess("$shopName — TillzoPOS", folderName))
+                    kotlinx.coroutines.delay(1200)
                     withContext(Dispatchers.Main) { onDone(newId) }
                 } else {
                     _uiState.emit(UiState.Error("Failed: ${result.error}"))
@@ -132,21 +150,65 @@ class SheetPickerViewModel @Inject constructor(
     }
 
     /**
-     * FIX (2026-08-06): Faisal's requirement — a Google Drive folder named
-     * after the business, created once and permanently remembered. Also reused
-     * as the GRN/backup folder. No-op if already created.
+     * Resolves the matching Drive folder for the chosen Sheet on reinstall or multi-device login.
+     * Prevents duplicate folder creation by checking:
+     * 1. Sheet Settings tab (remote cloud source of truth)
+     * 2. Google Drive appProperties tag (spreadsheetId tag)
+     * 3. Matching folder name on Drive
+     * Fallback only creates a new folder if no existing folder exists anywhere.
      */
-    private suspend fun ensureBusinessFolder() {
+    private suspend fun resolveAndLinkBusinessFolder(spreadsheetId: String, sheetTitle: String) {
         try {
-            if (appSetupPrefs.businessFolderId.isNotBlank()) return
-            val folderName = appSetupPrefs.businessName.ifBlank { "TillzoPOS Business" }
-            val folderId = driveSearchHelper.createFolder(folderName)
-            if (!folderId.isNullOrBlank()) {
+            val cleanShopName = sheetTitle
+                .substringBefore(" —")
+                .substringBefore(" -")
+                .trim()
+                .ifBlank { appSetupPrefs.businessName.ifBlank { "TillzoPOS Business" } }
+
+            // 1. Try reading folder from Sheet's Settings tab
+            val remoteSettings = try { sheetsRepository.getSettings() } catch (e: Exception) { null }
+            val remoteFolderId = remoteSettings?.businessFolderId?.ifBlank { remoteSettings.grnFolderId } ?: ""
+            val remoteFolderName = remoteSettings?.businessFolderName?.ifBlank { remoteSettings.grnFolderName } ?: ""
+
+            if (remoteFolderId.isNotBlank()) {
+                val exists = driveSearchHelper.verifyFolderExists(remoteFolderId)
+                if (exists) {
+                    val finalName = remoteFolderName.ifBlank { "$cleanShopName Folder" }
+                    appSetupPrefs.saveBusinessFolder(remoteFolderId)
+                    appSetupPrefs.saveGrnFolder(remoteFolderId, finalName)
+                    driveSearchHelper.tagFolder(remoteFolderId, spreadsheetId, cleanShopName)
+                    return
+                }
+            }
+
+            // 2. Search Drive for existing folder tagged or named after this business/sheet
+            val existingFolder = driveSearchHelper.findBusinessFolderForSheet(spreadsheetId, cleanShopName)
+            if (existingFolder != null) {
+                val folderId = existingFolder.spreadsheetId
+                val folderName = existingFolder.name
                 appSetupPrefs.saveBusinessFolder(folderId)
                 appSetupPrefs.saveGrnFolder(folderId, folderName)
+                driveSearchHelper.tagFolder(folderId, spreadsheetId, cleanShopName)
+                sheetsRepository.updateSetting("business_folder_id", folderId)
+                sheetsRepository.updateSetting("business_folder_name", folderName)
+                sheetsRepository.updateSetting("grn_folder_id", folderId)
+                sheetsRepository.updateSetting("grn_folder_name", folderName)
+                return
+            }
+
+            // 3. Fallback: Create only if absolutely no folder exists
+            val newFolderName = "$cleanShopName Folder"
+            val newFolderId = driveSearchHelper.createFolder(newFolderName, spreadsheetId, cleanShopName)
+            if (!newFolderId.isNullOrBlank()) {
+                appSetupPrefs.saveBusinessFolder(newFolderId)
+                appSetupPrefs.saveGrnFolder(newFolderId, newFolderName)
+                sheetsRepository.updateSetting("business_folder_id", newFolderId)
+                sheetsRepository.updateSetting("business_folder_name", newFolderName)
+                sheetsRepository.updateSetting("grn_folder_id", newFolderId)
+                sheetsRepository.updateSetting("grn_folder_name", newFolderName)
             }
         } catch (e: Exception) {
-            // Non-fatal — folder can be created later from Settings
+            // Non-fatal — folder can be configured later from Settings
         }
     }
 }

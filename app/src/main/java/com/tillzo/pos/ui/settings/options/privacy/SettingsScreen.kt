@@ -17,6 +17,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CloudUpload
@@ -36,6 +39,7 @@ import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -64,6 +68,7 @@ fun SettingsScreen(
     onNavigateToBilling: () -> Unit,
     onNavigateToSystemLogs: () -> Unit = {},
     onNavigateToDataViewer: () -> Unit = {},
+    onNavigateToPrinterSettings: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -78,6 +83,26 @@ fun SettingsScreen(
     val isSearchingFolders by viewModel.isSearchingFolders.collectAsStateWithLifecycle()
     val backupProgress by viewModel.backupProgress.collectAsStateWithLifecycle()
     val blockNegativeStock by viewModel.blockNegativeStock.collectAsStateWithLifecycle()
+    val countryCode by viewModel.countryCode.collectAsStateWithLifecycle()
+    val taxNumber by viewModel.taxNumber.collectAsStateWithLifecycle()
+    val taxLabel by viewModel.taxLabel.collectAsStateWithLifecycle()
+    val defaultTaxRate by viewModel.defaultTaxRate.collectAsStateWithLifecycle()
+    val taxInclusive by viewModel.taxInclusive.collectAsStateWithLifecycle()
+    val enableZatcaQr by viewModel.enableZatcaQr.collectAsStateWithLifecycle()
+
+    var showCountryDialog by remember { mutableStateOf(false) }
+    var showTaxEditDialog by remember { mutableStateOf(false) }
+
+    // DEF-31 FIX: Drive/folder/sheet failures ab snackbar se dikhte hain
+    val settingsError by viewModel.settingsError.collectAsStateWithLifecycle()
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(settingsError) {
+        settingsError?.let { msg ->
+            snackbarHostState.showSnackbar(msg)
+            viewModel.clearSettingsError()
+        }
+    }
 
     val backupLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/zip")
@@ -90,6 +115,8 @@ fun SettingsScreen(
     var showGrnFolderDialog by remember { mutableStateOf(false) }
     var grnNewFolderName by remember { mutableStateOf("") }
     var showCreateGrnFolder by remember { mutableStateOf(false) }
+    var manualFolderIdInput by remember { mutableStateOf("") }
+    var showManualFolderEntry by remember { mutableStateOf(false) }
     var newPinInput by remember { mutableStateOf("") }
     var currentPinInput by remember { mutableStateOf("") }
     var changeNewPinInput by remember { mutableStateOf("") }
@@ -98,8 +125,11 @@ fun SettingsScreen(
     var showSheetSelectionDialog by remember { mutableStateOf(false) }
     var manualSheetIdInput by remember { mutableStateOf("") }
     var showManualEntry by remember { mutableStateOf(false) }
+    var showCreateSheetForm by remember { mutableStateOf(false) }
+    var newSheetShopName by remember { mutableStateOf("") }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Settings & Privacy") },
@@ -216,6 +246,37 @@ fun SettingsScreen(
                 }
             }
 
+            // OVERNIGHT-AUDIT Phase 1c (2026-08-23): screen-capture blocking.
+            // FLAG_SECURE on every activity when ON — screenshots, screen recording
+            // and recents thumbnail all blocked (bank-level security).
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                shape = RoundedCornerShape(12.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                val blockCapture by viewModel.blockScreenCapture.collectAsStateWithLifecycle()
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.VisibilityOff, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Block Screenshots & Recording", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                        Text(
+                            "Bank-level: blocks screenshots, screen recording and recents preview",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = blockCapture,
+                        onCheckedChange = { viewModel.setBlockScreenCapture(it) }
+                    )
+                }
+            }
+
             // FIX (2026-08-06): multi-currency selector (industry-standard feature)
             Card(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -256,32 +317,112 @@ fun SettingsScreen(
                 }
             }
 
-            // FIX (2026-08-06): tax-inclusive toggle (industry-standard)
+            // ── Global Tax & Regional Compliance Section ────────────────────
+            val currentPreset = com.tillzo.pos.utils.TaxUtils.getPreset(countryCode)
             Card(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                 shape = RoundedCornerShape(12.dp),
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
-                val taxInclusive by viewModel.taxInclusive.collectAsState()
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Calculate, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Tax-Inclusive Prices", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-                        Text(
-                            "On: prices already include tax (total = subtotal). Off: tax added on top.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Calculate, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Tax & Regional Compliance", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                            Text("Configure country tax laws, TRN/GSTIN, and invoice rules", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Country Selection Row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showCountryDialog = true }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Business Country", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                            Text("${currentPreset.flag} ${currentPreset.name} (${currentPreset.currencySymbol})", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                        }
+                        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.padding(vertical = 4.dp))
+
+                    // Tax ID / TRN Row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showTaxEditDialog = true }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(currentPreset.taxIdLabel, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                            Text(taxNumber.ifBlank { "Not configured (Tap to add)" }, style = MaterialTheme.typography.bodySmall, color = if (taxNumber.isNotBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary)
+                        }
+                        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.padding(vertical = 4.dp))
+
+                    // Default Tax Rate & Label
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showTaxEditDialog = true }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Default Tax Rate", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                            Text("$taxLabel $defaultTaxRate% (Standard store rate)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.padding(vertical = 4.dp))
+
+                    // Tax Inclusive Switch
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Tax-Inclusive Pricing", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                            Text("On: prices include tax (VAT model). Off: tax added at checkout (Sales Tax model).", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(
+                            checked = taxInclusive,
+                            onCheckedChange = { viewModel.setTaxInclusive(it) }
                         )
                     }
-                    Switch(
-                        checked = taxInclusive,
-                        onCheckedChange = { viewModel.setTaxInclusive(it) }
-                    )
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.padding(vertical = 4.dp))
+
+                    // ZATCA / Compliance QR Switch
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Compliance E-Invoice QR", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                            Text("Print official ZATCA/Tax QR on thermal & digital receipts", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(
+                            checked = enableZatcaQr,
+                            onCheckedChange = { viewModel.setEnableZatcaQr(it) }
+                        )
+                    }
                 }
             }
 
@@ -462,6 +603,18 @@ fun SettingsScreen(
                 onClick = onNavigateToSystemLogs
             )
 
+            // FIX (2026-08-22, GAP-1): PrinterSettingsScreen was orphaned —
+            // no nav route existed, so the "No printer configured. Set MAC in
+            // Printer Settings." snackbar pointed at an unreachable screen.
+            // Bluetooth/Wi-Fi printing could NEVER be configured. Entry point
+            // added here (App Info section).
+            SettingsCard(
+                icon = Icons.Default.Payments,
+                title = "Printer Settings",
+                subtitle = "Configure Bluetooth / Wi-Fi ESC-POS printer (MAC or IP)",
+                onClick = onNavigateToPrinterSettings
+            )
+
             Spacer(modifier = Modifier.height(12.dp))
 
             SettingsCard(
@@ -518,22 +671,39 @@ fun SettingsScreen(
                         .fillMaxWidth()
                         .padding(16.dp)
                 ) {
-                    Text(
-                        "Select Data Sheet",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Choose a Google Sheet to store your POS data.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 13.sp
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Select Data Sheet",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                "Choose a Google Sheet to store your POS data.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 12.sp
+                            )
+                        }
+                        IconButton(
+                            onClick = { viewModel.loadDriveSheets() }
+                        ) {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = "Refresh Sheets",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
                     Spacer(Modifier.height(12.dp))
 
                     if (isSearching) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -582,7 +752,7 @@ fun SettingsScreen(
                                         )
                                         Spacer(Modifier.height(4.dp))
                                         Text(
-                                            "Create a new one below",
+                                            "Create a new one below or paste ID",
                                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                             fontSize = 12.sp
                                         )
@@ -618,58 +788,39 @@ fun SettingsScreen(
                             }
 
                             item {
-                                Card(
-                                    modifier = Modifier.fillMaxWidth().clickable {
-                                        viewModel.createNewSheet(
-                                            shopName = "My Shop",
-                                            onDone = { showSheetSelectionDialog = false }
-                                        )
-                                    },
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-                                    ),
-                                    shape = RoundedCornerShape(12.dp),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
+                                TextButton(
+                                    onClick = { showCreateSheetForm = !showCreateSheetForm },
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth().padding(16.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(40.dp)
-                                                .background(
-                                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
-                                                    CircleShape
-                                                ),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                Icons.Default.AddCircle, null,
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(22.dp)
+                                    Text(
+                                        if (showCreateSheetForm) "Hide create form" else "+ Create New Sheet",
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            }
+
+                            if (showCreateSheetForm) {
+                                item {
+                                    OutlinedTextField(
+                                        value = newSheetShopName,
+                                        onValueChange = { newSheetShopName = it },
+                                        label = { Text("Business / Shop Name") },
+                                        placeholder = { Text("e.g. My Shop") },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Button(
+                                        onClick = {
+                                            val name = newSheetShopName.trim().ifBlank { "TillzoPOS Business" }
+                                            viewModel.createNewSheet(
+                                                shopName = name,
+                                                onDone = { showSheetSelectionDialog = false }
                                             )
-                                        }
-                                        Spacer(Modifier.width(12.dp))
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                "Create New Sheet",
-                                                color = MaterialTheme.colorScheme.primary,
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontSize = 14.sp
-                                            )
-                                            Text(
-                                                "Start with a blank data sheet in your Drive",
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                fontSize = 12.sp
-                                            )
-                                        }
-                                        Icon(
-                                            Icons.Default.AddCircle, null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) { Text("Create & Connect Sheet") }
                                 }
                             }
 
@@ -736,22 +887,39 @@ fun SettingsScreen(
                         .fillMaxWidth()
                         .padding(16.dp)
                 ) {
-                    Text(
-                        "Select Receipt Folder",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Choose a Google Drive folder for GRN attachments.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 13.sp
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Select Receipt Folder",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                "Choose a Google Drive folder for attachments.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 12.sp
+                            )
+                        }
+                        IconButton(
+                            onClick = { viewModel.searchFolders() }
+                        ) {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = "Refresh Folders",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
                     Spacer(Modifier.height(12.dp))
 
                     if (isSearchingFolders) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -861,6 +1029,46 @@ fun SettingsScreen(
                                         },
                                         modifier = Modifier.fillMaxWidth()
                                     ) { Text("Create & Select") }
+                                }
+                            }
+
+                            item {
+                                TextButton(
+                                    onClick = { showManualFolderEntry = !showManualFolderEntry },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        if (showManualFolderEntry) "Hide manual folder entry" else "Paste Folder ID or URL manually",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            }
+
+                            if (showManualFolderEntry) {
+                                item {
+                                    OutlinedTextField(
+                                        value = manualFolderIdInput,
+                                        onValueChange = { manualFolderIdInput = it },
+                                        label = { Text("Folder ID or Drive URL") },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Button(
+                                        onClick = {
+                                            val extracted = if (manualFolderIdInput.contains("/folders/")) {
+                                                manualFolderIdInput.substringAfter("/folders/").substringBefore("?").substringBefore("/")
+                                            } else {
+                                                manualFolderIdInput.trim()
+                                            }
+                                            if (extracted.isNotBlank()) {
+                                                viewModel.selectFolder(extracted, "Selected Drive Folder")
+                                                showGrnFolderDialog = false
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) { Text("Connect Folder") }
                                 }
                             }
                         }
@@ -1038,6 +1246,119 @@ fun SettingsScreen(
                     TextButton(onClick = { showPinConfigDialog = false }) {
                         Text("Cancel")
                     }
+                }
+            )
+        }
+
+        // ── Country Selection Dialog ────────────────────────────────────────
+        if (showCountryDialog) {
+            AlertDialog(
+                onDismissRequest = { showCountryDialog = false },
+                title = { Text("Select Business Country", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 400.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        com.tillzo.pos.utils.TaxUtils.PRESETS.forEach { preset ->
+                            val isSelected = preset.code.equals(countryCode, ignoreCase = true)
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        viewModel.selectCountryPreset(preset.code)
+                                        showCountryDialog = false
+                                    },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(preset.flag, fontSize = 22.sp)
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(preset.name, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                        Text(
+                                            "${preset.currencySymbol} • ${preset.taxLabel} ${preset.defaultTaxRate}% (${if (preset.taxInclusive) "Inclusive" else "Exclusive"})",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    if (isSelected) {
+                                        Icon(Icons.Default.Verified, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showCountryDialog = false }) { Text("Close") }
+                }
+            )
+        }
+
+        // ── Tax Registration & Rate Edit Dialog ──────────────────────────────
+        if (showTaxEditDialog) {
+            val preset = com.tillzo.pos.utils.TaxUtils.getPreset(countryCode)
+            var tempTaxNumber by remember(taxNumber) { mutableStateOf(taxNumber) }
+            var tempTaxLabel by remember(taxLabel) { mutableStateOf(taxLabel) }
+            var tempTaxRate by remember(defaultTaxRate) { mutableStateOf(defaultTaxRate.toString()) }
+
+            AlertDialog(
+                onDismissRequest = { showTaxEditDialog = false },
+                title = { Text("Tax & Compliance Details", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = tempTaxNumber,
+                            onValueChange = { tempTaxNumber = it },
+                            label = { Text("${preset.taxIdLabel} / Tax ID") },
+                            placeholder = { Text("e.g. 100234567890003") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = tempTaxLabel,
+                            onValueChange = { tempTaxLabel = it },
+                            label = { Text("Tax Name / Label") },
+                            placeholder = { Text("e.g. VAT, GST, Sales Tax") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = tempTaxRate,
+                            onValueChange = { tempTaxRate = it },
+                            label = { Text("Default Tax Rate (%)") },
+                            placeholder = { Text("e.g. 5.0, 15.0, 18.0") },
+                            modifier = Modifier.fillMaxWidth(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.setTaxNumber(tempTaxNumber.trim())
+                            viewModel.setTaxLabel(tempTaxLabel.trim().ifBlank { "VAT" })
+                            viewModel.setDefaultTaxRate(tempTaxRate.toDoubleOrNull() ?: 0.0)
+                            showTaxEditDialog = false
+                        }
+                    ) { Text("Save") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showTaxEditDialog = false }) { Text("Cancel") }
                 }
             )
         }

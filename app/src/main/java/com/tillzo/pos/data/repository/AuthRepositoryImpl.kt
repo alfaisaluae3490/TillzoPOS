@@ -118,8 +118,38 @@ class AuthRepositoryImpl @Inject constructor(
     }
 
     override fun verifyPIN(pin: String): Boolean {
+        // FIX (2026-08-22, DEF-07): unlimited PIN attempts = brute-forceable
+        // (4-digit PIN = 10k combos, automated guessing takes minutes). Now:
+        // 5 failed attempts → 30s lockout, 10+ → 5min lockout. Attempt count
+        // and lock deadline persist in prefs so process death doesn't reset it.
+        val now = System.currentTimeMillis()
+        val lockUntil = sharedPrefs.getLong(KEY_PIN_LOCK_UNTIL, 0L)
+        if (now < lockUntil) {
+            val remaining = ((lockUntil - now) / 1000) + 1
+            android.util.Log.w("AuthRepo", "PIN locked for ${remaining}s")
+            return false
+        }
+
         val storedPin = sharedPrefs.getString(KEY_APP_PIN, null)
-        return storedPin == pin
+        val ok = storedPin == pin
+        if (ok) {
+            sharedPrefs.edit().putInt(KEY_PIN_ATTEMPTS, 0).apply()
+        } else {
+            val attempts = sharedPrefs.getInt(KEY_PIN_ATTEMPTS, 0) + 1
+            val lockMs = when {
+                attempts >= 10 -> 300_000L  // 5 min
+                attempts >= 5  -> 30_000L   // 30 sec
+                else           -> 0L
+            }
+            sharedPrefs.edit()
+                .putInt(KEY_PIN_ATTEMPTS, attempts)
+                .apply()
+            if (lockMs > 0) {
+                sharedPrefs.edit().putLong(KEY_PIN_LOCK_UNTIL, now + lockMs).apply()
+                android.util.Log.w("AuthRepo", "PIN locked for ${lockMs / 1000}s after $attempts failed attempts")
+            }
+        }
+        return ok
     }
 
     override fun hasPIN(): Boolean {
@@ -146,6 +176,9 @@ class AuthRepositoryImpl @Inject constructor(
         private const val KEY_ACCESS_TOKEN = "access_token"
         private const val KEY_REFRESH_TOKEN = "refresh_token"
         private const val KEY_APP_PIN = "app_pin"
+        // FIX (2026-08-22, DEF-07): PIN brute-force lockout state
+        private const val KEY_PIN_ATTEMPTS = "pin_attempts"
+        private const val KEY_PIN_LOCK_UNTIL = "pin_lock_until"
 
         // FIX (2026-08-06): single source of truth — WEB client ID from
         // Constants (matches default_web_client_id). Old Android client ID

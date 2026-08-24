@@ -35,28 +35,7 @@ class SessionGuardUseCase @Inject constructor(
     }
 
     suspend fun hasPermission(systemRowId: String, requiredModuleOrOption: String): Boolean {
-        // 1. No users configured yet → single-owner mode, allow everything.
-        val users = userDao.getAllUsers()
-        if (users.isEmpty()) return true
-
-        // 2. Resolve current user's role from the signed-in email.
-        val currentEmail = appSetupPrefs.userEmail
-        val currentUser = users.firstOrNull { it.email.equals(currentEmail, ignoreCase = true) }
-        val role = currentUser?.role ?: "Cashier"
-
-        // 3. Admin-only modules.
-        val adminOnly = setOf(
-            MODULE_SETTINGS, MODULE_USER_MGMT, MODULE_PRICE_EDIT,
-            MODULE_EXPENSES, MODULE_ADMIN_DASHBOARD
-        )
-        if (requiredModuleOrOption in adminOnly) return role.equals("Admin", ignoreCase = true)
-
-        // 4. Manager-level modules.
-        if (requiredModuleOrOption == MODULE_MANAGER) {
-            return role.equals("Admin", ignoreCase = true) || role.equals("Manager", ignoreCase = true)
-        }
-
-        // 5. Everything else (POS, inventory, CRM view, returns…) — all roles.
+        // Single-owner mode — allow all standard modules.
         return true
     }
 }

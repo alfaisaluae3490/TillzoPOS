@@ -69,17 +69,23 @@ class SheetsRemoteDataSource @Inject constructor(
             }
         }
 
-    suspend fun tagSheetAsPosSheet(sheetId: String, shopName: String): Boolean =
+    suspend fun tagSheetAsPosSheet(
+        sheetId: String,
+        shopName: String,
+        folderId: String? = null
+    ): Boolean =
         withContext(Dispatchers.IO) {
             try {
-                val body = mapOf(
-                    "appProperties" to mapOf(
-                        "isTillzoPosSheet" to "true",
-                        "shopName" to shopName,
-                        "createdByApp" to "TillzoPOS",
-                        "version" to "1"
-                    )
+                val props = mutableMapOf(
+                    "isTillzoPosSheet" to "true",
+                    "shopName" to shopName,
+                    "createdByApp" to "TillzoPOS",
+                    "version" to "1"
                 )
+                if (!folderId.isNullOrBlank()) {
+                    props["businessFolderId"] = folderId
+                }
+                val body = mapOf("appProperties" to props)
                 val resp = api.updateAppProperties(sheetId, body)
                 resp.isSuccessful
             } catch (e: Exception) {
@@ -167,11 +173,16 @@ class SheetsRemoteDataSource @Inject constructor(
             // Guard: spreadsheetId empty = user not signed in yet
             if (spreadsheetId.isEmpty()) return@withContext AppendResult(false, 0, "Spreadsheet ID not set")
             try {
+                // FIX (2026-08-21, DEF-27): range must be explicit A1-notation.
+                // Passing only the tab name ("Sales_Aug_2026") made the Sheets API's
+                // logical-table detection append at the last non-empty cell's RIGHT
+                // (col 0 → 20 → 40 → 60 …), scattering every sale row across columns.
+                val fixedRange = if (range.contains('!')) range else "$range!A1"
                 val resp = api.appendValues(
                     spreadsheetId,
-                    range,
+                    fixedRange,
                     body = mapOf(
-                        "range"          to range,
+                        "range"          to fixedRange,
                         "majorDimension" to "ROWS",
                         "values"         to rows
                     )
@@ -214,6 +225,29 @@ class SheetsRemoteDataSource @Inject constructor(
 
     // ── Read Range ───────────────────────────────────────────────────────────
 
+    /** OVERNIGHT-AUDIT D2-1: read result with success flag so callers can
+     *  distinguish "sheet empty" from "API failed" (critical for deletion sync). */
+    data class ReadResult(val rows: List<List<String>>, val success: Boolean)
+
+    @Suppress("UNCHECKED_CAST")
+    suspend fun readRangeResult(range: String): ReadResult =
+        withContext(Dispatchers.IO) {
+            // Guard: spreadsheetId empty = user not signed in yet — treat as failure
+            if (spreadsheetId.isEmpty()) return@withContext ReadResult(emptyList(), false)
+            try {
+                val resp = api.getValues(spreadsheetId, range)
+                if (!resp.isSuccessful) return@withContext ReadResult(emptyList(), false)
+
+                val values = resp.body()?.get("values") as? List<List<Any>>
+                    ?: return@withContext ReadResult(emptyList(), true) // empty sheet = success
+
+                ReadResult(values.map { row -> row.map { it.toString() } }, true)
+            } catch (e: Exception) {
+                android.util.Log.w("SheetsRemoteDataSource", "readRangeResult failed: ${e.message}")
+                ReadResult(emptyList(), false)
+            }
+        }
+
     @Suppress("UNCHECKED_CAST")
     suspend fun readRange(range: String): List<List<String>> =
         withContext(Dispatchers.IO) {
@@ -228,6 +262,36 @@ class SheetsRemoteDataSource @Inject constructor(
 
                 values.map { row -> row.map { it.toString() } }
             } catch (e: Exception) { emptyList() }
+        }
+
+    /**
+     * Batch reads multiple ranges in ONE single HTTP GET request using values:batchGet.
+     * Drastically eliminates HTTP 429 quota exhaustion.
+     */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun batchReadRanges(ranges: List<String>): Map<String, List<List<String>>> =
+        withContext(Dispatchers.IO) {
+            if (spreadsheetId.isEmpty() || ranges.isEmpty()) return@withContext emptyMap()
+            try {
+                val resp = api.batchGetValues(spreadsheetId, ranges)
+                if (!resp.isSuccessful) return@withContext emptyMap()
+
+                val valueRanges = resp.body()?.get("valueRanges") as? List<Map<String, Any>>
+                    ?: return@withContext emptyMap()
+
+                val result = mutableMapOf<String, List<List<String>>>()
+                for (vr in valueRanges) {
+                    val rawRange = vr["range"] as? String ?: continue
+                    val tabName = rawRange.substringBefore('!').trim('\'')
+                    val values = vr["values"] as? List<List<Any>> ?: emptyList()
+                    val stringValues = values.map { row -> row.map { it.toString() } }
+                    result[tabName] = stringValues
+                    result[rawRange] = stringValues
+                }
+                result
+            } catch (e: Exception) {
+                emptyMap()
+            }
         }
 
     // ── Read Single Cell (for ForceUpdate min_version) ───────────────────────
@@ -273,6 +337,31 @@ class SheetsRemoteDataSource @Inject constructor(
                         "updateSheetProperties" to mapOf(
                             "properties" to mapOf("sheetId" to sheetId, "title" to newTitle),
                             "fields"     to "title"
+                        )
+                    )))
+                )
+                resp.isSuccessful
+            } catch (e: Exception) { false }
+        }
+
+    /** Inserts N empty rows at the top of a tab (index 0). Used by SchemaGuard
+     *  to restore a lost header row WITHOUT overwriting existing data —
+     *  inserting a row shifts the existing rows down instead of destroying them. */
+    suspend fun insertRowsTop(sheetId: Int, count: Int = 1): Boolean =
+        withContext(Dispatchers.IO) {
+            if (spreadsheetId.isEmpty()) return@withContext false
+            try {
+                val resp = api.sheetsBatchUpdate(
+                    spreadsheetId,
+                    mapOf("requests" to listOf(mapOf(
+                        "insertDimension" to mapOf(
+                            "range" to mapOf(
+                                "sheetId" to sheetId,
+                                "dimension" to "ROWS",
+                                "startIndex" to 0,
+                                "endIndex" to count
+                            ),
+                            "inheritFromBefore" to false
                         )
                     )))
                 )

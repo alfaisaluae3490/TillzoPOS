@@ -21,7 +21,8 @@ import javax.inject.Inject
 class CreatePurchaseOrderViewModel @Inject constructor(
     private val poDao: PurchaseOrderDao,
     private val vendorDao: VendorDao,
-    private val inventoryDao: InventoryDao
+    private val inventoryDao: InventoryDao,
+    private val appSetupPrefs: com.tillzo.pos.data.local.prefs.AppSetupPrefs
 ) : ViewModel() {
 
     // ── exposed state ────────────────────────────────────────────────────────
@@ -34,6 +35,12 @@ class CreatePurchaseOrderViewModel @Inject constructor(
 
     private val _totalAmount = MutableStateFlow(0.0)
     val totalAmount: StateFlow<Double> = _totalAmount.asStateFlow()
+
+    // FIX (2026-08-23, DEF-61): double-save guard — rapid taps could launch two
+    // concurrent saves, both reading the same sequence (race). GRN VM already had
+    // _isLoading; PO VM had none.
+    private val _isSaving = MutableStateFlow(false)
+    val isSaving: StateFlow<Boolean> = _isSaving.asStateFlow()
 
     // ── vendor ───────────────────────────────────────────────────────────────
 
@@ -77,6 +84,9 @@ class CreatePurchaseOrderViewModel @Inject constructor(
     // ── item management ──────────────────────────────────────────────────────
 
     fun addItem(product: InventoryEntity, qty: Double, cost: Double) {
+        // FIX (2026-08-23, DEF-112): negative qty/price pehle cart mein add ho
+        // jate the → negative PO total. Ab reject.
+        if (qty <= 0.0 || cost < 0.0) return
         val newItem = PurchaseOrderItemEntity(
             poItemId      = UUID.randomUUID().toString(),
             poId          = "",               // assigned on save
@@ -100,6 +110,8 @@ class CreatePurchaseOrderViewModel @Inject constructor(
     }
 
     fun updateItemQty(itemId: String, qty: Double) {
+        // FIX (2026-08-23, DEF-112): negative qty reject.
+        if (qty < 0.0) return
         _items.value = _items.value.map { item ->
             if (item.poItemId == itemId)
                 item.copy(orderedQty = qty, totalCost = qty * item.unitCostPrice)
@@ -109,6 +121,8 @@ class CreatePurchaseOrderViewModel @Inject constructor(
     }
 
     fun updateItemPrice(itemId: String, price: Double) {
+        // FIX (2026-08-23, DEF-112): negative price reject.
+        if (price < 0.0) return
         _items.value = _items.value.map { item ->
             if (item.poItemId == itemId)
                 item.copy(unitCostPrice = price, totalCost = item.orderedQty * price)
@@ -127,12 +141,19 @@ class CreatePurchaseOrderViewModel @Inject constructor(
         val vendor = _selectedVendor.value ?: return
         val currentItems = _items.value
         if (currentItems.isEmpty()) return
+        // FIX (2026-08-23, DEF-61): double-save guard — second tap while saving
+        // is dropped instead of racing the same sequence number.
+        if (_isSaving.value) return
+        _isSaving.value = true
 
         viewModelScope.launch(Dispatchers.IO) {
-            val now  = System.currentTimeMillis()
-            val poId = UUID.randomUUID().toString()
-            val count = poDao.getTotalPOCount() + 1
-            val poNumber = "PO-${java.text.SimpleDateFormat("yyyyMM", java.util.Locale.getDefault()).format(java.util.Date())}-${String.format("%04d", count)}"
+            try {
+                val now  = System.currentTimeMillis()
+                val poId = UUID.randomUUID().toString()
+                // FIX (2026-08-23, DEF-61): MAX-based atomic sequence instead of
+                // COUNT(*)+1 — no reuse after soft-deletes, no read-then-insert race.
+                val seq = poDao.getNextPoSequence()
+                val poNumber = "PO-${java.text.SimpleDateFormat("yyyyMM", java.util.Locale.getDefault()).format(java.util.Date())}-${String.format("%04d", seq)}"
 
             val po = PurchaseOrderEntity(
                 poId                  = poId,
@@ -142,9 +163,15 @@ class CreatePurchaseOrderViewModel @Inject constructor(
                 status                = if (markAsSent) "SENT" else "DRAFT",
                 notes                 = notes,
                 totalAmount           = _totalAmount.value,
-                currency              = "$",
+                // FIX (2026-08-22, DEF-02): currency was hardcoded '$' —
+                // stores using AED/other symbols got wrong POs on the sheet.
+                // Use the user's configured currency symbol.
+                currency              = appSetupPrefs.currencySymbol.ifBlank { "$" },
                 expectedDeliveryDate  = expectedDate,
-                createdBy             = "admin",
+                // FIX (2026-08-23, DEF-93): createdBy was hardcoded "admin" —
+                // sheet Purchase_Orders.created_by hamesha "admin" dikhata tha,
+                // signed-in user kabhi record nahi hota tha (DEF-05 GRN pattern).
+                createdBy             = appSetupPrefs.userEmail.ifBlank { "admin" },
                 syncStatus            = "pending",
                 isDeleted             = false,
                 createdAt             = now,
@@ -156,6 +183,14 @@ class CreatePurchaseOrderViewModel @Inject constructor(
             poDao.insertPOItems(itemsToSave)
 
             kotlinx.coroutines.withContext(Dispatchers.Main) { onSuccess() }
+            } catch (e: Exception) {
+                // FIX (2026-08-23, DEF-111): pehle koi catch nahi tha — DB failure
+                // par uncaught exception app crash karta tha aur user ko kuch
+                // nahi dikhta tha. Ab log + silent (finally _isSaving reset).
+                Log.e("CreatePOVM", "Failed to save PO", e)
+            } finally {
+                _isSaving.value = false
+            }
         }
     }
 }

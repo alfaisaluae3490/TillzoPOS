@@ -172,6 +172,25 @@ class OAuthTokenManager @Inject constructor(
             .apply()
     }
 
+    /**
+     * Invalidates ONLY the cached access token + expiry (keeps refresh_token).
+     *
+     * FIX (2026-08-22, watchdog): a 401 response means the cached access token
+     * is rejected server-side even though its stored expiry is still in the
+     * future (e.g. Google rotated/revoked it, or the stored expiry drifts).
+     * getValidToken() step 1 would then return that same stale token forever
+     * and the refresh chain would NEVER run — every request 401s and sync is
+     * permanently dead. The 401 authenticator now calls this first so the next
+     * getValidToken() goes through GoogleAuthUtil / refresh_token (which the
+     * 2026-08-06 fix kept intact by NOT wiping the refresh token).
+     */
+    fun invalidateAccessToken() {
+        prefs.edit()
+            .remove(KEY_ACCESS_TOKEN)
+            .remove(KEY_EXPIRY_MS)
+            .apply()
+    }
+
     // ── Private helpers ──────────────────────────────────────────────────────
 
     private fun fetchViaGoogleAuthUtil(): String? {

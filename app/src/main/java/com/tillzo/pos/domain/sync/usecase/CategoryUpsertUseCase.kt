@@ -45,7 +45,13 @@ class CategoryUpsertUseCase @Inject constructor(
             }
 
             // 1. Fetch current remote categories to build id → row index map
-            val remoteRows = dataSource.readRange("$TABLE_NAME!A:ZZ")
+            // OVERNIGHT-AUDIT D2-1 FIX (2026-08-23): track read success. On API failure
+            // (e.g. HTTP 429) the map is empty and treating deletions as "not on sheet"
+            // hard-deletes the local marker forever → orphaned sheet rows. Now we
+            // distinguish "read failed" from "genuinely empty" and defer deletions.
+            val remoteRead = dataSource.readRangeResult("$TABLE_NAME!A:ZZ")
+            val remoteRows = remoteRead.rows
+            val readFailed = !remoteRead.success
             val idToRowMap = mutableMapOf<String, Int>()
             if (remoteRows.isNotEmpty()) {
                 val headers = remoteRows[0]
@@ -120,7 +126,13 @@ class CategoryUpsertUseCase @Inject constructor(
             }
 
             // ── Deletions: soft-deleted rows pending removal from Sheet ───────
+            // OVERNIGHT-AUDIT D2-1: if remote read failed, DEFER deletions (don't
+            // hard-delete markers) so the next successful sync removes sheet rows.
             if (pendingDeletions.isNotEmpty()) {
+                if (readFailed) {
+                    Log.w(TAG, "Remote read failed — deferring ${pendingDeletions.size} category deletion(s) to next sync")
+                    return false
+                }
                 val (onSheet, notOnSheet) = pendingDeletions.partition { idToRowMap.containsKey(it.system_row_id) }
 
                 for (row in notOnSheet) {

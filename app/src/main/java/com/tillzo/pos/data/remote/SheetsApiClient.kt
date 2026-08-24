@@ -107,6 +107,15 @@ class SheetsApiClient @Inject constructor(
             // never succeed after the first 401. getValidToken() now handles the
             // full chain (cached → GoogleAuthUtil → refresh_token) and only
             // broadcasts RE_AUTH_NEEDED if everything fails.
+            //
+            // FIX (2026-08-22, watchdog): a 401 alone does NOT prove the cached
+            // token is past its stored expiry — Google can revoke/rotate the
+            // token server-side while the local expiry clock still says valid.
+            // getValidToken() step 1 would then return the same stale token,
+            // the retry 401s again, and sync stays dead forever. So invalidate
+            // ONLY the access token (keep refresh_token) to force the full
+            // refresh chain on the retry.
+            tokenManager.invalidateAccessToken()
             val newToken = runBlocking { tokenManager.getValidToken() } ?: return null
 
             return response.request.newBuilder()
@@ -138,6 +147,31 @@ class SheetsApiClient @Inject constructor(
         response
     }
 
+    /**
+     * Rate Limit / 429 Backoff Interceptor.
+     * Automatically handles HTTP 429 (Resource Exhausted / Rate Limit) by waiting with
+     * exponential backoff (2s, 4s, 8s) and retrying before failing.
+     */
+    private val rateLimitRetryInterceptor = Interceptor { chain ->
+        val request = chain.request()
+        var response = chain.proceed(request)
+        var tryCount = 0
+        val maxTries = 3
+        while (response.code == 429 && tryCount < maxTries) {
+            tryCount++
+            val backoffMs = 1000L * (1 shl tryCount) // 2000ms, 4000ms, 8000ms
+            appLogger.logInfo("HTTP_RATE_LIMIT", "HTTP 429 Rate Limit for ${request.url}. Retrying after ${backoffMs}ms (attempt $tryCount/$maxTries)...")
+            response.close()
+            try {
+                Thread.sleep(backoffMs)
+            } catch (_: InterruptedException) {
+                break
+            }
+            response = chain.proceed(request)
+        }
+        response
+    }
+
     // ── Retrofit Instance ─────────────────────────────────────────────────────
 
     val retrofit: Retrofit = Retrofit.Builder()
@@ -148,6 +182,7 @@ class SheetsApiClient @Inject constructor(
                 .readTimeout(30, TimeUnit.SECONDS)
                 .writeTimeout(30, TimeUnit.SECONDS)
                 .addInterceptor(bearerInterceptor)
+                .addInterceptor(rateLimitRetryInterceptor)
                 .addInterceptor(errorLoggingInterceptor)
                 .addInterceptor(sanitizedLoggingInterceptor)
                 .authenticator(tokenAuthenticator)

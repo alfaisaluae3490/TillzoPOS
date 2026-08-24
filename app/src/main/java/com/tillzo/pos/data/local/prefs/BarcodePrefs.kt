@@ -60,7 +60,7 @@ data class BarcodeFieldConfig(
     val customValue: String = ""
 )
 
-class BarcodePrefs(context: Context) {
+class BarcodePrefs(private val context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("barcode_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()
 
@@ -107,11 +107,21 @@ class BarcodePrefs(context: Context) {
     }
 
     private fun loadGeneralConfig(): BarcodeGeneralConfig {
-        val json = prefs.getString("general_config", null) ?: return BarcodeGeneralConfig()
+        // DEF-22 FIX: label currency default app currency (AppSetupPrefs) se lo,
+        // legacy "Rs" default nahi — warna app "$" par label "Rs" print karta tha.
+        val appCurrency = AppSetupPrefs(context).currencySymbol.ifBlank { "$" }
+        val json = prefs.getString("general_config", null)
+            ?: return BarcodeGeneralConfig(currencySymbol = appCurrency)
         return try {
-            gson.fromJson(json, BarcodeGeneralConfig::class.java)
+            var config = gson.fromJson(json, BarcodeGeneralConfig::class.java)
+            // Legacy saved configs (purana "Rs" default) ko migrate karo — sirf
+            // tab jab user ne explicitly "Rs" choose nahi kiya ho (appCurrency != "Rs").
+            if (config.currencySymbol == "Rs" && appCurrency.isNotBlank() && appCurrency != "Rs") {
+                config = config.copy(currencySymbol = appCurrency)
+            }
+            config
         } catch (e: Exception) {
-            BarcodeGeneralConfig()
+            BarcodeGeneralConfig(currencySymbol = appCurrency)
         }
     }
 
@@ -122,7 +132,9 @@ class BarcodePrefs(context: Context) {
             val loaded: List<BarcodeFieldConfig> = gson.fromJson(json, type) ?: emptyList()
             if (loaded.isEmpty()) defaultFields() else loaded
         } catch (e: Exception) {
-            emptyList()
+            // DEF-98 FIX: corrupt JSON par defaults wapas do — empty list se GS1
+            // field encoding silently khali ho jata tha.
+            defaultFields()
         }
     }
 
@@ -140,8 +152,12 @@ class BarcodePrefs(context: Context) {
         if (index > 0) {
             val current = fields[index]
             val previous = fields[index - 1]
-            fields[index] = current.copy(sequenceOrder = previous.sequenceOrder)
-            fields[index - 1] = previous.copy(sequenceOrder = current.sequenceOrder)
+            // DEF-95 FIX: list position bhi swap karo — UI order == sequenceOrder.
+            // Pehle sirf sequenceOrder swap hota tha; list order wahi rehti thi,
+            // to UI mein Move Up/Down ka koi visible effect nahi tha (sirf GS1
+            // encoding order change hota tha, list nahi).
+            fields[index] = previous.copy(sequenceOrder = current.sequenceOrder)
+            fields[index - 1] = current.copy(sequenceOrder = previous.sequenceOrder)
             saveFieldsConfig(fields)
         }
     }
@@ -152,8 +168,9 @@ class BarcodePrefs(context: Context) {
         if (index >= 0 && index < fields.size - 1) {
             val current = fields[index]
             val next = fields[index + 1]
-            fields[index] = current.copy(sequenceOrder = next.sequenceOrder)
-            fields[index + 1] = next.copy(sequenceOrder = current.sequenceOrder)
+            // DEF-95 FIX: list position bhi swap karo (UI order == sequenceOrder).
+            fields[index] = next.copy(sequenceOrder = current.sequenceOrder)
+            fields[index + 1] = current.copy(sequenceOrder = next.sequenceOrder)
             saveFieldsConfig(fields)
         }
     }

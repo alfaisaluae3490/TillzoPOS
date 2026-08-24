@@ -41,6 +41,8 @@ fun WastageLogScreen(
     val currencySymbol = remember { AppSetupPrefs(context).currencySymbol.ifBlank { "$" } }
 
     var showLogDialog by remember { mutableStateOf(false) }
+    // GAP-4 FIX (2026-08-22): delete confirm dialog state
+    var entryToDelete by remember { mutableStateOf<WastageEntity?>(null) }
 
     Scaffold(
         topBar = {
@@ -113,7 +115,7 @@ fun WastageLogScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(filtered, key = { it.wastageId }) { entry ->
-                        WastageEntryCard(entry = entry)
+                        WastageEntryCard(entry = entry, onDelete = { entryToDelete = entry })
                     }
                 }
             }
@@ -124,6 +126,27 @@ fun WastageLogScreen(
         LogWastageDialog(
             viewModel = viewModel,
             onDismiss = { showLogDialog = false }
+        )
+    }
+
+    // GAP-4 FIX (2026-08-22): confirm + soft-delete wastage entry
+    entryToDelete?.let { entry ->
+        AlertDialog(
+            onDismissRequest = { entryToDelete = null },
+            title = { Text("Delete Wastage Entry", fontWeight = FontWeight.Bold) },
+            text = { Text("Delete \"${entry.productName}\" (${entry.quantity} ${entry.unit}, ${entry.reason}) from the log? Sheet audit trail unchanged rahega.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteWastage(entry)
+                        entryToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { entryToDelete = null }) { Text("Cancel") }
+            }
         )
     }
 }
@@ -162,7 +185,7 @@ private fun SummaryItem(label: String, value: String) {
 }
 
 @Composable
-private fun WastageEntryCard(entry: WastageEntity) {
+private fun WastageEntryCard(entry: WastageEntity, onDelete: () -> Unit) {
     val context = LocalContext.current
     val currencySymbol = remember { AppSetupPrefs(context).currencySymbol.ifBlank { "$" } }
     val reasonColor = when (entry.reason) {
@@ -199,6 +222,18 @@ private fun WastageEntryCard(entry: WastageEntity) {
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 Text("Loss: $currencySymbol %.2f".format(entry.totalLoss), color = MaterialTheme.colorScheme.error, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                // GAP-4 FIX (2026-08-22): entry delete action (pehle UI mein tha hi nahi)
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "Delete entry",
+                        tint = TextSecondary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
             }
         }
     }

@@ -144,7 +144,10 @@ fun InlineCameraBox(
             // Camera sleeping — unbind to free resources
             try {
                 cameraProvider.unbindAll()
-            } catch (e: Exception) { }
+            } catch (e: Exception) {
+                // OVERNIGHT-AUDIT D0: unbind on inactive camera is expected to no-op; log for diagnostics
+                android.util.Log.d("InlineCameraBox", "unbindAll skipped: ${e.message}")
+            }
         }
     }
 
@@ -157,7 +160,10 @@ fun InlineCameraBox(
             future.addListener({
                 try {
                     future.get().unbindAll()
-                } catch (e: Exception) { }
+                } catch (e: Exception) {
+                    // OVERNIGHT-AUDIT D0: dispose-time unbind may no-op if already released
+                    android.util.Log.d("InlineCameraBox", "dispose unbind skipped: ${e.message}")
+                }
             }, ContextCompat.getMainExecutor(context))
         }
     }

@@ -49,6 +49,9 @@ fun PurchaseOrderListScreen(
     val statusFilters = listOf(null, "DRAFT", "SENT", "RECEIVED", "CANCELLED")
 
     val filtered = if (statusFilters[selectedTab] == null) poList
+    // FIX (2026-08-22, DEF-10): PARTIALLY_RECEIVED POs were invisible —
+    // strict equality meant they matched NO tab. "Received" shows both.
+    else if (statusFilters[selectedTab] == "RECEIVED") poList.filter { it.status == "RECEIVED" || it.status == "PARTIALLY_RECEIVED" }
     else poList.filter { it.status == statusFilters[selectedTab] }
 
     Scaffold(

@@ -58,8 +58,8 @@ class ScannerViewModel @Inject constructor(
             _scannerState.value = ScannerState.Processing
             resetIdleTimer()
 
-            // Lookup product from Room DB
-            val product = inventoryDao.getItemByBarcode(barcodeValue)
+            // Lookup product from Room DB (DEF-64: barcode_id + ItemGtins dono)
+            val product = inventoryDao.getItemByBarcode(barcodeValue) ?: inventoryDao.getItemByGtin(barcodeValue)
 
             if (product != null) {
                 _scannedProduct.value = product

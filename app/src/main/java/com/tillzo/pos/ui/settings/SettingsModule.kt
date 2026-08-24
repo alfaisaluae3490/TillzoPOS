@@ -35,7 +35,24 @@ fun SettingsModule(
                 onNavigateToBilling = { settingsNavController.navigate("billing_screen") },
                 onNavigateToSystemLogs = { settingsNavController.navigate("system_logs") },
                 // FIX (2026-08-06): local data viewer
-                onNavigateToDataViewer = { settingsNavController.navigate("data_viewer") }
+                onNavigateToDataViewer = { settingsNavController.navigate("data_viewer") },
+                // FIX (2026-08-22, GAP-1): printer settings route — was orphaned
+                onNavigateToPrinterSettings = { settingsNavController.navigate("printer_settings") }
+            )
+        }
+
+        // FIX (2026-08-22, GAP-1): PrinterSettingsScreen was unreachable —
+        // no route existed anywhere. Hardware printing config (Bluetooth MAC /
+        // Wi-Fi IP) is now accessible from Settings → App Info → Printer Settings.
+        composable("printer_settings") {
+            com.tillzo.pos.ui.hardware.printer.PrinterSettingsScreen(
+                onNavigateBack = { settingsNavController.popBackStack() },
+                onNavigateToScannerTesting = {
+                    // FIX (2026-08-22, GAP-1): no ML-scanner test screen exists;
+                    // keep navigation safe — stay on printer settings.
+                    settingsNavController.popBackStack()
+                },
+                onNavigateToDiagnostics = {}
             )
         }
 

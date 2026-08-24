@@ -19,6 +19,7 @@ class NotificationHelper @Inject constructor(
         const val LOW_STOCK_CHANNEL    = "low_stock_channel"
         const val OUT_OF_STOCK_CHANNEL = "out_of_stock_channel"
         const val EXPIRY_CHANNEL       = "expiry_channel"
+        const val VENDOR_PAYMENT_CHANNEL = "vendor_payment_channel"
     }
 
     init {
@@ -40,6 +41,11 @@ class NotificationHelper @Inject constructor(
             notificationManager.createNotificationChannel(
                 NotificationChannel(EXPIRY_CHANNEL, "Expiry Alerts", NotificationManager.IMPORTANCE_DEFAULT).apply {
                     description = "Alerts for products nearing or past their expiry date"
+                }
+            )
+            notificationManager.createNotificationChannel(
+                NotificationChannel(VENDOR_PAYMENT_CHANNEL, "Vendor Payment Reminders", NotificationManager.IMPORTANCE_HIGH).apply {
+                    description = "Alerts for pending vendor payments and due credit bills"
                 }
             )
         }
@@ -90,6 +96,22 @@ class NotificationHelper @Inject constructor(
         val title = if (daysLeft <= 0) "❌ EXPIRED: $productName" else "⏰ Expiring Soon: $productName"
         val body  = if (daysLeft <= 0) "Expired on $expiryDate" else "Expires in $daysLeft days ($expiryDate)"
         send(EXPIRY_CHANNEL, title, body, productName.hashCode() + 2)
+    }
+
+    fun vendorPaymentDueAlert(
+        vendorName: String,
+        amountDue: Double,
+        dueDate: String,
+        isOverdue: Boolean,
+        currencySymbol: String
+    ) {
+        val title = if (isOverdue) "🚨 OVERDUE Vendor Bill: $vendorName" else "⏰ Vendor Payment Due: $vendorName"
+        val body = if (isOverdue) {
+            "Payment of $currencySymbol%.2f was due on $dueDate. Balance is still pending.".format(amountDue)
+        } else {
+            "Payment of $currencySymbol%.2f is due on $dueDate.".format(amountDue)
+        }
+        send(VENDOR_PAYMENT_CHANNEL, title, body, (vendorName + dueDate).hashCode())
     }
 
     // Legacy alias used by older call sites — delegates to new function

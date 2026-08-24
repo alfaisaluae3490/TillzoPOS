@@ -39,40 +39,47 @@ class TillzoPOSApp : Application(), Configuration.Provider {
 
     @Inject lateinit var appLogger: AppLogger
 
+    /** OVERNIGHT-AUDIT Phase 1c — FLAG_SECURE controller (set in onCreate). */
+    var screenSecurityController: com.tillzo.pos.utils.security.ScreenSecurityController? = null
+        private set
+
+    /** Lazy prefs access for screen-capture setting (avoid heavy init in field). */
+    private val appSetupPrefs by lazy {
+        dagger.hilt.android.EntryPointAccessors.fromApplication(
+            this,
+            AppSetupPrefsEntryPoint::class.java,
+        ).appSetupPrefs()
+    }
+
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
             .setWorkerFactory(workerFactory)
             .build()
 
     /**
-     * FIX (2026-08-07): Issue 11 — Tamper detection.
-     * Debug builds mein signing cert hash check karta hai. Release ke liye
-     * expected hash yahan add karo (apna release cert ka SHA-256).
-     * Repackaged APK (cracked) pe cert hash match nahi hota → warning.
+     * FIX (2026-08-07): Issue 11 — Tamper detection (was log-only).
+     * OVERNIGHT-AUDIT Phase 1a/1b (2026-08-23): replaced with REAL enforcement.
+     * SecurityGuard.enforce() = signature allow-list + debugger + root checks;
+     * mismatch/compromise -> immediate exitProcess BEFORE any business logic.
+     * Old log-only verifyApkSignature() removed (dead code).
      */
-    private fun verifyApkSignature() {
-        try {
-            val info = packageManager.getPackageInfo(packageName, android.content.pm.PackageManager.GET_SIGNATURES)
-            val cert = info.signatures?.firstOrNull() ?: return
-            val sha256 = java.security.MessageDigest.getInstance("SHA-256")
-                .digest(cert.toByteArray())
-                .joinToString("") { "%02x".format(it) }
-            // Debug signing cert (expected) — release cert hash yahan replace karna
-            Log.i("TAMPER_CHECK", "APK signature: $sha256")
-        } catch (e: Exception) {
-            Log.w("TAMPER_CHECK", "Signature check failed: ${e.message}")
-        }
-    }
 
     override fun onCreate() {
         super.onCreate()
 
-        // FIX (2026-08-07): Issue 11 — Tamper detection.
-        // Repackaged/cracked APK detect — signing cert verify at startup.
-        // Release build mein apna cert hash match na ho to warning log.
-        if (BuildConfig.DEBUG) {
-            verifyApkSignature()
-        }
+        // OVERNIGHT-AUDIT Phase 1a/1b — hard integrity enforcement at cold start.
+        // Order matters: signature first, then debugger, then root. Any failure
+        // exits the process before WorkManager/sync/network can touch data.
+        com.tillzo.pos.utils.security.SecurityGuard.initPackageManager(this)
+        com.tillzo.pos.utils.security.SecurityGuard.initDebuggableFlag(this)
+        com.tillzo.pos.utils.security.SecurityGuard.enforce(this)
+
+        // OVERNIGHT-AUDIT Phase 1c — screen capture blocking (FLAG_SECURE).
+        // Default ON (bank-level); Settings > Privacy toggle flips it at runtime.
+        screenSecurityController = com.tillzo.pos.utils.security.ScreenSecurityController(
+            application = this,
+            enabled = appSetupPrefs.blockScreenCapture,
+        ).also { it.register() }
 
         // Register uncaught exception crash handler
         Thread.setDefaultUncaughtExceptionHandler(CrashHandler(

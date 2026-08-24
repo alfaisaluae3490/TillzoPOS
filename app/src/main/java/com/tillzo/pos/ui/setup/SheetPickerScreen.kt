@@ -123,7 +123,68 @@ fun SheetPickerScreen(
                     }
 
                     is SheetPickerViewModel.UiState.CreatingNewSheet -> {
-                        FullScreenLoader("Creating your data sheet...")
+                        FullScreenLoader("Creating your data sheet & business folder...")
+                    }
+
+                    is SheetPickerViewModel.UiState.CreationSuccess -> {
+                        Box(
+                            Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF242424)),
+                                shape = RoundedCornerShape(16.dp),
+                                border = BorderStroke(1.dp, Color(0xFF4CAF50).copy(alpha = 0.4f))
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.padding(24.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        tint = Color(0xFF4CAF50),
+                                        modifier = Modifier.size(56.dp)
+                                    )
+                                    Spacer(Modifier.height(16.dp))
+                                    Text(
+                                        "Business Ready!",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 18.sp
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(
+                                        "Sheet: ${state.sheetName}",
+                                        color = Color.White.copy(alpha = 0.8f),
+                                        fontSize = 13.sp,
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        "Folder: ${state.folderName}",
+                                        color = Color(0xFF1E88E5),
+                                        fontSize = 12.sp,
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Spacer(Modifier.height(16.dp))
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        strokeWidth = 2.dp,
+                                        color = Color(0xFF4CAF50)
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(
+                                        "Opening POS...",
+                                        color = Color.White.copy(alpha = 0.5f),
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     is SheetPickerViewModel.UiState.Error -> {

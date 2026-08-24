@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.livedata.observeAsState
@@ -27,6 +28,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tillzo.pos.data.local.entity.InventoryEntity
 import com.tillzo.pos.data.local.entity.CategoryEntity
@@ -133,6 +136,19 @@ fun InventoryCrudScreen(
                     IconButton(onClick = onNavigateToOcr) {
                         Icon(Icons.Default.CameraAlt, contentDescription = "Smart AI Entry (OCR)")
                     }
+                    // OVERNIGHT-AUDIT Phase 2b: CSV bulk import (Excel/Sheets export)
+                    val importPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+                        androidx.activity.result.contract.ActivityResultContracts.GetContent()
+                    ) { uri ->
+                        if (uri != null) {
+                            context.contentResolver.openInputStream(uri)?.use { stream ->
+                                viewModel.importInventoryCsv(stream.readBytes())
+                            }
+                        }
+                    }
+                    IconButton(onClick = { importPicker.launch("text/*") }) {
+                        Icon(Icons.Default.UploadFile, contentDescription = "Import CSV (bulk upload)")
+                    }
                 }
             )
         },
@@ -145,6 +161,33 @@ fun InventoryCrudScreen(
             }
         }
     ) { padding ->
+        // OVERNIGHT-AUDIT Phase 2b: bulk import result banner
+        val importResult by viewModel.importResult.collectAsState()
+        if (importResult != null) {
+            val importMsg = importResult ?: ""
+            androidx.compose.material3.Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                colors = androidx.compose.material3.CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                )
+            ) {
+                androidx.compose.foundation.layout.Row(
+                    modifier = Modifier.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        importMsg,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    androidx.compose.material3.TextButton(onClick = { viewModel.clearImportResult() }) {
+                        Text("OK")
+                    }
+                }
+            }
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -401,9 +444,12 @@ fun InventoryFormDialog(
     
     var gtins by remember { mutableStateOf(item?.barcode_id?.let { listOf(it) } ?: emptyList()) }
     var currentGtinInput by remember { mutableStateOf("") }
+    var gtinError by remember { mutableStateOf<String?>(null) } // FIX (2026-08-22, DEF-08)
     var costPrice by remember { mutableStateOf(item?.cost_price?.takeIf { it > 0.0 }?.toString() ?: "") }
     var price by remember { mutableStateOf(item?.price_per_unit?.takeIf { it > 0.0 }?.toString() ?: "") }
-    var taxPercent by remember { mutableStateOf(item?.tax_percent?.takeIf { it > 0.0 }?.toString() ?: "") }
+    val context = LocalContext.current
+    val appSetupPrefs = remember { com.tillzo.pos.data.local.prefs.AppSetupPrefs(context) }
+    var taxPercent by remember { mutableStateOf(item?.tax_percent?.takeIf { it > 0.0 }?.toString() ?: if (item == null && appSetupPrefs.defaultTaxRate > 0.0) appSetupPrefs.defaultTaxRate.toString() else "") }
     
     var stock by remember { mutableStateOf(item?.current_stock?.takeIf { it > 0.0 }?.toString() ?: "") }
     var threshold by remember { mutableStateOf(item?.low_stock_threshold?.takeIf { it > 0.0 }?.toString() ?: "") }
@@ -413,6 +459,8 @@ fun InventoryFormDialog(
     var expDate by remember { mutableStateOf(item?.expiry_date ?: "") }
     var mfgDate by remember { mutableStateOf(item?.manufacturing_date ?: "") }
     var expAlert by remember { mutableStateOf(item?.expiry_alert_days?.toString() ?: "30") }
+    // OVERNIGHT-AUDIT FIX (2026-08-23): silent validation failure UX bug — surface errors
+    var saveError by remember { mutableStateOf<String?>(null) }
     
     var isDamaged by remember { mutableStateOf(item?.is_damaged_stock ?: false) }
     var dmgQty by remember { mutableStateOf(item?.damaged_qty?.takeIf { it > 0.0 }?.toString() ?: "") }
@@ -542,6 +590,15 @@ fun InventoryFormDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                // OVERNIGHT-AUDIT FIX: show validation errors instead of silent failure
+                if (saveError != null) {
+                    Text(
+                        text = saveError!!,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
                 // Section 1: Basic Info
                 Text("Basic Info", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Product Name *") }, colors = textFieldColors, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -658,16 +715,41 @@ fun InventoryFormDialog(
                             modifier = Modifier.weight(1f)
                         )
                         Button(
-                            onClick = { 
+                            onClick = {
                                 if (currentGtinInput.isNotBlank()) {
-                                    gtins = gtins + currentGtinInput
-                                    currentGtinInput = ""
+                                    // FIX (2026-08-22, DEF-08): GTIN validation —
+                                    // was accept-anything. Invalid barcodes
+                                    // (letters, wrong length, bad EAN-13 check
+                                    // digit) got saved and then never scanned
+                                    // at any retail POS. Now: 8-14 digits
+                                    // (EAN-8/UPC-A/EAN-13/GTIN-14), and a
+                                    // 13-digit code must pass the EAN checksum.
+                                    val clean = currentGtinInput.filter { it.isDigit() }
+                                    when {
+                                        clean.length !in 8..14 -> {
+                                            gtinError = "GTIN must be 8-14 digits (EAN-8, UPC-A, EAN-13, GTIN-14)"
+                                        }
+                                        clean.length == 13 && !com.tillzo.pos.utils.BarcodeUtils.isValidEan13(clean) -> {
+                                            gtinError = "Invalid EAN-13 check digit"
+                                        }
+                                        gtins.contains(clean) -> {
+                                            gtinError = "GTIN already added"
+                                        }
+                                        else -> {
+                                            gtins = gtins + clean
+                                            currentGtinInput = ""
+                                            gtinError = null
+                                        }
+                                    }
                                 }
                             },
                             modifier = Modifier.padding(top = 8.dp)
                         ) {
                             Text("Add")
                         }
+                    }
+                    gtinError?.let { err ->
+                        Text(err, color = Color(0xFFF44336), fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                     }
                 }
 
@@ -794,32 +876,45 @@ fun InventoryFormDialog(
             }
         },
         confirmButton = {
-            Button(
-                onClick = {
-                    val priceVal = price.toDoubleOrNull() ?: 0.0
-                    val costVal = costPrice.toDoubleOrNull() ?: 0.0
-                    val stockVal = stock.toDoubleOrNull() ?: 0.0
-                    val thresholdVal = threshold.toDoubleOrNull() ?: 0.0
+            // OVERNIGHT-AUDIT FIX (2026-08-23): extracted handler + semantic description.
+            // Synthetic taps (adb/uiautomator2) on this Button were silently dropped —
+            // contentDescription gives a11y tools a direct ACTION_CLICK target, and the
+            // Snackbar surfaces validation failures instead of failing silently.
+            val onSaveClick: () -> Unit = {
+                val priceVal = price.toDoubleOrNull() ?: 0.0
+                val costVal = costPrice.toDoubleOrNull() ?: 0.0
+                val stockVal = stock.toDoubleOrNull() ?: 0.0
+                val thresholdVal = threshold.toDoubleOrNull() ?: 0.0
 
-                    if (name.isNotBlank() && sku.isNotBlank() &&
-                        category.isNotBlank() && batch.isNotBlank() && expDate.isNotBlank() &&
-                        priceVal >= 0 && costVal >= 0 && stockVal >= 0 && thresholdVal >= 0) {
-                        
-                        // Include the current input if the user forgot to hit "Add"
-                        val finalGtins = if (currentGtinInput.isNotBlank()) gtins + currentGtinInput else gtins
-                        
-                        onSave(
-                            name, category, finalGtins, unit,
-                            priceVal, stockVal, thresholdVal,
-                            sku, desc, costVal,
-                            taxPercent.toDoubleOrNull() ?: 0.0,
-                            batch, expDate, mfgDate,
-                            expAlert.toIntOrNull() ?: 30,
-                            isDamaged,
-                            dmgQty.toDoubleOrNull() ?: 0.0
-                        )
+                if (name.isNotBlank() && sku.isNotBlank() &&
+                    category.isNotBlank() && batch.isNotBlank() && expDate.isNotBlank() &&
+                    priceVal >= 0 && costVal >= 0 && stockVal >= 0 && thresholdVal >= 0) {
+                    
+                    // Include the current input if the user forgot to hit "Add"
+                    val finalGtins = if (currentGtinInput.isNotBlank()) gtins + currentGtinInput else gtins
+                    
+                    onSave(
+                        name, category, finalGtins, unit,
+                        priceVal, stockVal, thresholdVal,
+                        sku, desc, costVal,
+                        taxPercent.toDoubleOrNull() ?: 0.0,
+                        batch, expDate, mfgDate,
+                        expAlert.toIntOrNull() ?: 30,
+                        isDamaged,
+                        dmgQty.toDoubleOrNull() ?: 0.0
+                    )
+                } else {
+                    saveError = when {
+                        batch.isBlank() -> "Batch Number is required"
+                        expDate.isBlank() -> "Expiry Date is required"
+                        category.isBlank() -> "Category is required"
+                        else -> "Please fill all required fields"
                     }
                 }
+            }
+            Button(
+                onClick = onSaveClick,
+                modifier = Modifier.semantics { contentDescription = "Save Product" }
             ) { Text("Save") }
         },
         dismissButton = {

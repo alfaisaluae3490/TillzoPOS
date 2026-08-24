@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
@@ -99,24 +100,27 @@ class PosViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
 
     val cartTax: StateFlow<Double> = _cartItems
-        .map { items -> items.sumOf { item -> item.total * item.taxPercent / 100.0 } }
+        .map { items ->
+            items.sumOf { item ->
+                com.tillzo.pos.utils.TaxUtils.computeLineTax(item.total, item.taxPercent, appSetupPrefs.taxInclusive).second
+            }
+        }
         .stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
 
     private val _cartDiscount = MutableStateFlow(0.0)
     val cartDiscount: StateFlow<Double> = _cartDiscount.asStateFlow()
 
-    // FIX (2026-08-06): tax-inclusive mode — when enabled, prices already contain
-    // tax, so the displayed total stays = subtotal (tax shown separately, not added).
-    val cartTotal: StateFlow<Double> = _cartItems
-        .map { items ->
-            val sub = items.sumOf { it.total }
-            if (appSetupPrefs.taxInclusive) {
-                sub - _cartDiscount.value
-            } else {
-                val tax = items.sumOf { item -> item.total * item.taxPercent / 100.0 }
-                sub + tax - _cartDiscount.value
+    val cartTotal: StateFlow<Double> = combine(_cartItems, _cartDiscount) { items, discount ->
+        val sub = items.sumOf { it.total }
+        if (appSetupPrefs.taxInclusive) {
+            (sub - discount).coerceAtLeast(0.0)
+        } else {
+            val tax = items.sumOf { item ->
+                com.tillzo.pos.utils.TaxUtils.computeLineTax(item.total, item.taxPercent, false).second
             }
+            (sub + tax - discount).coerceAtLeast(0.0)
         }
+    }
         .stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
 
     // ── Search State ──────────────────────────────────────────────────────────
@@ -145,11 +149,19 @@ class PosViewModel @Inject constructor(
     private val _paymentBreakdown = MutableStateFlow(PaymentBreakdown())
     val paymentBreakdown: StateFlow<PaymentBreakdown> = _paymentBreakdown.asStateFlow()
 
-    val remainingAmount: StateFlow<Double> = _cartItems.flatMapLatest { items ->
+    // FIX (2026-08-21, DEF-25-part2 + DEF-04): same stale-discount bug as cartTotal had —
+    // _cartDiscount.value was read once at flatMapLatest launch, so after applying a
+    // discount the total stayed at the PRE-discount value. remainingAmount then never
+    // reached 0 (e.g. 500 - 490 = 10 instead of 0), leaving the Confirm button
+    // permanently disabled on discounted sales. Now reacts to items + discount + payments.
+    // FIX (2026-08-21, DEF-04): taxInclusive branch added — previously tax was ALWAYS
+    // added even in tax-inclusive mode, so Remaining could exceed cartTotal.
+    val remainingAmount: StateFlow<Double> = combine(_cartItems, _cartDiscount, _paymentBreakdown) { items, discount, pb ->
         val sub = items.sumOf { it.total }
-        val tax = items.sumOf { item -> item.total * item.taxPercent / 100.0 }
-        val total = sub + tax - _cartDiscount.value
-        _paymentBreakdown.map { pb -> (total - pb.total).coerceAtLeast(0.0) }
+        val tax = if (appSetupPrefs.taxInclusive) 0.0
+                  else items.sumOf { item -> com.tillzo.pos.utils.TaxUtils.computeLineTax(item.total, item.taxPercent, false).second }
+        val total = (sub + tax - discount).coerceAtLeast(0.0)
+        (total - pb.total).coerceAtLeast(0.0)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
 
     // ── Customer State ────────────────────────────────────────────────────────
@@ -318,18 +330,39 @@ class PosViewModel @Inject constructor(
     }
 
     fun setDiscount(amount: Double) {
-        _cartDiscount.value = amount
-        appLogger.logInfo("UI_CLICK", "Discount applied: $amount")
+        // FIX (2026-08-22, DEF-42): clamp discount to [0, subtotal+tax] —
+        // a negative discount INCREASES the total (customer overcharged) and
+        // a discount larger than the pre-discount total produces a NEGATIVE
+        // total sale that still completes and deducts stock. Both were being
+        // recorded as valid sales. Clamping at source keeps cartTotal,
+        // remainingAmount, and the completed Sale consistent.
+        val items = _cartItems.value
+        val sub = items.sumOf { it.total }
+        val tax = if (appSetupPrefs.taxInclusive) 0.0
+                  else items.sumOf { item -> com.tillzo.pos.utils.TaxUtils.computeLineTax(item.total, item.taxPercent, false).second }
+        val maxDiscount = (sub + tax).coerceAtLeast(0.0)
+        val clamped = amount.coerceIn(0.0, maxDiscount)
+        if (clamped != amount) {
+            appLogger.logWarn("UI_CLICK", "Discount clamped: $amount -> $clamped (max allowed $maxDiscount)")
+        }
+        _cartDiscount.value = clamped
+        appLogger.logInfo("UI_CLICK", "Discount applied: $clamped")
     }
 
     fun addCustomItem(name: String, sellingPrice: Double, qty: Double = 1.0) {
+        // FIX (2026-08-23, DEF-109): blank name / negative price / non-positive
+        // qty pehle accept hote the → negative-total sale. Ab reject.
+        if (name.isBlank() || sellingPrice < 0.0 || qty <= 0.0) {
+            appLogger.logWarn("UI_CLICK", "Custom item rejected: blank name or negative price/qty")
+            return
+        }
         val cartItem = CartItem(
             itemId = "CUSTOM_ITEM_${System.currentTimeMillis()}",
             name = name,
             quantity = qty,
             pricePerUnit = sellingPrice,
             unit = "PC",
-            taxPercent = 0.0,
+            taxPercent = appSetupPrefs.defaultTaxRate,
             total = qty * sellingPrice
         )
         _cartItems.value = _cartItems.value + cartItem
@@ -339,12 +372,22 @@ class PosViewModel @Inject constructor(
     // ── Payment Functions ─────────────────────────────────────────────────────
 
     fun onPaymentAmountChanged(method: PaymentMethod, amount: Double) {
+        // FIX (2026-08-23, DEF-118): negative amount clamp — decimal keyboard
+        // se "-" normally nahi aata, lekin paste/hardware-keyboard/race se
+        // negative value aa sakti hai. Negative cash/card/wallet/udhaar
+        // component ke saath sale complete ho sakti thi (e.g. cash=-50 +
+        // card=150 on 100 total → remaining 0 → confirm enabled) — drawer
+        // aur sheet dono corrupt. Ab source par clamp.
+        val clamped = amount.coerceAtLeast(0.0)
+        if (clamped != amount) {
+            appLogger.logWarn("UI_CLICK", "Payment amount clamped: $amount -> $clamped ($method)")
+        }
         val pb = _paymentBreakdown.value
         _paymentBreakdown.value = when (method) {
-            PaymentMethod.CASH    -> pb.copy(cashAmount = amount)
-            PaymentMethod.CARD    -> pb.copy(cardAmount = amount)
-            PaymentMethod.WALLET  -> pb.copy(walletAmount = amount)
-            PaymentMethod.UDHAAR  -> pb.copy(udhaarAmount = amount)
+            PaymentMethod.CASH    -> pb.copy(cashAmount = clamped)
+            PaymentMethod.CARD    -> pb.copy(cardAmount = clamped)
+            PaymentMethod.WALLET  -> pb.copy(walletAmount = clamped)
+            PaymentMethod.UDHAAR  -> pb.copy(udhaarAmount = clamped)
         }
     }
 
@@ -411,18 +454,31 @@ class PosViewModel @Inject constructor(
                 }
                 _stockWarning.value = null
 
-                val sub = items.sumOf { it.total }
-                // FIX (2026-08-06): tax-inclusive mode — total stays = subtotal
-                val tax = if (appSetupPrefs.taxInclusive) 0.0
-                          else items.sumOf { item -> item.total * item.taxPercent / 100.0 }
+                val isTaxInclusive = appSetupPrefs.taxInclusive
+                val grossSub = items.sumOf { it.total }
+                val totalTax = items.sumOf { item ->
+                    com.tillzo.pos.utils.TaxUtils.computeLineTax(item.total, item.taxPercent, isTaxInclusive).second
+                }
                 val disc = _cartDiscount.value
-                val total = sub + tax - disc
+                val subtotal = if (isTaxInclusive) (grossSub - totalTax) else grossSub
+                val total = if (isTaxInclusive) (grossSub - disc).coerceAtLeast(0.0) else (grossSub + totalTax - disc).coerceAtLeast(0.0)
                 val pb = _paymentBreakdown.value
+
+                // FIX (2026-08-23, DEF-110): defense-in-depth — UI par khata
+                // toggle requires a customer, lekin VM level par bhi guard
+                // chahiye (bypass/race case mein udhaar bina customer ke
+                // KhataEvent silently drop hota tha — ledger understated).
+                if (pb.udhaarAmount > 0.0 && _selectedCustomer.value == null) {
+                    _saleResult.value = SaleResult.Error(
+                        "Udhaar payment requires a customer — select or create one"
+                    )
+                    return@launch
+                }
 
                 val sale = completeSaleUseCase(
                     cartItems = items,
-                    subtotal = sub,
-                    tax = tax,
+                    subtotal = subtotal,
+                    tax = totalTax,
                     discount = disc,
                     total = total,
                     paymentMethod = pb.methodString,

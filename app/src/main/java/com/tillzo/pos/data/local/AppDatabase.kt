@@ -98,9 +98,10 @@ data class SyncLogEntity(
         WastageEntity::class,              // E1 — Wastage / Damage Logging
         com.tillzo.pos.data.local.entity.ItemGtinEntity::class, // GTIN Support
         AppLogEntity::class,                // CL — Rolling Logging System
-        com.tillzo.pos.data.local.entity.TimeClockEntity::class // Employee time-tracking
+        com.tillzo.pos.data.local.entity.ReturnsEntity::class,    // GAP-3 — Returns ledger (2026-08-23)
+        com.tillzo.pos.data.local.entity.VendorPaymentEntity::class // AP — Vendor Payment Ledger (2026-08-24)
     ],
-    version = 31,
+    version = 33,
     exportSchema = false  // Set to true + provide schemaLocation when releasing to production
 )
 @TypeConverters(RoomConverters::class)
@@ -122,10 +123,13 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun productBatchDao(): ProductBatchDao
     abstract fun purchaseOrderDao(): PurchaseOrderDao
     abstract fun vendorDao(): VendorDao
+    abstract fun vendorPaymentDao(): com.tillzo.pos.data.local.dao.VendorPaymentDao // AP — Vendor Payment Ledger
     abstract fun grnDao(): GrnDao
     abstract fun productUnitDao(): ProductUnitDao
     abstract fun tillSessionDao(): TillSessionDao // M-Till — Shift management
-    abstract fun timeClockDao(): com.tillzo.pos.data.local.dao.TimeClockDao // Employee time-tracking
+
+    // GAP-3 (2026-08-23): Returns ledger DAO
+    abstract fun returnsDao(): com.tillzo.pos.data.local.dao.ReturnsDao
     abstract fun wastageDao(): WastageDao          // E1 — Wastage / Damage Logging
     abstract fun logDao(): LogDao                  // CL — Rolling Logging System
 
@@ -944,6 +948,71 @@ abstract class AppDatabase : RoomDatabase() {
                         PRIMARY KEY(`system_row_id`)
                     )"""
                 )
+            }
+        }
+
+        // GAP-3 FIX (2026-08-23): v32 — Returns ledger table (Returns sheet tab
+        // kabhi populate nahi hoti thi — ab har refund isme record hota hai).
+        val MIGRATION_31_32 = object : Migration(31, 32) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    """CREATE TABLE IF NOT EXISTS `returns_log` (
+                        `returnId` TEXT NOT NULL,
+                        `systemRowId` TEXT NOT NULL,
+                        `originalInvoiceId` TEXT NOT NULL,
+                        `itemId` TEXT NOT NULL,
+                        `qtyReturned` REAL NOT NULL,
+                        `condition` TEXT NOT NULL,
+                        `refundMethod` TEXT NOT NULL,
+                        `amount` REAL NOT NULL,
+                        `lastUpdated` INTEGER NOT NULL,
+                        `syncStatus` TEXT NOT NULL,
+                        `posTerminalId` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`returnId`)
+                    )"""
+                )
+            }
+        }
+
+        // AP Migration (2026-08-24): v33 — Vendor Accounts Payable & Payment Reminders
+        val MIGRATION_32_33 = object : Migration(32, 33) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // Add payment and reminder fields to grn_headers
+                try { database.execSQL("ALTER TABLE `grn_headers` ADD COLUMN `paymentStatus` TEXT NOT NULL DEFAULT 'UNPAID'") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `grn_headers` ADD COLUMN `paidAmount` REAL NOT NULL DEFAULT 0.0") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `grn_headers` ADD COLUMN `dueBalance` REAL NOT NULL DEFAULT 0.0") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `grn_headers` ADD COLUMN `paymentMethod` TEXT NOT NULL DEFAULT 'CREDIT'") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `grn_headers` ADD COLUMN `paymentDueDate` TEXT NOT NULL DEFAULT ''") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `grn_headers` ADD COLUMN `reminderEnabled` INTEGER NOT NULL DEFAULT 0") } catch(_: Exception) {}
+                try { database.execSQL("ALTER TABLE `grn_headers` ADD COLUMN `reminderIntervalDays` INTEGER NOT NULL DEFAULT 1") } catch(_: Exception) {}
+
+                // Create vendor_payments table
+                database.execSQL(
+                    """CREATE TABLE IF NOT EXISTS `vendor_payments` (
+                        `paymentId` TEXT NOT NULL,
+                        `vendorId` TEXT NOT NULL,
+                        `vendorName` TEXT NOT NULL,
+                        `grnId` TEXT NOT NULL DEFAULT '',
+                        `poId` TEXT NOT NULL DEFAULT '',
+                        `type` TEXT NOT NULL,
+                        `amount` REAL NOT NULL,
+                        `paymentMethod` TEXT NOT NULL DEFAULT 'CASH',
+                        `paidBy` TEXT NOT NULL DEFAULT '',
+                        `note` TEXT NOT NULL DEFAULT '',
+                        `dueDate` TEXT NOT NULL DEFAULT '',
+                        `syncStatus` TEXT NOT NULL DEFAULT 'pending',
+                        `isDeleted` INTEGER NOT NULL DEFAULT 0,
+                        `deletedAt` INTEGER,
+                        `posTerminalId` TEXT NOT NULL DEFAULT '',
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`paymentId`)
+                    )"""
+                )
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_vendor_payments_vendorId` ON `vendor_payments`(`vendorId`)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_vendor_payments_grnId` ON `vendor_payments`(`grnId`)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_vendor_payments_createdAt` ON `vendor_payments`(`createdAt`)")
             }
         }
     }

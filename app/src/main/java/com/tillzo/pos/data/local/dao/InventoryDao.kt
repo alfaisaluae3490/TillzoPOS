@@ -23,6 +23,11 @@ interface InventoryDao {
     @Query("SELECT * FROM Inventory WHERE barcode_id = :barcode AND is_deleted = 0 LIMIT 1")
     suspend fun getItemByBarcode(barcode: String): InventoryEntity?
 
+    // DEF-64 FIX (2026-08-22): auto-generated EAN-13 GTINs ItemGtins table mein hote
+    // hain (barcode_id nahi) — scanner/lookup ab GTIN se bhi match karta hai.
+    @Query("SELECT i.* FROM Inventory i INNER JOIN ItemGtins g ON g.item_id = i.system_row_id WHERE g.gtin = :gtin AND i.is_deleted = 0 LIMIT 1")
+    suspend fun getItemByGtin(gtin: String): InventoryEntity?
+
     @Query("SELECT * FROM Inventory WHERE is_deleted = 0 ORDER BY item_name ASC")
     fun getAllItems(): Flow<List<InventoryEntity>>
 
@@ -101,4 +106,9 @@ interface InventoryDao {
 
     @Query("DELETE FROM ItemGtins WHERE item_id = :itemId")
     suspend fun deleteGtinsForItem(itemId: String)
+
+    // DEF-92 FIX (2026-08-23): full GTIN dump for ItemGtins sheet upload
+    // (dedupe by gtin_id against sheet) + restore-side duplicate-value guard.
+    @Query("SELECT * FROM ItemGtins")
+    suspend fun getAllGtins(): List<com.tillzo.pos.data.local.entity.ItemGtinEntity>
 }

@@ -74,4 +74,10 @@ abstract class RepositoryModule {
     abstract fun bindVendorRepository(
         vendorRepositoryImpl: VendorRepositoryImpl
     ): VendorRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindVendorPaymentRepository(
+        vendorPaymentRepositoryImpl: com.tillzo.pos.data.repository.VendorPaymentRepositoryImpl
+    ): com.tillzo.pos.domain.repository.VendorPaymentRepository
 }

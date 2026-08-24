@@ -10,6 +10,10 @@ interface SaleRepository {
     fun getSalesInRangePaged(start: Long, end: Long, limit: Int, offset: Int): Flow<List<Sale>>
     suspend fun getSaleById(systemRowId: String): Sale?
     suspend fun getSaleByInvoiceId(invoiceId: String): Sale?
+    suspend fun getSaleByInvoiceIdPrefix(prefix: String): Sale?
+
+    /** DEF-46b (2026-08-23): true if any refund row references this invoice. */
+    suspend fun hasRefundForInvoice(invoiceId: String): Boolean
     
     /**
      * Completes a checkout transaction. 

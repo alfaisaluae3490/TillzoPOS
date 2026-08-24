@@ -87,6 +87,12 @@ class CrmViewModel @Inject constructor(
         name: String, phone: String,
         whatsapp: String, email: String, address: String
     ) {
+        // FIX (2026-08-23, DEF-107): empty customer name pehle save ho jata tha —
+        // sheet par naam-less customer row. Ab reject + log.
+        if (name.isBlank()) {
+            android.util.Log.w("CrmVM", "saveCustomer rejected: blank name")
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
             val termId = appSetupPrefs.spreadsheetId.take(20).ifBlank { "TERM_1" }
             val customer = existing?.copy(

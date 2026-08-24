@@ -22,6 +22,7 @@ import com.tillzo.pos.data.local.dao.ProductBatchDao
 import com.tillzo.pos.data.local.dao.StockAdjustmentDao
 import com.tillzo.pos.data.local.entity.InventoryEntity
 import com.tillzo.pos.data.local.entity.StockAdjustmentEntity
+import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import dagger.hilt.android.lifecycle.HiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -47,7 +48,8 @@ private val ADJUSTMENT_TYPES = listOf(
 class StockAdjustmentViewModel @Inject constructor(
     private val inventoryDao: InventoryDao,
     private val stockAdjustmentDao: StockAdjustmentDao,
-    private val productBatchDao: ProductBatchDao
+    private val productBatchDao: ProductBatchDao,
+    private val appSetupPrefs: AppSetupPrefs
 ) : ViewModel() {
 
     private val _searchResults = MutableStateFlow<List<InventoryEntity>>(emptyList())
@@ -85,8 +87,12 @@ class StockAdjustmentViewModel @Inject constructor(
         adjustmentType: String,
         qtyChange: Double,
         reason: String,
-        adjustedBy: String = "admin"
+        adjustedBy: String? = null
     ) {
+        // FIX (2026-08-23, DEF-94): adjustedBy was hardcoded "admin" (default
+        // param, call site kuch pass nahi karta tha) → sheet Stock_Adjustments
+        // .adjusted_by hamesha "admin" — signed-in user kabhi record nahi hota.
+        val effectiveAdjustedBy = adjustedBy ?: appSetupPrefs.userEmail.ifBlank { "admin" }
         viewModelScope.launch(Dispatchers.IO) {
             // 1. Update product stock
             val newStock = (product.current_stock + qtyChange).coerceAtLeast(0.0)
@@ -98,13 +104,41 @@ class StockAdjustmentViewModel @Inject constructor(
                 )
             )
             // 3. Update the oldest active batch (FIFO) so batch stock stays in sync
+            // FIX (2026-08-21, DEF-29): if NO active batch exists (e.g. all batches
+            // deactivated after stock hit 0), the old code silently skipped the batch
+            // update — the stock change existed only in `current_stock`, so the next
+            // recalculateTotalStock() (sum of ACTIVE batches, e.g. on GRN) zeroed it
+            // out and the adjustment was LOST. Now a new active batch is created to
+            // hold the adjusted qty, keeping batch-sum == current_stock.
             val batch = productBatchDao.getOldestActiveBatch(product.system_row_id)
             if (batch != null) {
-                val newBatchStock = (batch.stockQty + qtyChange).coerceAtLeast(0.0)
+                // FIX (2026-08-22, DEF-61): batch stock could go NEGATIVE while
+                // product stock clamped at 0 — e.g. adjust -5 on a product with
+                // 3 total across batches: product→0, batch→-2. Batch sums then
+                // disagreed with current_stock and phantom negative inventory
+                // leaked into the sheet. Clamp the batch delta to what the
+                // product actually has left.
+                val available = product.current_stock.coerceAtLeast(0.0)
+                val effectiveChange = if (qtyChange < 0) qtyChange.coerceAtLeast(-available) else qtyChange
+                val newBatchStock = (batch.stockQty + effectiveChange).coerceAtLeast(0.0)
                 productBatchDao.updateBatchStock(batch.batchId, newBatchStock, System.currentTimeMillis())
                 if (newBatchStock <= 0.0) {
                     productBatchDao.deactivateBatch(batch.batchId, System.currentTimeMillis())
                 }
+            } else if (qtyChange > 0.0) {
+                productBatchDao.insertBatch(
+                    com.tillzo.pos.data.local.entity.ProductBatchEntity(
+                        productId = product.system_row_id,
+                        barcodeId = product.barcode_id,
+                        batchNumber = "ADJ-${java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())}",
+                        stockQty = qtyChange,
+                        costPrice = product.cost_price,
+                        sellingPrice = product.price_per_unit,
+                        isActive = true,
+                        syncStatus = "pending",
+                        posTerminalId = "terminal_1"
+                    )
+                )
             }
 
             // 2. Record adjustment log
@@ -115,7 +149,7 @@ class StockAdjustmentViewModel @Inject constructor(
                     adjustmentType = adjustmentType,
                     quantityChanged = qtyChange,
                     reason = reason.trim(),
-                    adjustedBy = adjustedBy,
+                    adjustedBy = effectiveAdjustedBy,
                     syncStatus = "pending",
                     createdAt = System.currentTimeMillis()
                 )

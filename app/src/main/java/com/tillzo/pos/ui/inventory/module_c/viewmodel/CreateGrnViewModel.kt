@@ -33,6 +33,7 @@ class CreateGrnViewModel @Inject constructor(
     private val poDao: PurchaseOrderDao,
     private val productBatchDao: ProductBatchDao,
     private val grnRepository: GrnRepository,
+    private val vendorPaymentRepository: com.tillzo.pos.domain.repository.VendorPaymentRepository,
     private val saveGrnDraftUseCase: SaveGrnDraftUseCase,
     private val confirmGrnUseCase: ConfirmGrnUseCase,
     private val sheetsRemoteDataSource: SheetsRemoteDataSource,
@@ -62,6 +63,32 @@ class CreateGrnViewModel @Inject constructor(
 
     private val _attachedFileName = MutableStateFlow("")
     val attachedFileName: StateFlow<String> = _attachedFileName.asStateFlow()
+
+    // ── Payment Terms & Reminder State ───────────────────────────────────────
+    private val _paymentOption = MutableStateFlow("FULL_PAID") // FULL_PAID | PARTIAL | CREDIT
+    val paymentOption: StateFlow<String> = _paymentOption.asStateFlow()
+
+    private val _paidAmountInput = MutableStateFlow("")
+    val paidAmountInput: StateFlow<String> = _paidAmountInput.asStateFlow()
+
+    private val _paymentMethod = MutableStateFlow("CASH") // CASH | BANK_TRANSFER | CHEQUE | CARD
+    val paymentMethod: StateFlow<String> = _paymentMethod.asStateFlow()
+
+    private val _paymentDueDate = MutableStateFlow("")
+    val paymentDueDate: StateFlow<String> = _paymentDueDate.asStateFlow()
+
+    private val _reminderEnabled = MutableStateFlow(true)
+    val reminderEnabled: StateFlow<Boolean> = _reminderEnabled.asStateFlow()
+
+    private val _reminderIntervalDays = MutableStateFlow(1)
+    val reminderIntervalDays: StateFlow<Int> = _reminderIntervalDays.asStateFlow()
+
+    fun setPaymentOption(option: String) { _paymentOption.value = option }
+    fun setPaidAmountInput(amount: String) { _paidAmountInput.value = amount }
+    fun setPaymentMethod(method: String) { _paymentMethod.value = method }
+    fun setPaymentDueDate(date: String) { _paymentDueDate.value = date }
+    fun setReminderEnabled(enabled: Boolean) { _reminderEnabled.value = enabled }
+    fun setReminderIntervalDays(days: Int) { _reminderIntervalDays.value = days }
 
     fun setAttachedFile(uri: Uri?, fileName: String) {
         _attachedFileUri.value = uri
@@ -164,9 +191,18 @@ class CreateGrnViewModel @Inject constructor(
     fun saveAndConfirmGRN(notes: String) {
         val po = _selectedPO.value ?: return
         if (_isLoading.value) return
+        // OVERNIGHT-AUDIT FIX (2026-08-24, D7-2): PO already fully received → block new GRN.
+        // Pehle har 'Receive Goods' navigation naya GRN bana deta tha, duplicate batches
+        // ban jaate the jab user button ko baar-baar dabata tha.
+        if (po.status.equals("RECEIVED", ignoreCase = true)) return
         
         viewModelScope.launch {
             _isLoading.value = true
+            // FIX (2026-08-23, DEF-101): pehle koi try/catch nahi tha aur
+            // _isLoading sirf normal path par false hota tha — koi exception
+            // (DB/network) aane par app crash + UI hamesha loading stuck.
+            // Ab catch + finally reset.
+            try {
             val currentItems = _items.value
             val grnNumber = grnRepository.generateGrnNumber()
             val grnId = UUID.randomUUID().toString()
@@ -201,6 +237,19 @@ class CreateGrnViewModel @Inject constructor(
             }
             
             val totalReceivedQty = currentItems.sumOf { it.receivedQty }
+            val totalAmount = currentItems.sumOf { it.totalCost }
+            val paidAmount = when (_paymentOption.value) {
+                "FULL_PAID" -> totalAmount
+                "PARTIAL" -> _paidAmountInput.value.toDoubleOrNull()?.coerceIn(0.0, totalAmount) ?: 0.0
+                else -> 0.0
+            }
+            val dueBalance = (totalAmount - paidAmount).coerceAtLeast(0.0)
+            val paymentStatus = when {
+                dueBalance <= 0.0 -> "PAID"
+                paidAmount > 0.0 -> "PARTIALLY_PAID"
+                else -> "UNPAID"
+            }
+
             val header = GrnHeaderEntity(
                 grnId = grnId,
                 grnNumber = grnNumber,
@@ -211,12 +260,22 @@ class CreateGrnViewModel @Inject constructor(
                 vendorPhone = "",
                 status = "DRAFT",
                 notes = notes,
-                receivedBy = "admin_user_id",
-                receivedByName = "Admin",
+                receivedBy = appSetupPrefs.userEmail.ifBlank { "admin_user_id" },
+                receivedByName = appSetupPrefs.userDisplayName.ifBlank { "Admin" },
                 totalItems = currentItems.size,
                 totalReceivedQty = totalReceivedQty,
-                totalAmount = currentItems.sumOf { it.totalCost },
-                posTerminalId = "terminal_1",
+                totalAmount = totalAmount,
+                paymentStatus = paymentStatus,
+                paidAmount = paidAmount,
+                dueBalance = dueBalance,
+                paymentMethod = _paymentMethod.value,
+                paymentDueDate = if (dueBalance > 0.0) _paymentDueDate.value else "",
+                reminderEnabled = _reminderEnabled.value && dueBalance > 0.0,
+                reminderIntervalDays = _reminderIntervalDays.value,
+                // FIX (2026-08-23, DEF-105): posTerminalId hardcoded "terminal_1"
+                // tha (baaki modules real terminal id use karte hain). Ab
+                // spreadsheet-id based — sheet par terminal identity consistent.
+                posTerminalId = appSetupPrefs.spreadsheetId.take(20).ifBlank { "terminal_1" },
                 attachedFileId = attachedFileId,
                 attachedFileUrl = attachedFileUrl
             )
@@ -225,26 +284,57 @@ class CreateGrnViewModel @Inject constructor(
             
             saveGrnDraftUseCase(header, itemsToSave)
             val result = confirmGrnUseCase(grnId)
-            if (result.success) _confirmedGrnId.value = grnId
+            if (result.success) {
+                _confirmedGrnId.value = grnId
+                // Record in Vendor AP Ledger
+                vendorPaymentRepository.recordBill(
+                    vendorId = po.vendorId,
+                    vendorName = po.vendorName,
+                    grnId = grnId,
+                    poId = po.poId,
+                    totalAmount = totalAmount,
+                    paidAmount = paidAmount,
+                    dueDate = if (dueBalance > 0.0) _paymentDueDate.value else "",
+                    paymentMethod = _paymentMethod.value,
+                    paidBy = appSetupPrefs.userEmail.ifBlank { "Admin" },
+                    note = "GRN $grnNumber (${po.poNumber})"
+                )
+            }
             _confirmResult.value = result
-            _isLoading.value = false
+            } catch (e: Exception) {
+                // FIX (2026-08-23, DEF-101): GRN confirm failure ab crash nahi —
+                // log + result surface (UI error dikha sakta hai).
+                android.util.Log.e("CreateGrnVM", "GRN confirm failed", e)
+                _confirmResult.value = ConfirmGrnResult(
+                    success = false,
+                    newProductsCreated = 0,
+                    batchesAdded = 0,
+                    batchesUpdated = 0,
+                    errorMessage = "GRN confirm failed: ${e.message ?: "unknown error"}"
+                )
+            } finally {
+                _isLoading.value = false
+            }
         }
     }
 
     private suspend fun resolveUploadFolderId(): String? {
-        val saved = appSetupPrefs.grnFolderId
+        val saved = appSetupPrefs.grnFolderId.ifBlank { appSetupPrefs.businessFolderId }
         if (saved.isNotBlank()) return saved
 
-        val folders = driveSearchHelper.searchFolders()
-        val target = folders.find { it.name == "Tillzo POS Uploads" }
+        val sheetId = appSetupPrefs.spreadsheetId
+        val bizName = appSetupPrefs.businessName.ifBlank { "TillzoPOS Business" }
+        val target = driveSearchHelper.findBusinessFolderForSheet(sheetId, bizName)
         if (target != null) {
             appSetupPrefs.saveGrnFolder(target.spreadsheetId, target.name)
+            appSetupPrefs.saveBusinessFolder(target.spreadsheetId)
             return target.spreadsheetId
         }
 
-        val newId = driveSearchHelper.createFolder("Tillzo POS Uploads")
+        val newId = driveSearchHelper.createFolder("$bizName Folder", sheetId, bizName)
         if (newId != null) {
-            appSetupPrefs.saveGrnFolder(newId, "Tillzo POS Uploads")
+            appSetupPrefs.saveGrnFolder(newId, "$bizName Folder")
+            appSetupPrefs.saveBusinessFolder(newId)
         }
         return newId
     }

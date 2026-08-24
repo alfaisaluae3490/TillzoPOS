@@ -7,6 +7,7 @@ import com.tillzo.pos.domain.repository.GrnRepository
 import com.tillzo.pos.domain.repository.InventoryRepository
 import com.tillzo.pos.domain.repository.ProductBatchRepository
 import com.tillzo.pos.data.local.dao.PurchaseOrderDao
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -23,6 +24,15 @@ class ConfirmGrnUseCase @Inject constructor(
             try {
                 val grnHeader = grnRepository.getGrnById(grnId)
                     ?: return@withContext ConfirmGrnResult(false, 0, 0, 0, "GRN not found")
+
+                // FIX (2026-08-22, DEF-40): non-idempotent confirm — double-tap
+                // on "Confirm GRN" (or a retry after a timeout) re-applied the
+                // batch stock, DOUBLE-incrementing inventory and creating
+                // duplicate batches. A CONFIRMED GRN is now a terminal state:
+                // re-invoke returns success without re-applying anything.
+                if (grnHeader.status.equals("CONFIRMED", ignoreCase = true)) {
+                    return@withContext ConfirmGrnResult(true, 0, 0, 0, "Already confirmed (idempotent)")
+                }
 
                 val grnItems = grnRepository.getGrnItems(grnId)
                 var newProductsCreated = 0
@@ -152,7 +162,7 @@ class ConfirmGrnUseCase @Inject constructor(
 
                 // Update linked PO status
                 if (grnHeader.poId.isNotEmpty()) {
-                    updateLinkedPOStatus(grnHeader.poId)
+                    updateLinkedPOStatus(grnHeader.poId, grnItems)
                 }
 
                 ConfirmGrnResult(
@@ -168,7 +178,24 @@ class ConfirmGrnUseCase @Inject constructor(
         }
     }
 
-    private suspend fun updateLinkedPOStatus(poId: String) {
+    private suspend fun updateLinkedPOStatus(poId: String, grnItems: List<com.tillzo.pos.data.local.entity.GrnItemEntity> = emptyList()) {
+        // FIX (2026-08-22, DEF-44): increment each PO item's receivedQty by the
+        // quantity received in THIS GRN — previously receivedQty was never
+        // touched, so allFullyReceived/anyReceived stayed false and the PO was
+        // stuck at "SENT" forever (DEF-10 root cause). Only for planned GRNs
+        // (poItemId non-empty).
+        if (poId.isNotBlank()) {
+            val now = System.currentTimeMillis()
+            grnItems.forEach { grnItem ->
+                if (grnItem.poItemId.isNotBlank() && grnItem.receivedQty > 0) {
+                    try {
+                        purchaseOrderDao.incrementReceivedQty(grnItem.poItemId, grnItem.receivedQty, now)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to increment receivedQty for ${grnItem.poItemId}: ${e.message}")
+                    }
+                }
+            }
+        }
         val poItems = purchaseOrderDao.getPOItems(poId)
         val allFullyReceived = poItems.isNotEmpty() && poItems.all { it.receivedQty >= it.orderedQty }
         val anyReceived = poItems.any { it.receivedQty > 0 }
@@ -178,5 +205,9 @@ class ConfirmGrnUseCase @Inject constructor(
             else -> "SENT" // Or whatever default
         }
         purchaseOrderDao.updatePOStatus(poId, newStatus, System.currentTimeMillis())
+    }
+
+    companion object {
+        private const val TAG = "ConfirmGrnUseCase"
     }
 }

@@ -19,6 +19,10 @@ interface VendorDao {
     @Query("SELECT * FROM vendors WHERE isDeleted = 0 ORDER BY name ASC")
     fun getAllVendors(): Flow<List<VendorEntity>>
 
+    // FIX (2026-08-22, DEF-31b): one-shot list for pull-import dedupe guard
+    @Query("SELECT * FROM vendors WHERE isDeleted = 0 ORDER BY name ASC")
+    suspend fun getAllVendorsAsList(): List<VendorEntity>
+
     // suspend List (not Flow) — used for one-shot search in VM
     @Query("SELECT * FROM vendors WHERE (name LIKE '%' || :query || '%' OR phone LIKE '%' || :query || '%') AND isDeleted = 0 ORDER BY name ASC")
     suspend fun searchVendors(query: String): List<VendorEntity>

@@ -46,6 +46,14 @@ class AppSetupPrefs @Inject constructor(
         const val KEY_CURRENCY_SYMBOL   = "currency_symbol"
         const val KEY_ADMIN_PASSCODE    = "admin_passcode"
         const val KEY_BLOCK_NEGATIVE_STOCK = "block_negative_stock"
+        const val KEY_BLOCK_SCREEN_CAPTURE = "block_screen_capture"
+
+        // ── Global Tax & Compliance ─────────────────────────────────────────
+        const val KEY_COUNTRY_CODE      = "country_code"
+        const val KEY_TAX_NUMBER        = "tax_number"
+        const val KEY_TAX_LABEL         = "tax_label"
+        const val KEY_DEFAULT_TAX_RATE  = "default_tax_rate"
+        const val KEY_ENABLE_ZATCA_QR   = "enable_zatca_qr"
 
         // ── Onboarding / Business Profile (FIX 2026-08-06: Faisal) ──────────
         const val KEY_ONBOARDING_COMPLETE = "onboarding_complete"
@@ -115,12 +123,48 @@ class AppSetupPrefs @Inject constructor(
         get() = prefs.getBoolean(KEY_BLOCK_NEGATIVE_STOCK, false)
         set(value) = prefs.edit().putBoolean(KEY_BLOCK_NEGATIVE_STOCK, value).apply()
 
-    // ── Tax Configuration (FIX 2026-08-06: industry-standard) ──────────────────
+    // ── Global Tax & Compliance Configuration ──────────────────────────────────
+    var countryCode: String
+        get() = prefs.getString(KEY_COUNTRY_CODE, "OTHER") ?: "OTHER"
+        set(value) = prefs.edit().putString(KEY_COUNTRY_CODE, value).apply()
+
+    var taxNumber: String
+        get() = prefs.getString(KEY_TAX_NUMBER, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_TAX_NUMBER, value).apply()
+
+    var taxLabel: String
+        get() = prefs.getString(KEY_TAX_LABEL, "VAT") ?: "VAT"
+        set(value) = prefs.edit().putString(KEY_TAX_LABEL, value).apply()
+
+    var defaultTaxRate: Double
+        get() = prefs.getFloat(KEY_DEFAULT_TAX_RATE, 0.0f).toDouble()
+        set(value) = prefs.edit().putFloat(KEY_DEFAULT_TAX_RATE, value.toFloat()).apply()
+
+    var enableZatcaQr: Boolean
+        get() = prefs.getBoolean(KEY_ENABLE_ZATCA_QR, false)
+        set(value) = prefs.edit().putBoolean(KEY_ENABLE_ZATCA_QR, value).apply()
+
     // true = prices include tax (tax shown separately, total unchanged)
     // false = tax added on top of subtotal
     var taxInclusive: Boolean
-        get() = prefs.getBoolean("KEY_TAX_INCLUSIVE", false)
+        get() = prefs.getBoolean("KEY_TAX_INCLUSIVE", true)
         set(value) = prefs.edit().putBoolean("KEY_TAX_INCLUSIVE", value).apply()
+
+    fun applyCountryPreset(preset: com.tillzo.pos.utils.CountryTaxPreset) {
+        countryCode = preset.code
+        currencySymbol = preset.currencySymbol
+        taxLabel = preset.taxLabel
+        defaultTaxRate = preset.defaultTaxRate
+        taxInclusive = preset.taxInclusive
+        enableZatcaQr = preset.enableZatcaQr
+    }
+
+    // ── Security (OVERNIGHT-AUDIT Phase 1c, 2026-08-23) ─────────────────────────
+    // true (default) = FLAG_SECURE on all activities: screenshots + screen
+    // recording blocked (bank-level). false = capture allowed (demo/sharing).
+    var blockScreenCapture: Boolean
+        get() = prefs.getBoolean(KEY_BLOCK_SCREEN_CAPTURE, true)
+        set(value) = prefs.edit().putBoolean(KEY_BLOCK_SCREEN_CAPTURE, value).apply()
 
     // ── Loyalty Program (FIX 2026-08-06: industry-standard) ────────────────────
     // Points earned per Rs/currency unit spent; 100 points = 1 currency unit discount

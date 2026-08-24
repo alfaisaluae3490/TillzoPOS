@@ -17,6 +17,11 @@ interface ExpenseDao : BaseDao<ExpenseEntity> {
     @Query("SELECT * FROM Expenses WHERE sync_status = 'pending'")
     suspend fun getPendingExpenses(): List<ExpenseEntity>
 
+    // FIX (2026-08-22, DEF-52): needed to diff old vs new amount on update /
+    // restore value on delete (till reconciliation).
+    @Query("SELECT * FROM Expenses WHERE system_row_id = :id LIMIT 1")
+    suspend fun getExpenseById(id: String): ExpenseEntity?
+
     @Query("UPDATE Expenses SET is_deleted = 1, deleted_at = :timestamp, sync_status = 'pending' WHERE system_row_id = :id")
     suspend fun softDeleteById(id: String, timestamp: Long)
 

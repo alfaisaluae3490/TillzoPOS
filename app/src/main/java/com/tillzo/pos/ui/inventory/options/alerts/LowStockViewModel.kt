@@ -7,6 +7,7 @@ import com.tillzo.pos.domain.repository.InventoryRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import java.text.SimpleDateFormat
@@ -49,7 +50,12 @@ class LowStockViewModel @Inject constructor(
     val outOfStockCount: StateFlow<Int> = outOfStockItems.map { it.size }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
-    val expiringCount: StateFlow<Int> = nearExpiryItems.map { it.size + expiredItems.value.size }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    // FIX (2026-08-23, DEF-66): expiringCount ab combine() use karta hai —
+    // pehle `expiredItems.value` ka STALE snapshot read hota tha (map body
+    // execute hone ke waqt ka), isliye badge count expiry update ke baad bhi
+    // purana reh sakta tha. Dono flows ab reactively merge hote hain.
+    val expiringCount: StateFlow<Int> = combine(nearExpiryItems, expiredItems) { near, expired ->
+        near.size + expired.size
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 }
 

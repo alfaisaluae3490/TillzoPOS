@@ -67,7 +67,7 @@ class InlineScannerViewModel @Inject constructor(
             try {
                 resetSleepTimer() // reset 4min timer on every scan attempt
 
-                val product = inventoryDao.getItemByBarcode(barcodeValue)
+                val product = inventoryDao.getItemByBarcode(barcodeValue) ?: inventoryDao.getItemByGtin(barcodeValue)
 
                 if (product != null) {
                     _scanEvent.emit(ScanEvent.ProductFound(product))

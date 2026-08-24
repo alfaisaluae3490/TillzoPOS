@@ -19,6 +19,10 @@ interface StockAdjustmentDao {
     @Query("SELECT * FROM StockAdjustments WHERE syncStatus = 'pending'")
     suspend fun getPendingAdjustments(): List<StockAdjustmentEntity>
 
+    // DEF-115 (2026-08-23): ALL adjustments for backup export
+    @Query("SELECT * FROM StockAdjustments ORDER BY createdAt ASC")
+    suspend fun getAllAdjustmentsForBackup(): List<StockAdjustmentEntity>
+
     @Query("UPDATE StockAdjustments SET syncStatus = 'synced' WHERE adjustmentId IN (:ids)")
     suspend fun markAsSynced(ids: List<String>)
 }

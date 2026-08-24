@@ -208,8 +208,14 @@ object SheetColumns {
 
     val PURCHASE_ORDERS = listOf("po_id", "po_number", "vendor_id", "vendor_name", "status", "notes", "total_amount", "currency", "expected_delivery_date", "created_by", "sync_status", "pos_terminal_id", "created_at", "updated_at")
     val PO_ITEMS = listOf("po_item_id", "po_id", "product_id", "product_name", "sku", "barcode_id", "ordered_qty", "received_qty", "unit_cost_price", "total_cost", "unit", "sync_status", "created_at", "updated_at")
-    val GRN_HEADERS = listOf("grn_id", "grn_number", "po_id", "vendor_id", "vendor_name", "status", "notes", "received_by", "total_amount", "sync_status", "pos_terminal_id", "attached_file_id", "attached_file_url", "created_at", "updated_at")
+    val GRN_HEADERS = listOf("grn_id", "grn_number", "po_id", "vendor_id", "vendor_name", "status", "notes", "received_by", "total_amount", "payment_status", "paid_amount", "due_balance", "payment_method", "payment_due_date", "reminder_enabled", "reminder_interval_days", "sync_status", "pos_terminal_id", "attached_file_id", "attached_file_url", "created_at", "updated_at")
     val GRN_ITEMS = listOf("grn_item_id", "grn_id", "po_item_id", "product_id", "product_name", "barcode_id", "sku", "received_qty", "unit_cost_price", "total_cost", "unit", "batch_number", "manufacturing_date", "expiry_date", "inventory_action", "is_new_item", "sync_status", "created_at", "updated_at")
+    val VENDOR_PAYMENTS = listOf(
+        "payment_id", "vendor_id", "vendor_name", "grn_id", "po_id", "type",
+        "amount", "payment_method", "paid_by", "note", "due_date",
+        "sync_status", "is_deleted", "deleted_at", "pos_terminal_id",
+        "created_at", "updated_at"
+    )
     val VENDORS = listOf(
         "vendor_id", "name", "phone", "whatsapp", "email", "address",
         "city", "credit_limit",
@@ -236,11 +242,13 @@ object SheetColumns {
         "created_at", "updated_at"
     )
 
-    // FIX (2026-08-06): employee time-tracking
-    val TIME_CLOCK = listOf(
-        "system_row_id", "employee_email", "employee_name", "event_type",
-        "timestamp", "note", "pos_terminal_id", "created_at", "updated_at",
-        "sync_status"
+
+    // DEF-92 FIX (2026-08-23): ItemGtins (auto/user GTINs) kabhi sheet sync nahi
+    // hote the → reinstall par GTIN lookup toot jata tha (barcode_id lookup OK,
+    // secondary GTINs lost). Ab dedicated tab: gtin_id (PK), item_id (FK →
+    // Inventory.system_row_id), gtin (unique), timestamps delta-cursor ke liye.
+    val ITEM_GTINS = listOf(
+        "gtin_id", "item_id", "gtin", "created_at", "updated_at"
     )
 
     val WASTAGE_LEDGER = listOf(

@@ -85,6 +85,24 @@ class WastageViewModel @Inject constructor(
         _selectedFilter.value = reason
     }
 
+    /**
+     * GAP-4 FIX (2026-08-22): Wastage entry delete UI ka backing function.
+     * Soft-delete (syncStatus='deleted') — entry list/totals se turant gayab,
+     * sheet par append-only audit trail intact rehta hai (sheet kabhi delete nahi).
+     * Stock intentionally NOT mutated — stock correction alag flow (Stock Adjustment)
+     * se hota hai, taaki double-deduction/restock race na ho.
+     */
+    fun deleteWastage(entry: WastageEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                wastageDao.softDelete(entry.wastageId)
+                android.util.Log.d("WastageVM", "Wastage entry soft-deleted: ${entry.wastageId}")
+            } catch (e: Exception) {
+                android.util.Log.e("WastageVM", "Delete failed: ${e.message}")
+            }
+        }
+    }
+
     fun searchProducts(query: String) {
         if (query.isBlank()) {
             _productSearchResults.value = emptyList()
@@ -119,6 +137,14 @@ class WastageViewModel @Inject constructor(
         loggedBy: String,
         posTerminalId: String
     ) {
+        // FIX (2026-08-23, DEF-102): quantity validation — pehle 0/negative qty
+        // silently accepted thi; negative qty actually INCREASED stock
+        // (maxOf(0, stock - (-5)) = stock+5) aur sheet par bogus wastage row
+        // banti thi. Ab reject + log.
+        if (quantity <= 0.0) {
+            android.util.Log.w("WastageVM", "logWastage rejected: quantity must be > 0 (got $quantity)")
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
             val today = dateFormat.format(Date())
             val wastage = WastageEntity(

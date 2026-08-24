@@ -173,4 +173,48 @@ class HomeViewModel @Inject constructor(
     fun forceSync() {
         syncOrchestrator.triggerManualSync()
     }
+
+    // ── OVERNIGHT-AUDIT Phase 2d (2026-08-23): 1-hour sync cooldown ─────────────
+    // Delta Sync already avoids A-to-Z re-uploads; this adds a UX-level guard so
+    // the user doesn't hammer the button. Within the window we surface a confirm
+    // dialog instead of silently syncing (exact copy per audit spec).
+    companion object {
+        private const val SYNC_COOLDOWN_MS = 60L * 60L * 1000L // 1 hour
+        const val COOLDOWN_DIALOG_TEXT =
+            "Sync not required yet. You can sync after closing the day etc. " +
+            "If you still want to sync, please confirm."
+    }
+
+    /** Epoch millis of the last completed/attempted manual sync (null = never). */
+    private val _lastManualSyncAt = MutableStateFlow<Long?>(null)
+    val lastManualSyncAt = _lastManualSyncAt.asStateFlow()
+
+    /** true when a Force Sync was requested inside the 1h cooldown window. */
+    private val _showSyncCooldownDialog = MutableStateFlow(false)
+    val showSyncCooldownDialog = _showSyncCooldownDialog.asStateFlow()
+
+    fun dismissSyncCooldownDialog() {
+        _showSyncCooldownDialog.value = false
+    }
+
+    /** User explicitly confirmed force-sync despite the warning. */
+    fun forceSyncNow() {
+        _showSyncCooldownDialog.value = false
+        forceSync()
+    }
+
+    /**
+     * Entry point from menu: if last sync < 1h ago, show the confirm popup;
+     * otherwise sync immediately.
+     */
+    fun requestSyncWithCooldown() {
+        val last = _lastManualSyncAt.value
+        val now = System.currentTimeMillis()
+        if (last != null && (now - last) < SYNC_COOLDOWN_MS) {
+            _showSyncCooldownDialog.value = true
+        } else {
+            _lastManualSyncAt.value = now
+            forceSync()
+        }
+    }
 }

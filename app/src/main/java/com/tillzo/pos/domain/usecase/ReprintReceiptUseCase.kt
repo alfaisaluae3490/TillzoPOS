@@ -6,6 +6,7 @@ import com.tillzo.pos.data.local.entity.SaleEntity
 import com.tillzo.pos.data.local.entity.SyncStatus
 import com.tillzo.pos.data.remote.SheetsRemoteDataSource
 import com.tillzo.pos.domain.model.Sale
+import com.tillzo.pos.domain.model.CartItem
 import com.tillzo.pos.utils.SheetColumns
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -51,6 +52,21 @@ class ReprintReceiptUseCase @Inject constructor(
             val metadata = sheetsRemoteDataSource.getSheetMetadata()
             val salesTabs = metadata.keys.filter { it.startsWith("Sales_") || it == "Sales" }
                 .sortedDescending()
+            // FIX (2026-08-22, DEF-65): the OLD code always returned the MOST
+            // RECENT Sales tab — reprinting an invoice from last month (or any
+            // older month) looked in the current tab, missed, and failed. Now:
+            // scan each Sales_* tab (newest first) for the invoice id; the
+            // current-month tab is only the fallback, not the only answer.
+            for (tab in salesTabs) {
+                try {
+                    val rows = sheetsRemoteDataSource.readRange("$tab!A:A")
+                    if (rows.any { row -> row.isNotEmpty() && row[0] == invoiceId }) {
+                        return tab
+                    }
+                } catch (_: Exception) {
+                    // skip unreadable tab, try next
+                }
+            }
             salesTabs.firstOrNull() ?: "Sales"
         } catch (e: Exception) {
             "Sales"
@@ -86,12 +102,21 @@ class ReprintReceiptUseCase @Inject constructor(
     }
 
     private fun SaleEntity.toDomainModel(): Sale {
+        // FIX (2026-08-23, DEF-116): items pehle hamesha emptyList() the —
+        // History duplicate-receipt print par sirf header chhapta tha, koi
+        // item line nahi. Ab items_json (cart snapshot) parse karke Sale.items
+        // mein bharo; corrupt/old JSON par empty fallback (print header-only).
+        val parsedItems: List<CartItem> = try {
+            gson.fromJson(items_json, cartItemListType) ?: emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
         return Sale(
             systemRowId = system_row_id,
             invoiceId = sync_uuid,
             cashierId = cashier_id,
             timestamp = timestamp,
-            items = emptyList(),
+            items = parsedItems,
             subtotal = subtotal,
             tax = tax,
             discount = discount,
@@ -104,5 +129,9 @@ class ReprintReceiptUseCase @Inject constructor(
             customerId = customer_id,
             referenceId = reference_id
         )
+    }
+
+    companion object {
+        private val cartItemListType = object : com.google.gson.reflect.TypeToken<List<CartItem>>() {}.type
     }
 }

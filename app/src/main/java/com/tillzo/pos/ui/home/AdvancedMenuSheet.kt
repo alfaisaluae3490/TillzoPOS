@@ -2,6 +2,7 @@ package com.tillzo.pos.ui.home
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -10,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -37,6 +39,7 @@ import com.tillzo.pos.ui.theme.*
 @Composable
 fun AdvancedMenuSheet(
     onDismiss: () -> Unit,
+    onNavigateToAnalytics: () -> Unit = {},
     onNavigateToWastage: () -> Unit = {},
     onNavigateToReturns: () -> Unit = {},
     onNavigateToCrm: () -> Unit = {},
@@ -44,7 +47,6 @@ fun AdvancedMenuSheet(
     onNavigateToSync: () -> Unit = {},
     onNavigateToZReport: () -> Unit = {},
     onNavigateToExpense: () -> Unit = {},
-    onNavigateToAdmin: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {},
     onNavigateToInventory: () -> Unit = {},
     onNavigateToPoList: () -> Unit = {},
@@ -52,7 +54,6 @@ fun AdvancedMenuSheet(
     onNavigateToVendors: () -> Unit = {},
     onNavigateToStockAdjustment: () -> Unit = {},
     onNavigateToTill: () -> Unit = {},
-    onNavigateToTimeClock: () -> Unit = {},
     onNavigateToVerifyQr: () -> Unit = {},
     onNavigateToStockAlerts: () -> Unit = {},
     onNavigateToHardwareDiagnostics: () -> Unit = {}
@@ -65,14 +66,25 @@ fun AdvancedMenuSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
+                // DEF-85 FIX: scroll state save/restore mat karo — rememberScrollState
+                // internally rememberSaveable hai, isliye activity recreate par menu
+                // mid-list scroll position par khulta tha. Ab hamesha top se khulega.
+                .verticalScroll(remember { ScrollState(0) })
                 .padding(bottom = 32.dp)
         ) {
             Text(
-                text = "Advanced Options",
+                text = "Business Intelligence & Operations",
                 color = TextSecondary,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+            )
+
+            MenuItemRow(
+                icon = Icons.Default.AutoGraph,
+                label = "Business Analytics & Insights",
+                description = "P&L charts, sales, top items & tax",
+                accentColor = AccentBlue,
+                onClick = { onDismiss(); onNavigateToAnalytics() }
             )
 
             MenuItemRow(
@@ -160,14 +172,6 @@ fun AdvancedMenuSheet(
                 accentColor = AccentBlue,
                 onClick = { onDismiss(); onNavigateToTill() }
             )
-            // FIX (2026-08-06): employee time-tracking
-            MenuItemRow(
-                icon = Icons.Default.Timer,
-                label = "Time Clock",
-                description = "Punch in / out, attendance log",
-                accentColor = AccentBlue,
-                onClick = { onDismiss(); onNavigateToTimeClock() }
-            )
             // FIX (2026-08-06): receipt QR verification (anti-fraud)
             MenuItemRow(
                 icon = Icons.Default.QrCodeScanner,
@@ -180,13 +184,6 @@ fun AdvancedMenuSheet(
             Divider(color = SurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp))
             Spacer(modifier = Modifier.height(4.dp))
 
-            MenuItemRow(
-                icon = Icons.Default.AdminPanelSettings,
-                label = "Admin Dashboard",
-                description = "P&L, user management, reports",
-                accentColor = AccentBlue,
-                onClick = { onDismiss(); onNavigateToAdmin() }
-            )
             MenuItemRow(
                 icon = Icons.Default.Build,
                 label = "Hardware Diagnostics",

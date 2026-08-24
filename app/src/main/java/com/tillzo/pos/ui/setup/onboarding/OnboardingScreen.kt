@@ -47,6 +47,11 @@ fun OnboardingScreen(
 
     val ownerName by viewModel.ownerName.collectAsState()
     val businessName by viewModel.businessName.collectAsState()
+    val countryCode by viewModel.countryCode.collectAsState()
+    val taxNumber by viewModel.taxNumber.collectAsState()
+    val taxLabel by viewModel.taxLabel.collectAsState()
+    val defaultTaxRate by viewModel.defaultTaxRate.collectAsState()
+    val taxInclusive by viewModel.taxInclusive.collectAsState()
     val businessAddress by viewModel.businessAddress.collectAsState()
     val businessPhone by viewModel.businessPhone.collectAsState()
     val businessSocial by viewModel.businessSocial.collectAsState()
@@ -63,18 +68,17 @@ fun OnboardingScreen(
     ) { uri -> if (uri != null) viewModel.pickLogo(uri) }
 
     val steps = listOf(
-        "Owner Name", "Business Name", "Business Address", "Business Logo",
+        "Owner Name", "Business Name", "Country & Tax", "Business Address", "Business Logo",
         "Business Phone", "Social Media", "Website / App Link", "Review"
     )
 
-    // FIX (2026-08-06): business name, address, phone are MANDATORY per Faisal.
-    // Everything else is optional. Social = just username; website+app link merged.
     val canProceed = when (step) {
         0 -> true // owner name optional
         1 -> businessName.isNotBlank()
-        2 -> businessAddress.isNotBlank()
-        3 -> true // logo optional
-        4 -> businessPhone.isNotBlank()
+        2 -> countryCode.isNotBlank()
+        3 -> businessAddress.isNotBlank()
+        4 -> true // logo optional
+        5 -> businessPhone.isNotBlank()
         else -> true
     }
 
@@ -169,7 +173,16 @@ fun OnboardingScreen(
                     placeholder = "e.g. Smith's Grocery",
                     onValue = viewModel::setBusinessName
                 )
-                2 -> OnboardingField(
+                2 -> CountryTaxStep(
+                    selectedCountryCode = countryCode,
+                    taxNumber = taxNumber,
+                    taxLabel = taxLabel,
+                    taxRate = defaultTaxRate,
+                    taxInclusive = taxInclusive,
+                    onSelectCountry = viewModel::selectCountry,
+                    onTaxNumberChange = viewModel::setTaxNumber
+                )
+                3 -> OnboardingField(
                     title = "Business address *",
                     subtitle = "Required — printed on receipts and used for reports.",
                     value = businessAddress,
@@ -177,22 +190,22 @@ fun OnboardingScreen(
                     onValue = viewModel::setBusinessAddress,
                     singleLine = false
                 )
-                3 -> LogoStep(logoPath = logoPath, onPick = { logoPicker.launch("image/*") })
-                4 -> OnboardingField(
+                4 -> LogoStep(logoPath = logoPath, onPick = { logoPicker.launch("image/*") })
+                5 -> OnboardingField(
                     title = "Business phone number *",
                     subtitle = "Required — customers can call this number from receipts.",
                     value = businessPhone,
                     placeholder = "e.g. +1 555 123 4567",
                     onValue = viewModel::setBusinessPhone
                 )
-                5 -> OnboardingField(
+                6 -> OnboardingField(
                     title = "Social media username",
                     subtitle = "Optional — just your @username, no full link needed.",
                     value = businessSocial,
                     placeholder = "e.g. @smithsgrocery",
                     onValue = viewModel::setBusinessSocial
                 )
-                6 -> OnboardingField(
+                7 -> OnboardingField(
                     title = "Website / App link",
                     subtitle = "Optional — one link for both your website and app.",
                     value = businessWebsite,
@@ -203,9 +216,13 @@ fun OnboardingScreen(
                         viewModel.setBusinessAppLink(it)
                     }
                 )
-                7 -> ReviewStep(
+                8 -> ReviewStep(
                     ownerName = ownerName,
                     businessName = businessName,
+                    countryCode = countryCode,
+                    taxNumber = taxNumber,
+                    taxLabel = taxLabel,
+                    taxRate = defaultTaxRate,
                     businessAddress = businessAddress,
                     businessPhone = businessPhone,
                     businessSocial = businessSocial,
@@ -308,9 +325,106 @@ private fun LogoStep(logoPath: String, onPick: () -> Unit) {
 }
 
 @Composable
+private fun CountryTaxStep(
+    selectedCountryCode: String,
+    taxNumber: String,
+    taxLabel: String,
+    taxRate: Double,
+    taxInclusive: Boolean,
+    onSelectCountry: (String) -> Unit,
+    onTaxNumberChange: (String) -> Unit
+) {
+    Text(
+        "Country & Tax System",
+        color = Color.White,
+        fontSize = 22.sp,
+        fontWeight = FontWeight.Bold
+    )
+    Spacer(Modifier.height(6.dp))
+    Text(
+        "Select your business country. Tillzo will automatically configure official tax rules, currency, and invoice formats.",
+        color = Color(0xFFAAAAAA),
+        fontSize = 14.sp
+    )
+    Spacer(Modifier.height(20.dp))
+
+    // Country selection list
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        com.tillzo.pos.utils.TaxUtils.PRESETS.forEach { preset ->
+            val isSelected = preset.code.equals(selectedCountryCode, ignoreCase = true)
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onSelectCountry(preset.code) },
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isSelected) Color(0xFF1E3A5F) else Color(0xFF242424)
+                ),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (isSelected) Color(0xFF1E88E5) else Color(0xFF383838)
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(preset.flag, fontSize = 24.sp)
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            preset.name,
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 15.sp
+                        )
+                        Text(
+                            "${preset.currencySymbol} • ${preset.taxLabel} ${preset.defaultTaxRate}% (${if (preset.taxInclusive) "Inclusive" else "Exclusive"})",
+                            color = if (isSelected) Color(0xFF90CAF9) else Color(0xFF888888),
+                            fontSize = 12.sp
+                        )
+                    }
+                    if (isSelected) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFF1E88E5),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    Spacer(Modifier.height(20.dp))
+
+    val currentPreset = com.tillzo.pos.utils.TaxUtils.getPreset(selectedCountryCode)
+    OutlinedTextField(
+        value = taxNumber,
+        onValueChange = onTaxNumberChange,
+        label = { Text("${currentPreset.taxIdLabel} (Optional)") },
+        placeholder = { Text("e.g. 100234567890003") },
+        modifier = Modifier.fillMaxWidth(),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = Color.White,
+            unfocusedTextColor = Color.White,
+            focusedBorderColor = Color(0xFF1E88E5),
+            unfocusedBorderColor = Color(0xFF444444)
+        ),
+        shape = RoundedCornerShape(10.dp),
+        singleLine = true
+    )
+}
+
+@Composable
 private fun ReviewStep(
     ownerName: String,
     businessName: String,
+    countryCode: String,
+    taxNumber: String,
+    taxLabel: String,
+    taxRate: Double,
     businessAddress: String,
     businessPhone: String,
     businessSocial: String,
@@ -327,8 +441,14 @@ private fun ReviewStep(
     )
     Spacer(Modifier.height(20.dp))
 
+    val preset = com.tillzo.pos.utils.TaxUtils.getPreset(countryCode)
     ReviewRow("Owner", ownerName)
     ReviewRow("Business", businessName)
+    ReviewRow("Country", "${preset.flag} ${preset.name} (${preset.currencySymbol})")
+    ReviewRow("Tax Rule", "$taxLabel ${taxRate}% (${if (preset.taxInclusive) "Inclusive" else "Exclusive"})")
+    if (taxNumber.isNotBlank()) {
+        ReviewRow(preset.taxIdLabel, taxNumber)
+    }
     ReviewRow("Address", businessAddress)
     ReviewRow("Phone", businessPhone)
     ReviewRow("Social", businessSocial)
