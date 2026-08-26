@@ -1174,3 +1174,28 @@ LATEST (2026-08-25) — DEF-46 KHATA FIX + HOUSEKEEPING
 - plans/: 4 plans (hierarchical categories, product units, two-step selector,
   vendor profiles) -> IMPLEMENTED marked.
 - OPEN: device-level Z-Report acceptance test (emulator), Play release signing.
+
+========================================================================
+DEF-46 ACCEPTANCE TEST — PASSED (2026-08-26, emulator-5554, fresh build)
+========================================================================
+Scenario: Split sale (Panadol $20 = cash $8 + udhaar $12) on Faisal Khan,
+then full refund (Return to Inventory / RESTOCK) of that invoice.
+
+  [1] Split sale  -> Khata UDHAAR 12 (sale 25665b8f)          PASS
+  [2] CRM Balance Due = $12 (udhaar portion only)             PASS
+  [3] Full refund -> Khata JAMA 12 (EXACTLY udhaar, not 20)   PASS
+  [4] CRM Balance Due = $0 (no negative; Total Paid $12)      PASS
+  [5] Stock restock: Panadol +1 (Returns sheet qty 1 RESTOCK) PASS
+  [6] Z-Report Expected Cash $170 = 100 open +70 sales
+      +8 split -8 refund (DEF-127 session deduction)          PASS
+  [7] Double-refund guard (DEF-46b) in code                   PASS
+  [8] Sheets sync: Returns + reverse Sale rows uploaded       PASS
+
+VERDICT: DEF-46 fix verified live at UI + ledger (Khata_Events) +
+Z-Report level. No regressions on the refund path.
+
+NOTES (pre-existing, out of scope):
+- Duplicate customer records 'Faisal Khan' vs 'Faisal%20Khan'
+  (old URL-encode bug) — cleanup suggested.
+- 'Faisal Khan' has legacy ledger 20+100-70 = $50 due from prior
+  sessions (untouched by this test).
