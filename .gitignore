@@ -66,3 +66,9 @@ graphify-out/
 /Opencode Testing Doc/
 /HERMES_MASTER_AUTONOMOUS_PROMPT.md
 /tillzo_ultra_master_autonomous_prompt.md
+
+# One-off adb UI automation scripts (test debris)
+ui_auto.py
+ui_flow.py
+ui_flow2.py
+uihelper.py
