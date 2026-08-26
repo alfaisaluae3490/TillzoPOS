@@ -244,25 +244,39 @@ class ReturnsViewModel @Inject constructor(
                 }
             }
             
-            // FIX (2026-08-22, DEF-46): refund was never recorded in the
-            // customer's Khata — a customer who paid cash and then got a
-            // refund saw NO credit on their account, and the khata balance
-            // stayed overstated. Now a JAMA (credit) event is created for
-            // customer-linked sales.
+            // DEF-46 FIX (2026-08-25): JAMA sirf us portion ka jo customer
+            // par asal udhaar tha. Pehle hamesha originalSale.total credit
+            // hota tha → CASH/CARD/WALLET sale ka refund cash drawer se
+            // wapas jaata hai (DEF-127 cashOut) AUR khata pe full JAMA bhi
+            // → double benefit (customer ko cash bhi milta, account pe
+            // credit bhi, balance negative ho jaata tha). SPLIT sale
+            // (e.g. 40 cash + 60 udhaar) par bhi 100 ka JAMA → 40 ka
+            // bogus credit. Ab sirf udhaarAmount JAMA hota hai (debt
+            // cancel); CASH/CARD/WALLET refund par khata event bilkul
+            // nahi — sale ke waqt khata involve hi nahi hua tha. Legacy
+            // UDHAAR sales (purane versions: udhaarAmount 0) ke liye
+            // fallback: paymentMethod UDHAAR ho to full total JAMA.
             if (originalSale.customerId != null) {
-                try {
-                    khataEventDao.insert(
-                        KhataEventEntity(
-                            customer_id = originalSale.customerId,
-                            event_type = "JAMA",
-                            amount = originalSale.total,
-                            note = "Refund of ${originalSale.invoiceId} ($reason)",
-                            reference_sale_id = returnInvoiceId,
-                            pos_terminal_id = appSetupPrefs.spreadsheetId.take(20).ifBlank { "TERM_1" }
+                val udhaarOwed = when {
+                    originalSale.udhaarAmount > 0.0 -> originalSale.udhaarAmount
+                    originalSale.paymentMethod.equals("UDHAAR", ignoreCase = true) -> originalSale.total
+                    else -> 0.0
+                }
+                if (udhaarOwed > 0.0) {
+                    try {
+                        khataEventDao.insert(
+                            KhataEventEntity(
+                                customer_id = originalSale.customerId,
+                                event_type = "JAMA",
+                                amount = udhaarOwed,
+                                note = "Refund of ${originalSale.invoiceId} ($reason)",
+                                reference_sale_id = returnInvoiceId,
+                                pos_terminal_id = appSetupPrefs.spreadsheetId.take(20).ifBlank { "TERM_1" }
+                            )
                         )
-                    )
-                } catch (e: Exception) {
-                    android.util.Log.e("ReturnsVM", "Khata refund event failed: ${e.message}")
+                    } catch (e: Exception) {
+                        android.util.Log.e("ReturnsVM", "Khata refund event failed: ${e.message}")
+                    }
                 }
             }
 

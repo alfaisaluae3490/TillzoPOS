@@ -1164,3 +1164,13 @@ PHASE 1/2 GAPS FOUND & FIXED (2026-08-25):
         +generateEan13, +generateQr (Phase 2.5 Code128/EAN13/QR engine)
 BUILD: compileDebugKotlin PASSED
 
+
+========================================================================
+LATEST (2026-08-25) — DEF-46 KHATA FIX + HOUSEKEEPING
+========================================================================
+- DEF-46 FIX: refund JAMA ab sirf udhaar portion ka (SPLIT/CASH double-credit
+  khatam) — ReturnsViewModel.processFullReturn; V1.md section 13.
+- Git: saara accumulated kaam commit 935536e + push origin/main (clean tree).
+- plans/: 4 plans (hierarchical categories, product units, two-step selector,
+  vendor profiles) -> IMPLEMENTED marked.
+- OPEN: device-level Z-Report acceptance test (emulator), Play release signing.

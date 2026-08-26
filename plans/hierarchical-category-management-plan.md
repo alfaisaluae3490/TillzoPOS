@@ -1,3 +1,5 @@
+> **STATUS: ✅ IMPLEMENTED (2026-08-25)** — plan ke mutabiq code complete, V1 changelog mein logged.
+
 # Hierarchical Category Management (Main & Sub-Categories) with Google Sheets Sync
 
 ## Architecture Overview

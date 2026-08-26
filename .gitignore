@@ -50,3 +50,19 @@ graphify-out/
 /sc*.png
 /*.xlsx
 /*.csv
+
+# Local dev artifacts (not part of app repo)
+/old_plain.db
+/legacy_plain_device.bak
+/audit_screen1.png
+/form_state.png
+/form_state2.png
+/build_hermes_suite.py
+/graphify_query.py
+/hermes_watchdog.py
+/sheet_verifier.py
+
+# Test debris + sensitive
+/Opencode Testing Doc/
+/HERMES_MASTER_AUTONOMOUS_PROMPT.md
+/tillzo_ultra_master_autonomous_prompt.md

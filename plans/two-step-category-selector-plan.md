@@ -1,3 +1,5 @@
+> **STATUS: ✅ IMPLEMENTED (2026-08-25)** — plan ke mutabiq code complete, V1 changelog mein logged.
+
 # Two-Step Hierarchical Category Selection in Product Form
 
 ## Overview

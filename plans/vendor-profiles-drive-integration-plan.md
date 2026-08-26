@@ -1,3 +1,5 @@
+> **STATUS: ✅ IMPLEMENTED (2026-08-25)** — plan ke mutabiq code complete, V1 changelog mein logged.
+
 # Vendor Profiles Extension — Google Drive Document Uploads + Expanded Fields
 
 ## Overview
