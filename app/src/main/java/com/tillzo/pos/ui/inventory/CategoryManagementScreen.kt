@@ -22,6 +22,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.tillzo.pos.data.local.dao.CategoryDao
 import com.tillzo.pos.data.local.entity.CategoryEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -36,11 +38,23 @@ import javax.inject.Inject
 
 @HiltViewModel
 class CategoryManagementViewModel @Inject constructor(
-    private val categoryDao: CategoryDao
+    private val categoryDao: CategoryDao,
+    @ApplicationContext private val appContext: Context
 ) : ViewModel() {
 
     val categories: StateFlow<List<CategoryEntity>> = categoryDao.getAllCategories()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // TEMP DEBUG DUMP (audit 26-Aug): write all categories to file for verification
+    init {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val all = categoryDao.getAllCategories().first()
+                val f = java.io.File(appContext.filesDir, "db_dump_categories.txt")
+                f.writeText(all.joinToString("\n") { "${it.system_row_id} | ${it.category_name} | parent=${it.parent_category_id} | del=${it.is_deleted} | sync=${it.sync_status}" })
+            }
+        }
+    }
 
     private val _errorChannel = Channel<String>(Channel.BUFFERED)
     val errorChannel: Flow<String> = _errorChannel.receiveAsFlow()
@@ -119,10 +133,11 @@ fun CategoryManagementScreen(
     var showDeleteConfirm by remember { mutableStateOf<CategoryEntity?>(null) }
 
     // Separate main categories and subcategories
-    val mainCategories = remember(categories) { categories.filter { it.parent_category_id == null } }
+    // FIX: parent_category_id can be "" (empty string) from Room/Sheet sync, not null
+    val mainCategories = remember(categories) { categories.filter { it.parent_category_id.isNullOrBlank() } }
 
     // Build a map of parent_id -> children for quick lookup
-    val childrenMap = remember(categories) { categories.groupBy { it.parent_category_id } }
+    val childrenMap = remember(categories) { categories.filter { !it.parent_category_id.isNullOrBlank() }.groupBy { it.parent_category_id } }
 
     // Delete confirm dialog
     showDeleteConfirm?.let { cat ->

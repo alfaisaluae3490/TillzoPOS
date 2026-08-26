@@ -1,6 +1,7 @@
 package com.tillzo.pos.di
 
 import android.content.Context
+import android.util.Log
 import androidx.room.Room
 import com.tillzo.pos.data.local.AppDatabase
 import com.tillzo.pos.data.local.dao.SaleDao
@@ -55,6 +56,12 @@ object DatabaseModule {
         // Passphrase: AES-256 key from app Keystore. DB file ab encrypted —
         // rooted device / debuggable build se copy karne par bhi unreadable.
         val passphrase = com.tillzo.pos.utils.DbEncryption.getOrCreatePassphrase(context)
+        // FIX (2026-08-25, overnight audit BUG#3): pre-encryption installs (before the
+        // 2026-08-07 SQLCipher fix) carry a PLAINTEXT tillzo_pos_db. Opening it through
+        // SQLCipher SupportFactory throws "file is not a database" on first query and
+        // the app crashes at startup. Auto-migrate: back up the legacy file, delete it,
+        // and let Room recreate a fresh SQLCipher-encrypted DB.
+        migrateLegacyPlaintextDb(context)
         val factory = SupportFactory(SQLiteDatabase.getBytes(passphrase.toCharArray()))
 
         return Room.databaseBuilder(
@@ -99,6 +106,34 @@ object DatabaseModule {
             )
             // fallbackToDestructiveMigration() ← dev-only safety net, commented out in favor of real migration
             .build()
+    }
+
+    /**
+     * BUG#3 fix (2026-08-25): detects a legacy PLAINTEXT SQLite DB (created before the
+     * 2026-08-07 SQLCipher fix) and migrates it safely:
+     *  1. backs the file up to `<name>.legacy_plain.bak` (recovery safety net),
+     *  2. deletes the original so Room recreates a SQLCipher-encrypted DB.
+     * Detection: a plaintext DB opens fine via android SQLite; a SQLCipher DB does not.
+     */
+    private fun migrateLegacyPlaintextDb(context: Context) {
+        val dbFile = context.getDatabasePath(AppDatabase.DATABASE_NAME)
+        if (!dbFile.exists()) return
+        try {
+            val probe = android.database.sqlite.SQLiteDatabase.openDatabase(
+                dbFile.path, null,
+                android.database.sqlite.SQLiteDatabase.OPEN_READONLY
+            )
+            probe.close()
+            // Opened as plaintext → legacy unencrypted DB.
+            val bak = java.io.File(dbFile.parentFile, AppDatabase.DATABASE_NAME + ".legacy_plain.bak")
+            if (!bak.exists()) dbFile.copyTo(bak, overwrite = true)
+            dbFile.delete()
+            java.io.File(dbFile.parentFile, AppDatabase.DATABASE_NAME + "-wal").delete()
+            java.io.File(dbFile.parentFile, AppDatabase.DATABASE_NAME + "-shm").delete()
+            Log.w("DatabaseModule", "Legacy plaintext DB → backed up to ${bak.name} & will be recreated encrypted")
+        } catch (_: Exception) {
+            // Not plaintext (already SQLCipher-encrypted, or no DB) — leave as is.
+        }
     }
 
     // ── DAOs ─────────────────────────────────────────────────────────────────

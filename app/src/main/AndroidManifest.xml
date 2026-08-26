@@ -23,8 +23,14 @@
     <!-- Bluetooth (for ESC/POS and Label printers — M5) -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <!-- PLAY POLICY (2026-08-24): neverForLocation flag mandatory — BT scan must not
+         imply location access. Without it, Play Console flags location-permission review. -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_CONNECT"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
 
     <!-- Camera (ML Kit scanner — M5, M6) -->
     <uses-permission android:name="android.permission.CAMERA" />

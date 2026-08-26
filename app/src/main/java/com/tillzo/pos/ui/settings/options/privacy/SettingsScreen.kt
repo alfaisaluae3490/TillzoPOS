@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -584,6 +585,93 @@ fun SettingsScreen(
                     context.startActivity(browserIntent)
                 }
             )
+
+            // ── PLAY POLICY T2 (2026-08-24): Account & Data Deletion ─────────
+            Spacer(modifier = Modifier.height(12.dp))
+            val deleteState by viewModel.deleteAccountState.collectAsStateWithLifecycle()
+            var showDeleteConfirm by remember { mutableStateOf(false) }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.DeleteForever, contentDescription = null, tint = Color(0xFFD32F2F))
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("Delete Account & Data", fontWeight = FontWeight.Bold, color = Color(0xFFD32F2F))
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Permanently deletes your local Tillzo POS database, all app preferences and " +
+                        "revokes this app's access to your Google Account. This cannot be undone. " +
+                        "Your Google Sheet on your own Drive is NOT deleted.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF6D4C41)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(
+                        onClick = { showDeleteConfirm = true },
+                        enabled = deleteState !is DeleteAccountState.Deleting,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (deleteState is DeleteAccountState.Deleting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = Color.White
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("Deleting...")
+                        } else {
+                            Text("Delete Account & All Data")
+                        }
+                    }
+                }
+            }
+
+            if (showDeleteConfirm) {
+                AlertDialog(
+                    onDismissRequest = { showDeleteConfirm = false },
+                    title = { Text("Delete everything?") },
+                    text = {
+                        Text(
+                            "This will permanently erase ALL local data (products, sales, customers, " +
+                            "expenses, ledgers), reset the app to first-run state, and revoke its Google " +
+                            "Account access. Your Google Sheet itself stays on your Drive.\n\nAre you sure?"
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            showDeleteConfirm = false
+                            viewModel.deleteAccountAndData()
+                        }) {
+                            Text("Yes, delete everything", color = Color(0xFFD32F2F))
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
+                    }
+                )
+            }
+
+            // On success: kill process so next launch starts fresh (first-run state)
+            LaunchedEffect(deleteState) {
+                if (deleteState is DeleteAccountState.Done) {
+                    kotlinx.coroutines.delay(1500)
+                    android.os.Process.killProcess(android.os.Process.myPid())
+                }
+            }
+
+            if (deleteState is DeleteAccountState.Error) {
+                LaunchedEffect(deleteState) {
+                    snackbarHostState.showSnackbar(
+                        "Deletion failed: ${(deleteState as DeleteAccountState.Error).message}"
+                    )
+                    viewModel.clearSettingsError()
+                }
+            }
 
             Spacer(modifier = Modifier.height(24.dp))
             Text("App Info", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)

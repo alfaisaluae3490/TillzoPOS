@@ -25,8 +25,17 @@ class SettingsViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val driveSearchHelper: DriveSearchHelper,
     private val sheetsRepository: SheetsRepository,
-    private val localBackupManager: LocalBackupManager
+    private val localBackupManager: LocalBackupManager,
+    private val appDatabase: com.tillzo.pos.data.local.AppDatabase,
+    application: Application
 ) : ViewModel() {
+
+    // PLAY POLICY T2: app context for DB file deletion + prefs wipe
+    private val application: Application = application
+
+    // PLAY POLICY T2: held reference so deleteAllLocalData() can close Room
+    // before deleting the database files (SQLCipher SupportFactory connection).
+    private var appDatabaseRef: com.tillzo.pos.data.local.AppDatabase? = appDatabase
 
     private val _spreadsheetId = MutableStateFlow(appSetupPrefs.spreadsheetId)
     val spreadsheetId = _spreadsheetId.asStateFlow()
@@ -417,4 +426,117 @@ class SettingsViewModel @Inject constructor(
             }
         }
     }
+
+    // ── PLAY POLICY T2 (2026-08-24): Account & Data Deletion ─────────────────
+
+    private val _deleteAccountState = MutableStateFlow<DeleteAccountState>(DeleteAccountState.Idle)
+    val deleteAccountState: StateFlow<DeleteAccountState> = _deleteAccountState.asStateFlow()
+
+    /**
+     * Full account & data deletion per Google Play policy:
+     *  1. Revoke Google OAuth token server-side (removes grant from user's
+     *     Google Account → myaccount.google.com/permissions)
+     *  2. Wipe the entire local Room database (all business data)
+     *  3. Clear every SharedPreferences/DataStore file (setup prefs, tokens,
+     *     barcode prefs, update prefs, encryption prefs)
+     *
+     * After completion the app process is killed so the next launch starts
+     * from a clean first-run state.
+     */
+    fun deleteAccountAndData() {
+        if (_deleteAccountState.value is DeleteAccountState.Deleting) return
+        _deleteAccountState.value = DeleteAccountState.Deleting
+
+        viewModelScope.launch {
+            try {
+                // Step 1 — revoke Google OAuth grant server-side
+                val revoked = withContext(Dispatchers.IO) { authRepository.revokeGoogleAccess() }
+                android.util.Log.d("SettingsViewModel", "Google access revoked: $revoked")
+
+                // Step 2 + 3 — wipe local DB & all preferences on IO thread
+                withContext(Dispatchers.IO) {
+                    deleteAllLocalData()
+                }
+
+                _deleteAccountState.value = DeleteAccountState.Done
+            } catch (e: Exception) {
+                android.util.Log.e("SettingsViewModel", "Delete account failed", e)
+                _deleteAccountState.value = DeleteAccountState.Error(e.message ?: "Deletion failed")
+            }
+        }
+    }
+
+    /**
+     * Deletes the Room database file(s) directly (bypassing clearAllTables which
+     * requires an open connection and SQLCipher key management), then wipes all
+     * SharedPreferences files this app owns. WorkManager jobs are cancelled too
+     * so no pending sync can resurrect deleted rows.
+     */
+    private suspend fun deleteAllLocalData() {
+        val ctx: android.content.Context = application
+        deleteAllDataWith(ctx)
+    }
+
+    private suspend fun deleteAllDataWith(ctx: android.content.Context) {
+
+        // Cancel all background work first — prevents WorkManager from writing
+        // to the DB while we delete it or after deletion.
+        try {
+            androidx.work.WorkManager.getInstance(ctx).cancelAllWork()
+            androidx.work.WorkManager.getInstance(ctx).pruneWork()
+        } catch (e: Exception) {
+            android.util.Log.w("SettingsViewModel", "WorkManager cancel failed", e)
+        }
+
+        // Close Room before deleting files. The Hilt singleton holds an open
+        // connection — close it via the instance from the DI graph. We can't
+        // inject AppDatabase into the ViewModel method easily here, so use the
+        // application-scoped instance passed in at construction time.
+        try {
+            appDatabaseRef?.close()
+            appDatabaseRef = null
+        } catch (e: Exception) {
+            android.util.Log.w("SettingsViewModel", "DB close skipped: ${e.message}")
+        }
+
+        // Delete DB files (main + WAL + SHM; -journal for safety). The database
+        // is SQLCipher-encrypted but file deletion works regardless of encryption.
+        listOf("", "-wal", "-shm", "-journal").forEach { suffix ->
+            ctx.getDatabasePath("tillzo_pos_db$suffix").let { f ->
+                if (f.exists()) f.delete()
+            }
+        }
+
+        // Clear EVERY SharedPreferences file the app owns:
+        // tillzo_setup_secure_prefs, tillzo_oauth_prefs, barcode_prefs,
+        // tillzo_update_prefs, db_encryption, auth_repo prefs, any others.
+        ctx.getSharedPreferences("tillzo_setup_secure_prefs", 0).edit().clear().commit()
+        ctx.getSharedPreferences("tillzo_oauth_prefs", 0).edit().clear().commit()
+        ctx.getSharedPreferences("barcode_prefs", 0).edit().clear().commit()
+        ctx.getSharedPreferences("tillzo_update_prefs", 0).edit().clear().commit()
+        ctx.getSharedPreferences("db_encryption", 0).edit().clear().commit()
+        ctx.getSharedPreferences("auth_prefs", 0).edit().clear().commit()
+        // Sweep any remaining pref files by scanning the shared_prefs dir
+        ctx.filesDir?.parentFile?.let { appDir ->
+            java.io.File(appDir, "shared_prefs").listFiles()?.forEach { xml ->
+                val name = xml.nameWithoutExtension
+                try {
+                    ctx.getSharedPreferences(name, 0).edit().clear().commit()
+                } catch (_: Exception) { }
+            }
+        }
+
+        // Delete cached files / external cache (receipts, PDFs, temp exports)
+        ctx.cacheDir?.deleteRecursively()
+        ctx.externalCacheDir?.deleteRecursively()
+    }
 }
+
+/** State machine for the Delete Account flow UI. */
+sealed class DeleteAccountState {
+    object Idle : DeleteAccountState()
+    object Deleting : DeleteAccountState()
+    object Done : DeleteAccountState()
+    data class Error(val message: String) : DeleteAccountState()
+}
+

@@ -430,6 +430,10 @@ class SyncWorker @AssistedInject constructor(
     private suspend fun verifyAndHideSysDbTab() {
         try {
             schemaGuardUseCase()
+            // FIX (2026-08-25, DEF-126): ensureSysDbTabHidden() was dead code —
+            // SyncWorker only ran SchemaGuardUseCase (tab exists + header
+            // repair), so SYS_DB_DO_NOT_TOUCH was never actually hidden.
+            sheetsRepository.ensureSysDbTabHidden()
             Log.d(TAG, "M2.3: Schema checked and verified")
         } catch (e: Exception) {
             Log.w(TAG, "M2.3: Failed to verify schema: ${e.message}")

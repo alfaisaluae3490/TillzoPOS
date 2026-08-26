@@ -12,6 +12,7 @@ import java.util.UUID
 import javax.inject.Inject
 import com.tillzo.pos.data.local.dao.InventoryDao
 import com.tillzo.pos.data.local.dao.KhataEventDao
+import com.tillzo.pos.data.local.dao.TillSessionDao // DEF-127 (2026-08-25)
 import com.tillzo.pos.data.local.entity.KhataEventEntity
 import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import com.tillzo.pos.data.local.dao.ProductBatchDao
@@ -31,6 +32,7 @@ class ReturnsViewModel @Inject constructor(
     private val wastageDao: WastageDao,
     private val khataEventDao: KhataEventDao,
     private val returnsDao: ReturnsDao, // GAP-3 (2026-08-23)
+    private val tillSessionDao: TillSessionDao, // DEF-127 (2026-08-25)
     private val appSetupPrefs: AppSetupPrefs
 ) : ViewModel() {
 
@@ -97,6 +99,58 @@ class ReturnsViewModel @Inject constructor(
             )
             
             saleRepository.processCheckout(returnSale)
+
+            // DEF-127 FIX (2026-08-25): refund ab till session ko bhi
+            // decrement karta hai. Pehle sirf negative SaleEntity insert hota
+            // tha — session ke totalCashSales/totalSalesCount/expectedCash
+            // kabhi update nahi hote the, isliye Z-Report "Expected Cash"
+            // overstated rehta tha aur day-close par jhoota SHORTAGE dikhata
+            // tha (drawer mein refund wali cash nahi hoti). Amounts ORIGINAL
+            // sale se derive hote hain: CASH refund par drawer ka net jo gaya
+            // tha wahi wapas aata hai (sale total — DEF-39 over-tender change
+            // pehle hi net ho chuka hai); SPLIT refund par har method ka
+            // exact portion. Non-fatal — koi open session nahi to skip.
+            try {
+                val posId = appSetupPrefs.spreadsheetId.take(20).ifBlank { "TERM_1" }
+                val openSession = tillSessionDao.getOpenSession(posId)
+                openSession?.let { session ->
+                    val refundMethod = originalSale.paymentMethod.ifBlank { "CASH" }
+                    val cashOut: Double
+                    val cardOut: Double
+                    val walletOut: Double
+                    val udhaarOut: Double
+                    when {
+                        refundMethod.equals("SPLIT", ignoreCase = true) -> {
+                            cashOut = originalSale.cashAmount
+                            cardOut = originalSale.cardAmount
+                            walletOut = originalSale.walletAmount
+                            udhaarOut = originalSale.udhaarAmount
+                        }
+                        refundMethod.equals("CARD", ignoreCase = true) -> {
+                            cashOut = 0.0; cardOut = originalSale.total; walletOut = 0.0; udhaarOut = 0.0
+                        }
+                        refundMethod.equals("WALLET", ignoreCase = true) -> {
+                            cashOut = 0.0; cardOut = 0.0; walletOut = originalSale.total; udhaarOut = 0.0
+                        }
+                        refundMethod.equals("UDHAAR", ignoreCase = true) -> {
+                            cashOut = 0.0; cardOut = 0.0; walletOut = 0.0; udhaarOut = originalSale.total
+                        }
+                        else -> { // CASH
+                            cashOut = originalSale.total
+                            cardOut = 0.0; walletOut = 0.0; udhaarOut = 0.0
+                        }
+                    }
+                    tillSessionDao.deductRefundFromSession(
+                        sessionId = session.sessionId,
+                        cashOut = cashOut,
+                        cardOut = cardOut,
+                        walletOut = walletOut,
+                        udhaarOut = udhaarOut
+                    )
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("ReturnsVM", "Till session refund update non-fatal: ${e.message}")
+            }
 
             // GAP-3 FIX (2026-08-23): Returns sheet tab was vestigial — never
             // populated. Now every processed return writes one ReturnsEntity

@@ -20,6 +20,9 @@ interface TillSessionDao {
     @Query("SELECT * FROM till_sessions WHERE status = 'OPEN' AND posTerminalId = :terminalId LIMIT 1")
     suspend fun getOpenSession(terminalId: String): TillSessionEntity?
 
+    @Query("SELECT * FROM till_sessions WHERE status = 'OPEN'")
+    fun getAllOpenSessions(): List<TillSessionEntity>
+
     @Query("SELECT * FROM till_sessions WHERE status = 'OPEN' LIMIT 1")
     fun getOpenSessionFlow(): Flow<TillSessionEntity?>
 
@@ -96,6 +99,34 @@ interface TillSessionDao {
         walletIn: Double,
         udhaarIn: Double,
         paymentMethod: String,
+        now: Long = System.currentTimeMillis()
+    )
+
+    // DEF-127 (2026-08-25): refunds ab till session ko bhi decrement karte
+    // hain. Pehle ReturnsViewModel sirf negative SaleEntity insert karta tha
+    // — session ke totalCashSales/totalSalesCount/expectedCash kabhi update
+    // nahi hote the, isliye Z-Report "Expected Cash" overstated rehta tha
+    // aur day-close par jhoota SHORTAGE dikhata tha (drawer mein refund wali
+    // cash maujood nahi hoti). CompleteSaleUseCase.addSaleToSession ka
+    // negative mirror; totalSalesCount floor-at-0 rakhta hai.
+    @Query("""
+        UPDATE till_sessions
+        SET totalCashSales = CASE WHEN totalCashSales - :cashOut < 0 THEN 0 ELSE totalCashSales - :cashOut END,
+            totalCardSales = CASE WHEN totalCardSales - :cardOut < 0 THEN 0 ELSE totalCardSales - :cardOut END,
+            totalWalletSales = CASE WHEN totalWalletSales - :walletOut < 0 THEN 0 ELSE totalWalletSales - :walletOut END,
+            totalUdhaarSales = CASE WHEN totalUdhaarSales - :udhaarOut < 0 THEN 0 ELSE totalUdhaarSales - :udhaarOut END,
+            totalSalesCount = CASE WHEN totalSalesCount > 0 THEN totalSalesCount - 1 ELSE 0 END,
+            expectedCash = CASE WHEN expectedCash - :cashOut < 0 THEN 0 ELSE expectedCash - :cashOut END,
+            syncStatus = 'pending',
+            updatedAt = :now
+        WHERE sessionId = :sessionId
+    """)
+    suspend fun deductRefundFromSession(
+        sessionId: String,
+        cashOut: Double,
+        cardOut: Double,
+        walletOut: Double,
+        udhaarOut: Double,
         now: Long = System.currentTimeMillis()
     )
 

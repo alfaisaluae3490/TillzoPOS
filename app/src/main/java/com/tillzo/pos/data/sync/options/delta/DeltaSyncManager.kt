@@ -748,6 +748,15 @@ class DeltaSyncManager @Inject constructor(
                         // overwrite, observed: expected_cash 549.99 vs true ~2049.99).
                         // Live OPEN session state is device-local and is pushed on upload;
                         // sheet rows are authoritative only once a session is CLOSED.
+                        // QA-FIX (2026-08-26, L9): DEF-26 ka circular-overwrite
+                        // concern SIRF tab relevant hai jab is device par pehle
+                        // se koi LIVE OPEN session ho. Jab local DB mein koi OPEN
+                        // session nahi (data reset / fresh restore), sheet ka OPEN
+                        // session kabhi wapas nahi aata tha → till permanently
+                        // lost + har restart par naya session banne laga (sheet
+                        // pollution — 15+ OPEN rows observed 26-Aug).
+                        // Safe merge: per terminal SIRF LATEST OPEN session,
+                        // aur SIRF tab jab us terminal ka local OPEN na ho.
                         val sessions = tabRows.map { row ->
                             com.tillzo.pos.data.local.entity.TillSessionEntity(
                                 sessionId = row["session_id"] as? String ?: java.util.UUID.randomUUID().toString(),
@@ -774,9 +783,24 @@ class DeltaSyncManager @Inject constructor(
                                 updatedAt = (row["updated_at"] as? String)?.toLongOrNull() ?: System.currentTimeMillis()
                             )
                         }
+                        // CLOSED sessions: hamesha import (DEF-26 behavior).
                         sessions
                             .filter { it.status != "OPEN" }
                             .forEach { appDatabase.tillSessionDao().insertSession(it) }
+                        // OPEN sessions: restore sirf jab local ke paas us
+                        // terminal ka koi OPEN session na ho — latest per terminal.
+                        val localOpenTerminals = appDatabase.tillSessionDao()
+                            .getAllOpenSessions().map { it.posTerminalId }.toSet()
+                        sessions
+                            .filter { it.status == "OPEN" }
+                            .groupBy { it.posTerminalId }
+                            .forEach { (terminal, openRows) ->
+                                if (terminal !in localOpenTerminals) {
+                                    val latest = openRows.maxByOrNull { it.openedAt ?: 0L } ?: return@forEach
+                                    appDatabase.tillSessionDao().insertSession(latest)
+                                    appLogger.logInfo("DELTA_SYNC", "Till restore: OPEN session ${latest.sessionId.take(8)} (terminal=$terminal) — local mein koi OPEN session nahi tha")
+                                }
+                            }
                     }
                     // FIX (2026-08-23, DEF-92): ItemGtins kabhi restore nahi hote
                     // the → reinstall par GTIN lookup (secondary GTINs / scanner

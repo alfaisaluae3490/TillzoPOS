@@ -58,6 +58,30 @@ class NotificationHelper @Inject constructor(
         return true
     }
 
+    /**
+     * PLAY POLICY (2026-08-24, T4): Runtime POST_NOTIFICATIONS request.
+     * Android 13+ (API 33) requires an explicit runtime grant — the manifest
+     * declaration alone is not enough. Call this ONCE from a resumed Activity
+     * (e.g. MainActivity.onCreate / onboarding flow) BEFORE any alerts are
+     * scheduled by WorkManager.
+     *
+     * Returns true when permission is already granted, or on < Android 13
+     * where no runtime request is needed. The Activity result callback must
+     * be wired by the caller using registerForActivityResult(
+     * RequestPermissionContract()).
+     */
+    fun needsRuntimePermissionRequest(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        return false
+    }
+
+    /** The exact permission string for the runtime launcher. */
+    val runtimePermission: String
+        get() = android.Manifest.permission.POST_NOTIFICATIONS
+
     private fun send(channelId: String, title: String, body: String, notificationId: Int) {
         if (!canNotify()) return
         val notification = NotificationCompat.Builder(context, channelId)

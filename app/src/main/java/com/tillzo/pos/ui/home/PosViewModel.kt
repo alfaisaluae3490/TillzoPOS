@@ -489,8 +489,21 @@ class PosViewModel @Inject constructor(
                     selectedCustomerId = _selectedCustomer.value?.system_row_id,
                     cashierId = appSetupPrefs.userEmail.ifBlank { "cashier" }
                 )
-                _saleResult.value = SaleResult.Success(sale)
+                // FIX (2026-08-26, L6C-SALE-RESULT-CLEAR): ORDER MATTERS.
+                // clearCart() internally _saleResult ko null kar deta hai. Pehle
+                // Success emit karke clearCart() call karne se Success kabhi
+                // collector tak pahunchta hi nahi tha (StateFlow conflated — dono
+                // ek hi frame mein) → LaunchedEffect(saleResult) fire nahi hota →
+                // dialog band nahi hota, receipt navigate nahi hota. Ab pehle
+                // cart clear hota hai, phir Success emit hota hai.
+                // FIX (2026-08-26, L6C-RECEIPT-LOOP): sale complete → cart clear.
+                // Pehle cart sale ke baad bhi bhara rehta tha; system back se
+                // home par stale cart dikhta aur dobara PAY NOW par DUPLICATE sale
+                // ho sakti thi. Receipt apna data sale.items_json se leta hai,
+                // isliye cart clear safe hai.
+                clearCart()
                 refreshPendingSyncCount()
+                _saleResult.value = SaleResult.Success(sale)
                 appLogger.logInfo("UI_CLICK", "Sale completed: ${sale.sync_uuid}, total=$total, method=${pb.methodString}")
             } catch (e: Exception) {
                 Log.e(TAG, "Sale failed: ${e.message}", e)

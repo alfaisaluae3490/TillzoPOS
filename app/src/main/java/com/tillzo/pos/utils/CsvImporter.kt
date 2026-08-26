@@ -127,6 +127,59 @@ object CsvImporter {
 
     // ---- Vendors ---------------------------------------------------------------
 
+    /** OVERNIGHT-AUDIT Phase 1/2 — Customer master import (module 7 CRM). */
+    fun parseCustomerRows(input: InputStream): List<CsvCustomerRow> {
+        val rows = readCsv(input)
+        val first = rows.firstOrNull() ?: return emptyList()
+        if (first.values["name"].isNullOrBlank() && first.values["customer"].isNullOrBlank()) {
+            return emptyList()
+        }
+        return rows.mapNotNull { r ->
+            val name = r.values["name"] ?: r.values["customer"] ?: r.values["customer_name"] ?: ""
+            if (name.isBlank()) return@mapNotNull null
+            CsvCustomerRow(
+                name = name.trim(),
+                phone = (r.values["phone"] ?: r.values["mobile"] ?: r.values["contact"] ?: "").trim(),
+                whatsapp = r.values["whatsapp"]?.trim()?.takeIf { it.isNotEmpty() },
+                email = r.values["email"]?.trim()?.takeIf { it.isNotEmpty() },
+                address = r.values["address"]?.trim()?.takeIf { it.isNotEmpty() },
+                openingBalance = (r.values["opening_balance"]
+                    ?: r.values["balance"] ?: r.values["openingbal"] ?: "").toDoubleOrNull() ?: 0.0,
+                creditLimit = (r.values["credit_limit"]
+                    ?: r.values["creditlimit"] ?: "").toDoubleOrNull() ?: 0.0
+            )
+        }
+    }
+
+    /** OVERNIGHT-AUDIT Phase 1/2 — Batch master import (module 6 batch engine). */
+    fun parseBatchRows(input: InputStream): List<CsvBatchRow> {
+        val rows = readCsv(input)
+        val first = rows.firstOrNull() ?: return emptyList()
+        if (first.values["product_id"].isNullOrBlank() && first.values["sku"].isNullOrBlank()) {
+            return emptyList()
+        }
+        return rows.mapNotNull { r ->
+            val product = r.values["product_id"] ?: r.values["productid"] ?: r.values["sku"] ?: r.values["product"] ?: ""
+            if (product.isBlank()) return@mapNotNull null
+            CsvBatchRow(
+                productId = product.trim(),
+                barcodeId = (r.values["barcode"] ?: r.values["barcode_id"] ?: r.values["barcodeid"] ?: "").trim(),
+                batchNumber = (r.values["batch"] ?: r.values["batch_no"]
+                    ?: r.values["batch_number"] ?: r.values["batchno"] ?: "").trim(),
+                manufacturingDate = (r.values["manufacturing_date"]
+                    ?: r.values["mfg_date"] ?: r.values["mfgdate"] ?: r.values["mfg"] ?: "").trim(),
+                expiryDate = (r.values["expiry_date"] ?: r.values["exp_date"]
+                    ?: r.values["expirydate"] ?: r.values["exp"] ?: "").trim(),
+                stockQty = (r.values["stock_qty"] ?: r.values["quantity"]
+                    ?: r.values["qty"] ?: r.values["stock"] ?: "").toDoubleOrNull() ?: 0.0,
+                costPrice = (r.values["cost_price"] ?: r.values["cost"]
+                    ?: r.values["costprice"] ?: "").toDoubleOrNull() ?: 0.0,
+                sellingPrice = (r.values["selling_price"] ?: r.values["sale_price"]
+                    ?: r.values["price"] ?: r.values["sellingprice"] ?: "").toDoubleOrNull() ?: 0.0
+            )
+        }
+    }
+
     fun parseVendorRows(input: InputStream): List<CsvVendorRow> {
         val rows = readCsv(input)
         val first = rows.firstOrNull() ?: return emptyList()
@@ -163,4 +216,27 @@ data class CsvVendorRow(
     val address: String,
     val city: String,
     val creditLimit: Double,
+)
+
+/** OVERNIGHT-AUDIT Phase 1/2 — Customer master import row (module 7 CRM). */
+data class CsvCustomerRow(
+    val name: String,
+    val phone: String,
+    val whatsapp: String?,
+    val email: String?,
+    val address: String?,
+    val openingBalance: Double,
+    val creditLimit: Double,
+)
+
+/** OVERNIGHT-AUDIT Phase 1/2 — Batch master import row (module 6 batch engine). */
+data class CsvBatchRow(
+    val productId: String,
+    val barcodeId: String,
+    val batchNumber: String,
+    val manufacturingDate: String,
+    val expiryDate: String,
+    val stockQty: Double,
+    val costPrice: Double,
+    val sellingPrice: Double,
 )

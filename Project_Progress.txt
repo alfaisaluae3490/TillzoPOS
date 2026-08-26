@@ -1143,3 +1143,24 @@ All 14 DAOs provided via @Provides in DatabaseModule: CONFIRMED ✅
 ════════════════════════════════════════
 END OF REPORT
 ════════════════════════════════════════
+
+========================================================================
+OVERNIGHT AUDIT (2026-08-25) — SESSION LOG
+========================================================================
+ENV: emulator-5554 (Android 10), app installed v1.0.0, DB tillzo_pos_db (SQLCipher)
+AUDIT VERDICT: Codebase March progress file se aage — 42 screens, 20 entities,
+24 sheet tabs mapped, SecurityGuard (sig+root+debugger) done 23-08,
+FLAG_SECURE toggle done, delta sync + 60-min cooldown popup done (exact text),
+TimestampFormat (yyyy-MM-dd hh:mm a) done, monthly sharding done,
+CSV import (Inventory/Vendors) done, QR/DataMatrix gen done.
+
+PHASE 1/2 GAPS FOUND & FIXED (2026-08-25):
+[FIX 1] CsvImporter: +parseCustomerRows, +parseBatchRows (Customers/Batches import)
+[FIX 2] InventoryCrudViewModel: +importCustomersCsv, +importVendorsCsv, +importBatchesCsv
+        (customerDao + vendorDao injected)
+[FIX 3] InventoryCrudScreen: import button -> 4-type chooser dialog
+        (Inventory/Vendors/Customers/Batches), launcher dispatch by type
+[FIX 4] BarcodeGeneratorUtil: +generateBarcode(format), +generateCode128,
+        +generateEan13, +generateQr (Phase 2.5 Code128/EAN13/QR engine)
+BUILD: compileDebugKotlin PASSED
+

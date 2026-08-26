@@ -1,2 +1,0 @@
-name,sku,barcode,category,cost_price,selling_price,stock_qty,unit
-DELETE-ME-TEST,SKU-DEL-1,,Testing,1.00,2.00,5,pcs

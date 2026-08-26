@@ -78,6 +78,15 @@ fun ReceiptScreen(
     val scope = rememberCoroutineScope()
     val escPosPrinter = remember { EscPosPrinter() }
 
+    // FIX (2026-08-26, L6C-RECEIPT-LOOP): system back press par bhi New Sale
+    // jaisa behaviour — cart/saleResult reset + home pop. Pehle back sirf pop
+    // karta tha, home ka LaunchedEffect(saleResult) wapas Success dekh kar
+    // receipt par RE-NAVIGATE kar deta tha (infinite loop).
+    androidx.activity.compose.BackHandler {
+        viewModel.resetAfterSale()
+        onNewSale()
+    }
+
     val sale = (saleResult as? SaleResult.Success)?.sale
 
     // Parse items from sale.items_json if available, else use current cart

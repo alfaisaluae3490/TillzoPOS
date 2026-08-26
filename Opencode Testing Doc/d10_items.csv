@@ -1,3 +1,0 @@
-name,sku,barcode,category,cost_price,selling_price,stock_qty,unit
-AUDIT-CUST-A,SKU-D10A,,Testing,3.00,7.00,9,pcs
-AUDIT-CUST-B,SKU-D10B,,Testing,4.00,8.00,11,box

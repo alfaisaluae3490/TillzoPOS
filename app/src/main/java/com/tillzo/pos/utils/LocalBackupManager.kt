@@ -94,11 +94,15 @@ class LocalBackupManager @Inject constructor(
 
             "Documents/TillzoPOS/$fileName"
         } else {
-            // Legacy direct file write (API < 29)
+            // PLAY POLICY (2026-08-24, T5): Legacy (API < 29) direct write now
+            // targets app-scoped external dir — no WRITE_EXTERNAL_STORAGE needed.
+            // Public Documents write on old APIs required the deprecated
+            // permission; scoped dir is always writable and policy-compliant.
             val dir = java.io.File(
-                android.os.Environment.getExternalStoragePublicDirectory(
-                    android.os.Environment.DIRECTORY_DOCUMENTS
-                ),
+                context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOCUMENTS)
+                    ?: android.os.Environment.getExternalStoragePublicDirectory(
+                        android.os.Environment.DIRECTORY_DOCUMENTS
+                    ),
                 "TillzoPOS"
             )
             if (!dir.exists()) dir.mkdirs()

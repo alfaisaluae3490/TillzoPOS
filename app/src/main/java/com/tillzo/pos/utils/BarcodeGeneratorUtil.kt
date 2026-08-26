@@ -190,4 +190,46 @@ object BarcodeGeneratorUtil {
             null
         }
     }
+
+    /**
+     * OVERNIGHT-AUDIT Phase 2c — Code128 / EAN13 / QR generation mapped to
+     * Item Master data. [format] selects the symbol; content is auto-validated:
+     * EAN13 requires 12 or 13 digits (13th = check digit auto-computed by ZXing).
+     * Returns null on invalid input so callers can fall back to another symbol.
+     */
+    fun generateBarcode(
+        content: String,
+        format: BarcodeFormat,
+        width: Int,
+        height: Int
+    ): Bitmap? {
+        if (content.isBlank()) return null
+        val writer = MultiFormatWriter()
+        return try {
+            val bitMatrix = writer.encode(content, format, width, height)
+            val w = bitMatrix.width
+            val h = bitMatrix.height
+            val pixels = IntArray(w * h)
+            for (y in 0 until h) {
+                for (x in 0 until w) {
+                    pixels[y * w + x] = if (bitMatrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+                }
+            }
+            val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            bitmap.setPixels(pixels, 0, w, 0, 0, w, h)
+            bitmap
+        } catch (e: WriterException) {
+            null
+        }
+    }
+
+    /** Convenience wrappers for the three required symbol types. */
+    fun generateCode128(content: String, width: Int = 300, height: Int = 120): Bitmap? =
+        generateBarcode(content, BarcodeFormat.CODE_128, width, height)
+
+    fun generateEan13(content: String, width: Int = 300, height: Int = 120): Bitmap? =
+        generateBarcode(content, BarcodeFormat.EAN_13, width, height)
+
+    fun generateQr(content: String, size: Int = 300): Bitmap? =
+        generateBarcode(content, BarcodeFormat.QR_CODE, size, size)
 }

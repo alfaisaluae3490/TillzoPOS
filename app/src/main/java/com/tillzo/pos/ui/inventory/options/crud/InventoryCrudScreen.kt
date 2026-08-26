@@ -75,6 +75,30 @@ fun InventoryCrudScreen(
     var showFormDialog by remember { mutableStateOf(false) }
     var selectedItemForBatches by remember { mutableStateOf<InventoryEntity?>(null) }
     var itemToPrint by remember { mutableStateOf<InventoryEntity?>(null) }
+    var importType by remember { mutableStateOf<String?>(null) }
+    var showImportChooser by remember { mutableStateOf(false) }
+    // DEF-68 FIX (2026-08-26): delete pe confirmation dialog — accidental delete
+    // (Panadol incident, M1.4) se bachav. Icon tap se pehle confirm lena zaroori hai.
+    var itemPendingDelete by remember { mutableStateOf<InventoryEntity?>(null) }
+
+    // OVERNIGHT-AUDIT Phase 2b: CSV bulk import (Excel/Sheets export) — declared at
+    // composable scope so both the top-bar launcher AND the import-type chooser dialog
+    // can reference it.
+    val importPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let {
+            val bytes = context.contentResolver.openInputStream(it)?.use { s -> s.readBytes() }
+            if (bytes != null) {
+                when (importType) {
+                    "Vendors" -> viewModel.importVendorsCsv(bytes)
+                    "Customers" -> viewModel.importCustomersCsv(bytes)
+                    "Batches" -> viewModel.importBatchesCsv(bytes)
+                    else -> viewModel.importInventoryCsv(bytes)
+                }
+            }
+        }
+    }
 
     // M6.2 Read OCR scanned values returned from OcrEntryScreen
     val backStackEntry = navController?.currentBackStackEntryAsState()?.value
@@ -136,17 +160,7 @@ fun InventoryCrudScreen(
                     IconButton(onClick = onNavigateToOcr) {
                         Icon(Icons.Default.CameraAlt, contentDescription = "Smart AI Entry (OCR)")
                     }
-                    // OVERNIGHT-AUDIT Phase 2b: CSV bulk import (Excel/Sheets export)
-                    val importPicker = androidx.activity.compose.rememberLauncherForActivityResult(
-                        androidx.activity.result.contract.ActivityResultContracts.GetContent()
-                    ) { uri ->
-                        if (uri != null) {
-                            context.contentResolver.openInputStream(uri)?.use { stream ->
-                                viewModel.importInventoryCsv(stream.readBytes())
-                            }
-                        }
-                    }
-                    IconButton(onClick = { importPicker.launch("text/*") }) {
+                    IconButton(onClick = { importType = null; showImportChooser = true }) {
                         Icon(Icons.Default.UploadFile, contentDescription = "Import CSV (bulk upload)")
                     }
                 }
@@ -187,6 +201,37 @@ fun InventoryCrudScreen(
                     }
                 }
             }
+        }
+        if (showImportChooser) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { showImportChooser = false },
+                title = { Text("Bulk Import (CSV / Excel)") },
+                text = {
+                    Column {
+                        listOf(
+                            "Inventory Master" to "Inventory",
+                            "Product Batches" to "Batches",
+                            "Vendors" to "Vendors",
+                            "Customers" to "Customers"
+                        ).forEach { (label, type) ->
+                            androidx.compose.material3.TextButton(
+                                onClick = {
+                                    importType = type
+                                    showImportChooser = false
+                                    importPicker.launch("text/*")
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text(label, fontWeight = FontWeight.SemiBold) }
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = { showImportChooser = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
         }
         Column(
             modifier = Modifier
@@ -263,13 +308,38 @@ fun InventoryCrudScreen(
                             viewModel.selectItem(item)
                             showFormDialog = true
                         },
-                        onDelete = { viewModel.deleteItem(item.system_row_id) },
+                        onDelete = { itemPendingDelete = item },
                         onPrintQr = { navController?.navigate("barcode_print_settings/${item.system_row_id}") },
                         onViewBatches = { selectedItemForBatches = item }
                     )
                 }
             }
         }
+    }
+
+    // DEF-68 FIX (2026-08-26): delete confirmation dialog — icon tap se pehle
+    // confirm. Accidental delete (Panadol incident) ab impossible.
+    itemPendingDelete?.let { pending ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { itemPendingDelete = null },
+            title = { Text("Delete Item?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text("'${pending.item_name}' (${pending.barcode_id}) permanently delete ho jayega. Yeh action wapas nahi ho sakta.")
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        viewModel.deleteItem(pending.system_row_id)
+                        itemPendingDelete = null
+                    }
+                ) { Text("Delete", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { itemPendingDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     if (showFormDialog) {

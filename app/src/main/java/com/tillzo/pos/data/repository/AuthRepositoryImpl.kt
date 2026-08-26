@@ -14,7 +14,11 @@ import com.google.android.gms.tasks.Tasks
 import com.tillzo.pos.data.sync.options.token.OAuthTokenManager
 import com.tillzo.pos.domain.repository.AuthRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import okhttp3.FormBody
+import okhttp3.OkHttpClient
 import net.openid.appauth.*
 import javax.inject.Inject
 import kotlin.coroutines.resume
@@ -93,9 +97,57 @@ class AuthRepositoryImpl @Inject constructor(
             .remove(KEY_ACCESS_TOKEN)
             .remove(KEY_REFRESH_TOKEN)
             .apply()
-        val googleSignInClient = GoogleSignIn.getClient(context, GoogleSignInOptions.DEFAULT_SIGN_IN)
-        Tasks.await(googleSignInClient.signOut())
+        // FIX (2026-08-25, overnight audit BUG#1): Tasks.await() throws
+        // "Must not be called on the main application thread" — must run on IO.
+        withContext(Dispatchers.IO) {
+            val googleSignInClient = GoogleSignIn.getClient(context, GoogleSignInOptions.DEFAULT_SIGN_IN)
+            Tasks.await(googleSignInClient.signOut())
+        }
     }
+
+    /**
+     * PLAY POLICY (2026-08-24, T2): Account & Data Deletion.
+     * Revokes the OAuth token server-side via Google's /revoke endpoint so the
+     * grant disappears from the user's Google Account security page, then
+     * clears all local tokens. Returns true if revocation succeeded (or there
+     * was nothing to revoke — that still satisfies the policy).
+     */
+    override suspend fun revokeGoogleAccess(): Boolean {
+        val token: String? = getAccessToken() ?: run {
+            // No cached access token — try refresh token for revocation
+            val refresh = sharedPrefs.getString(KEY_REFRESH_TOKEN, null)
+            if (refresh.isNullOrBlank()) {
+                // Nothing stored — already clean. Still clear everything defensively.
+                logout()
+                return true
+            }
+            refresh
+        }
+
+        var revoked = false
+        withContext(Dispatchers.IO) {
+            try {
+                val client = OkHttpClient()
+                val body = FormBody.Builder().add("token", token ?: "").build()
+                val req = okhttp3.Request.Builder()
+                    .url("https://oauth2.googleapis.com/revoke")
+                    .post(body)
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    revoked = resp.isSuccessful
+                    Log.d("AuthRepository", "Token revoke HTTP ${resp.code}")
+                }
+            } catch (e: Exception) {
+                Log.e("AuthRepository", "Token revoke failed", e)
+            }
+        }
+
+        // Local cleanup ALWAYS runs — even if server revocation failed,
+        // user data must be wiped locally per Play policy.
+        logout()
+        return revoked
+    }
+
 
     override fun getAccessToken(): String? {
         // FIX (2026-08-06): legacy prefs first; tokenManager valid-token lookup is

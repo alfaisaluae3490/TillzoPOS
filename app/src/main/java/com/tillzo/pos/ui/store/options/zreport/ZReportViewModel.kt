@@ -9,11 +9,14 @@ import com.tillzo.pos.domain.repository.SaleRepository
 import com.tillzo.pos.domain.repository.StoreRepository
 import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import com.tillzo.pos.utils.printer.EscPosPrinter
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.withContext
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -25,7 +28,8 @@ class ZReportViewModel @Inject constructor(
     private val syncLogDao: SyncLogDao,
     private val tillSessionDao: TillSessionDao,
     private val escPosPrinter: EscPosPrinter,
-    private val appSetupPrefs: AppSetupPrefs
+    private val appSetupPrefs: AppSetupPrefs,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context
 ) : ViewModel() {
     // FIX (2026-08-06): currency from settings (USA-friendly default)
     private val currencySymbol get() = appSetupPrefs.currencySymbol.ifBlank { "$" }
@@ -69,15 +73,25 @@ class ZReportViewModel @Inject constructor(
     // Till / Shift data
     private val todayDate = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
 
-    val activeSession = tillSessionDao.getOpenSessionFlowForTerminal(
-        appSetupPrefs.spreadsheetId.take(20).ifBlank { "TERMINAL_1" }
-    )
-        .stateIn(viewModelScope, SharingStarted.Lazily, null)
+    // DEF-123 FIX (2026-08-26): ye DEF-119 (TillViewModel) jaisa hi cold-start
+    // stale-null race tha — SharingStarted.Lazily + stateIn(null) se Room/WAL
+    // replay par pehla emission null aata tha aur static OPEN row (koi DB
+    // change nahi) dobara emit nahi hoti thi → executeDayClose hamesha
+    // "No open till session" error deta tha, chahe till khula ho. Ab:
+    // init collect turant chalu + executeDayClose me one-shot re-query.
+    private val _activeSession = MutableStateFlow<TillSessionEntity?>(null)
+    val activeSession: StateFlow<TillSessionEntity?> = _activeSession.asStateFlow()
 
     val allSessionsToday = tillSessionDao.getSessionsForDate(todayDate)
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     init {
+        // DEF-123: collect turant chalu — stale-null race se bachne ke liye
+        viewModelScope.launch {
+            tillSessionDao.getOpenSessionFlowForTerminal(
+                appSetupPrefs.spreadsheetId.take(20).ifBlank { "TERMINAL_1" }
+            ).collect { _activeSession.value = it }
+        }
         loadDailyMetrics()
     }
 
@@ -170,7 +184,13 @@ class ZReportViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            val session = activeSession.value
+            // DEF-123: stale StateFlow null ko ignore — fresh one-shot query
+            // se asal OPEN session uthao (cold-start race guard).
+            val session = withContext(Dispatchers.IO) {
+                tillSessionDao.getOpenSession(
+                    appSetupPrefs.spreadsheetId.take(20).ifBlank { "TERMINAL_1" }
+                )
+            } ?: activeSession.value
             if (session == null) {
                 // FIX (2026-08-22, DEF-50): previously the session==null case
                 // was SILENTLY skipped — "Day Closed Successfully!" was shown
@@ -248,14 +268,12 @@ class ZReportViewModel @Inject constructor(
                         sb.appendLine("\"${s.invoiceId}\",${s.timestamp},${s.items.size},${s.subtotal},${s.tax},${s.discount},${s.total},\"${s.paymentMethod}\"")
                     }
                     val fileName = "TillzoPOS_Sales_${java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())}.csv"
-                    // Prefer app-scoped external dir (no permission needed on API 29+);
-                    // public Downloads may be unavailable under scoped storage.
-                    val appDir = java.io.File(
-                        android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS).parentFile?.parentFile,
-                        "Android/data/com.tillzo.pos/files/Download"
-                    )
-                    val dir = if (appDir.exists() || appDir.mkdirs()) appDir
-                              else android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                    // PLAY POLICY (2026-08-24, T5): Scoped Storage — app-scoped
+                    // external files dir (getExternalFilesDir) needs NO permission
+                    // on any API level. Old path hardcoded /Android/data/ via
+                    // public Downloads parent traversal — fragile & flagged.
+                    val dir = context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS)
+                        ?: context.filesDir
                     val file = java.io.File(dir, fileName)
                     file.writeText(sb.toString())
                     _reportStatus.value = "Day Closed + CSV exported: $fileName"

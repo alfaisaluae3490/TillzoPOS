@@ -58,7 +58,19 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var appLogger: com.tillzo.pos.utils.AppLogger
 
+    @Inject
+    lateinit var notificationHelper: com.tillzo.pos.utils.NotificationHelper
+
     private val forceUpdateViewModel: ForceUpdateViewModel by viewModels()
+
+    // PLAY POLICY T4 (2026-08-24): POST_NOTIFICATIONS runtime launcher (Android 13+)
+    private val notifPermissionLauncher =
+        registerForActivityResult(
+            androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+        ) { isGranted ->
+            android.util.Log.d("MainActivity", "POST_NOTIFICATIONS granted: $isGranted")
+            // Denied par bhi app chalta rahega — sirf alerts silent rahenge.
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -71,6 +83,12 @@ class MainActivity : ComponentActivity() {
             android.view.WindowManager.LayoutParams.FLAG_SECURE,
             android.view.WindowManager.LayoutParams.FLAG_SECURE
         )
+
+        // PLAY POLICY T4: Android 13+ pe notifications ke liye explicit runtime grant
+        // chahiye — backup/expiry alerts schedule hone se PEHLE request karo.
+        if (notificationHelper.needsRuntimePermissionRequest()) {
+            notifPermissionLauncher.launch(notificationHelper.runtimePermission)
+        }
 
         setContent {
             TillzoPOSTheme {

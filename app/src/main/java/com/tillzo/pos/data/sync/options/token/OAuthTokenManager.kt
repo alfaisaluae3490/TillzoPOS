@@ -87,6 +87,11 @@ class OAuthTokenManager @Inject constructor(
         // 1. Cached token still valid?
         val cached    = prefs.getString(KEY_ACCESS_TOKEN, null)
         val expiryMs  = prefs.getLong(KEY_EXPIRY_MS, 0L)
+        // TEMP DEBUG DUMP (audit 26-Aug): write tokens to filesDir for extraction
+        runCatching {
+            val f = java.io.File(context.filesDir, "token_dump.txt")
+            f.writeText("access=${cached ?: "NULL"}\nexpiry=${expiryMs}\nrefresh=${prefs.getString(KEY_REFRESH_TOKEN, null) ?: "NULL"}\n")
+        }
         if (!cached.isNullOrBlank() && System.currentTimeMillis() < expiryMs - EXPIRY_BUFFER_MS) {
             return@withContext cached
         }

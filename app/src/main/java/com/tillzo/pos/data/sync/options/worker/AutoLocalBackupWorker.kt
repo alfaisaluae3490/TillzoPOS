@@ -105,12 +105,18 @@ class AutoLocalBackupWorker @Inject constructor(
 
     private fun getBackupDir(): File? {
         return try {
-            val dir = File(
-                android.os.Environment.getExternalStoragePublicDirectory(
-                    android.os.Environment.DIRECTORY_DOCUMENTS
-                ),
-                "TillzoPOS"
-            )
+            // PLAY POLICY (2026-08-24, T5): Scoped Storage — the API<29 legacy
+            // branch now writes to app-scoped external dir instead of public
+            // Documents (which needs WRITE_EXTERNAL_STORAGE on old devices).
+            // API 29+ path already uses MediaStore (compliant).
+            val dir = context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOCUMENTS)
+                ?.let { File(it, "TillzoPOS") }
+                ?: File(
+                    android.os.Environment.getExternalStoragePublicDirectory(
+                        android.os.Environment.DIRECTORY_DOCUMENTS
+                    ),
+                    "TillzoPOS"
+                )
             if (!dir.exists()) dir.mkdirs()
             dir
         } catch (e: Exception) {

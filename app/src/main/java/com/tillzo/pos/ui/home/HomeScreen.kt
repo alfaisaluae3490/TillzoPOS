@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -173,11 +174,20 @@ fun HomeScreen(
         }
     }
 
-    // Navigate to receipt when sale completes
+    // Navigate to receipt when sale completes.
+    // FIX (2026-08-26, L6C-RECEIPT-LOOP): handledSaleId guard — pehle har home
+    // re-entry par (system back ke baad) LaunchedEffect saleResult=Success dekh
+    // kar SAME receipt par wapas navigate kar deta tha (infinite loop, L6C
+    // 'New Sale/back dono se exit nahi hua'). Ab sirf NAYI sale (naya sync_uuid)
+    // navigate karti hai; purana Success home entry par ignore hota hai.
+    var handledSaleId by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(saleResult) {
         val result = saleResult
-        if (result is SaleResult.Success) {
+        android.util.Log.d("DEBUG_NAV", "effect ran: saleResult=${result?.let { if (it is SaleResult.Success) "Success(${it.sale.sync_uuid})" else "Error" }}, handled=$handledSaleId")
+        if (result is SaleResult.Success && result.sale.sync_uuid != handledSaleId) {
+            handledSaleId = result.sale.sync_uuid
             showPaymentDialog = false
+            android.util.Log.d("DEBUG_NAV", "navigating to receipt: ${result.sale.sync_uuid}")
             onNavigateToReceipt(result.sale.sync_uuid)
         }
     }
@@ -200,13 +210,16 @@ fun HomeScreen(
         // DEF-119 FIX: cold-start WAL replay race par Room flow null re-emit
         // nahi karta (static OPEN row) — bounded auto-retry with one-shot
         // re-query clears the stale gate within ~9s instead of ~10 min.
+        // QA-FIX (2026-08-26, L9): pehla refresh BINA delay (turant) + attempts
+        // 6→20 (30s coverage) — emulator cold start par Room init slow hota hai.
         LaunchedEffect(Unit) {
             var attempts = 0
-            while (tillViewModel.currentSession.value?.status != "OPEN" && attempts < 6) {
-                delay(1500)
+            while (tillViewModel.currentSession.value?.status != "OPEN" && attempts < 20) {
+                if (attempts > 0) delay(1500)
                 tillViewModel.refreshSession()
                 attempts++
             }
+            android.util.Log.d("TillVM", "gate retry exhausted: attempts=$attempts final=${tillViewModel.currentSession.value?.status}")
         }
         Box(
             modifier = Modifier

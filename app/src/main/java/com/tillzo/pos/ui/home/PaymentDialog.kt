@@ -18,6 +18,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -86,19 +88,40 @@ fun PaymentDialog(
     val isConfirmEnabled = remainingAmount <= 0.01 && !isProcessing &&
         ((paymentBreakdown.udhaarAmount <= 0.0) || selectedCustomer != null)
 
+    // PLAY/QA FIX (ULTRA-L6): skipPartiallyExpanded — sheet opens FULL height so
+    // Confirm Payment footer is always composed & visible (was cut off-screen).
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        windowInsets = WindowInsets(0),
+        sheetState = sheetState,
+        // ULTRA-L6 FIX v4 (2026-08-26): windowInsets=WindowInsets(0) HATA diya —
+        // wo navigation-bars insets bhi zero kar deta tha, isliye footer ka
+        // navigationBarsPadding() 0 padding deta tha aur Confirm Payment phir bhi
+        // [0,2109..2258] par render hota (nav bar ke peeche, a11y tree me absent).
+        // Default insets ke saath sheet nav bar ke UPAR expand hoti hai aur footer
+        // hamesha reachable rehta hai.
         containerColor = SurfaceDark,
         tonalElevation = 8.dp
     ) {
+        // ULTRA-L6 FIX v2 (2026-08-26): Confirm Payment footer ko ACTUALLY scroll
+        // ke bahar rakha. v1 comment me "outside the scroll" tha lekin footer abhi
+        // bhi verticalScroll Column ke andar tha — content lamba hone par footer
+        // viewport se bahar chala jata tha aur a11y tree me kabhi nahi aata tha.
+        // NOTE: ModalBottomSheet content khud scrollable hota hai (unbounded height),
+        // isliye weight(1f) NAHI chalta — footer infinite height ke end me render
+        // hota. heightIn(max) bounded scroll area deta hai — footer fixed niche.
+        // QA-FIX (2026-08-26, L9): imePadding — keyboard khula ho (cash amount
+        // manually type karte waqt) to bhi Confirm Payment footer keyboard ke
+        // upar shift ho jata hai; pehle footer keyboard ke neeche chala jata
+        // tha → click keyboard par lagta tha (no-op quirk, L6D/L6F notes).
+        Column(modifier = Modifier.fillMaxWidth().imePadding()) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(max = 1500.dp)
                 .verticalScroll(rememberScrollState())
-                .navigationBarsPadding()
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp)
+                .padding(bottom = 8.dp)
         ) {
             // Header
             Row(
@@ -441,23 +464,54 @@ fun PaymentDialog(
                 )
             }
 
-            // Confirm Button
-            Button(
-                onClick = { viewModel.completeSale() },
-                enabled = isConfirmEnabled,
-                modifier = Modifier.fillMaxWidth().height(54.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, disabledContainerColor = SurfaceVariant),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                if (isProcessing) {
-                    CircularProgressIndicator(color = TextPrimary, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Default.CheckCircle, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Confirm Payment", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-            Spacer(Modifier.height(8.dp))
+        }
+
+        // PLAY/QA FIX (ULTRA-L6 v2): fixed footer — Confirm Payment ALWAYS visible
+        // (outer Column ka last child, scroll area ke niche — navigationBarsPadding
+        // se nav bar overlap bhi handle hota hai)
+        Spacer(Modifier.height(8.dp))
+        ConfirmPaymentFooter(
+            isProcessing = isProcessing,
+            enabled = isConfirmEnabled,
+            onComplete = { viewModel.completeSale() }
+        )
+        Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+/**
+ * PLAY/QA FIX (2026-08-25, ULTRA-L6): Confirm Payment was INSIDE the scrollable
+ * ModalBottomSheet column — on 1080x2280 screens it rendered below the visible
+ * area and the sheet refused to expand via drag, making sales impossible from UI.
+ * Moved to a fixed footer outside the scroll so it is ALWAYS reachable.
+ */
+@Composable
+private fun ConfirmPaymentFooter(
+    isProcessing: Boolean,
+    enabled: Boolean,
+    onComplete: () -> Unit
+) {
+    Button(
+        onClick = onComplete,
+        enabled = enabled,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(54.dp)
+            // ULTRA-L6 FIX v4: windowInsets=WindowInsets(0) hatne ke baad ye
+            // navigationBarsPadding ab ASAL insets (132px) apply karta hai —
+            // button nav bar ke upar [~1986..2148] render hota hai, reachable.
+            .navigationBarsPadding()
+            .semantics { contentDescription = "Confirm Payment" },
+        colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, disabledContainerColor = SurfaceVariant),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        if (isProcessing) {
+            CircularProgressIndicator(color = TextPrimary, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+        } else {
+            Icon(Icons.Default.CheckCircle, null)
+            Spacer(Modifier.width(8.dp))
+            Text("Confirm Payment", fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
     }
 }

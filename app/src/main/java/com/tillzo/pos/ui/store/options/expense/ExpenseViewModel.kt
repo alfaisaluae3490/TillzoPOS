@@ -62,6 +62,9 @@ class ExpenseViewModel @Inject constructor(
             } catch (_: Exception) {
                 // Non-fatal: expense already saved, no open session to deduct from
             }
+            // FIX (2026-08-25, DEF-124): list never refreshed after adding an
+            // expense — save succeeded but the UI kept showing the empty state.
+            loadExpenses()
         }
     }
 

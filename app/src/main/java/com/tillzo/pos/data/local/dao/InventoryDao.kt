@@ -95,6 +95,13 @@ interface InventoryDao {
     @Query("SELECT MAX(item_number) FROM Inventory")
     suspend fun getMaxItemNumber(): Int?
 
+    // DEF-67 FIX (2026-08-26): legacy rows have item_number = 0 (migration default),
+    // so MAX(item_number) alone collides — every new product got itemNum=1 and the
+    // SAME auto EAN-13 as Panadol (0000000000017). Count-based guard keeps numbers
+    // unique even when legacy 0s / gaps exist.
+    @Query("SELECT COUNT(*) FROM Inventory")
+    suspend fun getItemCount(): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertGtins(gtins: List<com.tillzo.pos.data.local.entity.ItemGtinEntity>)
 

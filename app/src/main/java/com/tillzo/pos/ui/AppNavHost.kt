@@ -252,12 +252,27 @@ fun AppNavHost(
         // M4: Receipt Screen
         composable("receipt/{invoiceId}") { backStackEntry ->
             val invoiceId = backStackEntry.arguments?.getString("invoiceId") ?: ""
-            // Share the same PosViewModel from the home back-stack entry so saleResult is preserved
-            val posViewModel: PosViewModel = hiltViewModel(
-                remember(backStackEntry) {
-                    navController.getBackStackEntry("home")
-                }
-            )
+            // FIX (2026-08-26, L6C-RECEIPT-LOOP): POS ViewModel scope mismatch.
+            // Home route GAP-2 (2026-08-22) se ACTIVITY-scoped PosViewModel use
+            // karta hai, lekin receipt abhi home-ENTRY-scoped instance le raha tha
+            // -> do ALAG instances: sale VM-A (activity) pe complete hoti thi,
+            // receipt VM-B (entry) pe saleResult=null dikhta tha (receipt ka
+            // items/totals section ghaib — fallback mode), aur New Sale click par
+            // VM-B.resetAfterSale() VM-A ka Success state kabhi null nahi karta tha
+            // -> popBackStack("home") ke baad home ka LaunchedEffect(saleResult)
+            // wapas Success dekh kar receipt/{invoiceId} pe RE-NAVIGATE kar deta
+            // tha = infinite loop (L6C 'New Sale click no-op' bug).
+            // FIX: receipt bhi wahi ACTIVITY-scoped instance share kare.
+            val activity = LocalContext.current as? androidx.activity.ComponentActivity
+            val posViewModel: PosViewModel = if (activity != null) {
+                hiltViewModel(viewModelStoreOwner = activity)
+            } else {
+                hiltViewModel(
+                    remember(backStackEntry) {
+                        navController.getBackStackEntry("home")
+                    }
+                )
+            }
             ReceiptScreen(
                 invoiceId = invoiceId,
                 onNewSale = {

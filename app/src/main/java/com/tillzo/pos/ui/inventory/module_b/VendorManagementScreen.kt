@@ -17,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -366,6 +367,8 @@ private fun VendorFormDialog(
     var isActive by remember(existing) { mutableStateOf(existing?.isActive ?: true) }
     var city by remember(existing) { mutableStateOf(existing?.city ?: "") }
     var creditLimit by remember(existing) { mutableStateOf(existing?.creditLimit?.toString() ?: "0.0") }
+    // QA-FIX (2026-08-26, L9): focus-par-clear guard — "0.0" default ko typing replace kare
+    var creditLimitTouched by remember(existing) { mutableStateOf(false) }
 
     // Handle save state changes
     LaunchedEffect(saveState) {
@@ -451,7 +454,18 @@ private fun VendorFormDialog(
                             label = { Text("City") }, modifier = Modifier.fillMaxWidth(),
                             colors = vendorFormFieldColors())
                         OutlinedTextField(value = creditLimit, onValueChange = { creditLimit = it },
-                            label = { Text("Credit Limit") }, modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Credit Limit") }, modifier = Modifier.fillMaxWidth()
+                                // QA-FIX (2026-08-26, L9): field default "0.0" hota
+                                // hai — focus par auto-clear (default value ho to)
+                                // taake typing replace kare, append nahi ("0.0"+5000
+                                // = "0.05000" → 0.05 store hone ka bug tha).
+                                .onFocusChanged { st ->
+                                    if (st.isFocused && !creditLimitTouched) {
+                                        creditLimitTouched = true
+                                        if (creditLimit == "0.0") creditLimit = ""
+                                    }
+                                    if (!st.isFocused && creditLimit.isBlank()) creditLimit = "0.0"
+                                },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             colors = vendorFormFieldColors())
                         Row(

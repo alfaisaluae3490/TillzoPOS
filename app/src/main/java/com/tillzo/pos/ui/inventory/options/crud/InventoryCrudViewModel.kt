@@ -16,6 +16,8 @@ import com.tillzo.pos.data.local.entity.ProductUnitEntity
 import com.tillzo.pos.data.local.dao.ProductBatchDao
 import com.tillzo.pos.data.local.entity.ProductBatchEntity
 import com.tillzo.pos.data.local.dao.InventoryDao
+import com.tillzo.pos.data.local.dao.CustomerDao
+import com.tillzo.pos.data.local.dao.VendorDao
 import com.tillzo.pos.data.local.prefs.AppSetupPrefs
 import com.tillzo.pos.data.local.prefs.BarcodePrefs
 import com.tillzo.pos.data.local.prefs.BarcodeGeneralConfig
@@ -48,6 +50,8 @@ class InventoryCrudViewModel @Inject constructor(
     private val productUnitDao: ProductUnitDao,
     private val productBatchDao: ProductBatchDao,
     private val inventoryDao: InventoryDao,
+    private val customerDao: CustomerDao,
+    private val vendorDao: VendorDao,
     @ApplicationContext private val context: Context,
     private val appSetupPrefs: AppSetupPrefs
 ) : ViewModel() {
@@ -209,7 +213,11 @@ class InventoryCrudViewModel @Inject constructor(
                 val terminalId = appSetupPrefs.spreadsheetId.take(20).ifBlank { "TERM_1" } // FIX 2026-08-06: real terminal idwith actual fetch mechanism
             
             val existingItem = _selectedItem.value
-            val itemNum = existingItem?.item_number ?: ((inventoryDao.getMaxItemNumber() ?: 0) + 1)
+            // DEF-67 FIX (2026-08-26): max-of(max, count) — legacy rows carry
+            // item_number=0 (migration default), so MAX alone returned 0 and every
+            // new product got itemNum=1 → same auto EAN-13 (Panadol collision).
+            val itemNum = existingItem?.item_number
+                ?: (maxOf(inventoryDao.getMaxItemNumber() ?: 0, inventoryDao.getItemCount()) + 1)
             
             // GS1 default GTIN auto-generation if list is empty
             // FIX (2026-08-22, DEF-64): was "0000000%07d" = 14 digits. EAN-13
@@ -464,7 +472,9 @@ class InventoryCrudViewModel @Inject constructor(
                 }
                 var inserted = 0
                 var skipped = 0
-                var nextNum = (inventoryDao.getMaxItemNumber() ?: 0)
+                // DEF-67 FIX (2026-08-26): count-guard — legacy item_number=0 rows
+                // made MAX() return 0 → CSV import collided barcodes with Panadol.
+                var nextNum = maxOf(inventoryDao.getMaxItemNumber() ?: 0, inventoryDao.getItemCount())
                 for ((index, r) in rows.withIndex()) {
                     try {
                         if (r.name.isBlank()) { skipped++; continue }
@@ -508,6 +518,131 @@ class InventoryCrudViewModel @Inject constructor(
                     }
                 }
                 _importResult.value = "Import complete: $inserted added, $skipped skipped."
+            } catch (e: Exception) {
+                _importResult.value = "Import failed: ${e.message}"
+            }
+        }
+    }
+
+    /** OVERNIGHT-AUDIT Phase 1/2 — Bulk import: Customers master (module 7 CRM). */
+    fun importCustomersCsv(bytes: ByteArray) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val rows = withContext(Dispatchers.IO) {
+                    java.io.ByteArrayInputStream(bytes).use {
+                        com.tillzo.pos.utils.CsvImporter.parseCustomerRows(it)
+                    }
+                }
+                if (rows.isEmpty()) {
+                    _importResult.value = "No data rows found (header only or empty file)."
+                    return@launch
+                }
+                var inserted = 0
+                var skipped = 0
+                for (r in rows) {
+                    try {
+                        if (r.name.isBlank()) { skipped++; continue }
+                        customerDao.insert(
+                            com.tillzo.pos.data.local.entity.CustomerEntity(
+                                name = r.name,
+                                phone = r.phone,
+                                whatsapp = r.whatsapp ?: r.phone,
+                                email = r.email ?: "",
+                                address = r.address ?: "",
+                                pos_terminal_id = appSetupPrefs.spreadsheetId.take(20).ifBlank { "TERM_1" }
+                            )
+                        )
+                        inserted++
+                    } catch (rowEx: Exception) {
+                        skipped++
+                    }
+                }
+                _importResult.value = "Customers import complete: $inserted added, $skipped skipped."
+            } catch (e: Exception) {
+                _importResult.value = "Import failed: ${e.message}"
+            }
+        }
+    }
+
+    /** OVERNIGHT-AUDIT Phase 1/2 — Bulk import: Vendors master (module 4 PO). */
+    fun importVendorsCsv(bytes: ByteArray) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val rows = withContext(Dispatchers.IO) {
+                    java.io.ByteArrayInputStream(bytes).use {
+                        com.tillzo.pos.utils.CsvImporter.parseVendorRows(it)
+                    }
+                }
+                if (rows.isEmpty()) {
+                    _importResult.value = "No data rows found (header only or empty file)."
+                    return@launch
+                }
+                var inserted = 0
+                var skipped = 0
+                for (r in rows) {
+                    try {
+                        if (r.name.isBlank()) { skipped++; continue }
+                        vendorDao.insertVendor(
+                            com.tillzo.pos.data.local.entity.VendorEntity(
+                                vendorId = java.util.UUID.randomUUID().toString(),
+                                name = r.name,
+                                phone = r.phone,
+                                whatsapp = r.phone,
+                                email = r.email,
+                                address = r.address,
+                                city = r.city,
+                                creditLimit = r.creditLimit
+                            )
+                        )
+                        inserted++
+                    } catch (rowEx: Exception) {
+                        skipped++
+                    }
+                }
+                _importResult.value = "Vendors import complete: $inserted added, $skipped skipped."
+            } catch (e: Exception) {
+                _importResult.value = "Import failed: ${e.message}"
+            }
+        }
+    }
+
+    /** OVERNIGHT-AUDIT Phase 1/2 — Bulk import: Product batches (module 6). */
+    fun importBatchesCsv(bytes: ByteArray) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val rows = withContext(Dispatchers.IO) {
+                    java.io.ByteArrayInputStream(bytes).use {
+                        com.tillzo.pos.utils.CsvImporter.parseBatchRows(it)
+                    }
+                }
+                if (rows.isEmpty()) {
+                    _importResult.value = "No data rows found (header only or empty file)."
+                    return@launch
+                }
+                var inserted = 0
+                var skipped = 0
+                for (r in rows) {
+                    try {
+                        if (r.productId.isBlank()) { skipped++; continue }
+                        productBatchDao.insertBatch(
+                            com.tillzo.pos.data.local.entity.ProductBatchEntity(
+                                productId = r.productId,
+                                barcodeId = r.barcodeId,
+                                batchNumber = r.batchNumber,
+                                manufacturingDate = r.manufacturingDate,
+                                expiryDate = r.expiryDate,
+                                stockQty = r.stockQty,
+                                costPrice = r.costPrice,
+                                sellingPrice = r.sellingPrice,
+                                posTerminalId = appSetupPrefs.spreadsheetId.take(20).ifBlank { "TERM_1" }
+                            )
+                        )
+                        inserted++
+                    } catch (rowEx: Exception) {
+                        skipped++
+                    }
+                }
+                _importResult.value = "Batches import complete: $inserted added, $skipped skipped."
             } catch (e: Exception) {
                 _importResult.value = "Import failed: ${e.message}"
             }

@@ -35,8 +35,13 @@ class TillViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            tillSessionDao.getOpenSessionFlowForTerminal(posTerminalId())
-                .collect { _currentSession.value = it }
+            val terminal = posTerminalId()
+            android.util.Log.d("TillVM", "init: collecting open session flow for terminal=$terminal")
+            tillSessionDao.getOpenSessionFlowForTerminal(terminal)
+                .collect {
+                    android.util.Log.d("TillVM", "flow emitted: ${it?.sessionId?.take(8) ?: "NULL"} status=${it?.status}")
+                    _currentSession.value = it
+                }
         }
     }
 
@@ -44,7 +49,9 @@ class TillViewModel @Inject constructor(
      *  mila to StateFlow update (gate turant clear). */
     fun refreshSession() {
         viewModelScope.launch(Dispatchers.IO) {
-            val session = tillSessionDao.getOpenSession(posTerminalId())
+            val terminal = posTerminalId()
+            val session = tillSessionDao.getOpenSession(terminal)
+            android.util.Log.d("TillVM", "refreshSession: terminal=$terminal found=${session?.sessionId?.take(8) ?: "NULL"} status=${session?.status}")
             if (session != null) {
                 _currentSession.value = session
             }

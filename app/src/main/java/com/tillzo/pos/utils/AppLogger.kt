@@ -70,8 +70,16 @@ class AppLogger @Inject constructor(
                 }
             }
 
-            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            if (!downloadsDir.exists()) downloadsDir.mkdirs()
+            // PLAY POLICY (2026-08-24, T5): Scoped Storage compliance.
+            // Public Downloads direct write is legacy — on Android 10+ it fails
+            // without MANAGE_EXTERNAL_STORAGE. App-scoped external files dir is
+            // always writable, no permission needed, and FileProvider still
+            // shares it with any share target.
+            val downloadsDir = File(
+                context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS)
+                    ?: context.filesDir,
+                "exports"
+            ).apply { if (!exists()) mkdirs() }
             val fileName = "TillzoPOS_Logs_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())}.txt"
             val file = File(downloadsDir, fileName)
             file.writeText(content)

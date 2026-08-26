@@ -16,6 +16,8 @@ import timber.log.Timber
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 /**
@@ -130,13 +132,20 @@ class CrashHandler(
                 append("Exception: ${throwable.javaClass.name}: ${throwable.message}\n")
                 append(stackTrace)
             }
-            logDao.insertLogBlocking(
-                AppLogEntity(
-                    tag = "APP_CRASH",
-                    logLevel = "FATAL",
-                    message = deviceInfo
-                )
-            )
+            // FIX (2026-08-25, overnight audit BUG#2): runBlocking bridges the
+            // crashing (main) thread to Dispatchers.IO so Room's
+            // assertNotMainThread() doesn't kill crash-logging itself.
+            runBlocking {
+                withContext(Dispatchers.IO) {
+                    logDao.insertLog(
+                        AppLogEntity(
+                            tag = "APP_CRASH",
+                            logLevel = "FATAL",
+                            message = deviceInfo
+                        )
+                    )
+                }
+            }
         } catch (e: Exception) {
             Log.e("CrashHandler", "Failed to log crash: ${e.message}")
         }
