@@ -1199,3 +1199,41 @@ NOTES (pre-existing, out of scope):
   (old URL-encode bug) — cleanup suggested.
 - 'Faisal Khan' has legacy ledger 20+100-70 = $50 due from prior
   sessions (untouched by this test).
+
+========================================================================
+SESSION 2026-08-27 — DEF-47/48/49/50/51 TEST RUN (emulator-5554)
+========================================================================
+BUILD: PaymentDialog.kt windowInsets fix (confirm-payment footer tap miss)
+       compileDebugKotlin + install PASSED; app v1.0.0 on emulator.
+
+[DEF-47 phantom payment leak]  PASS
+  - Card $25 type -> dialog dismiss -> reopen: teeno fields blank
+  - $20 sale -> receipt sirf "Cash Paid: $20.00" (no phantom Card/Wallet)
+  - Invoice 463F267B
+
+[Confirm Payment quirk]  FIXED + VERIFIED
+  - Root cause: keyboard open hone par footer [411,2026] IME ke peeche
+    atka rehta -> tap keyboard pe lagta, click miss hota tha.
+  - Fix: PaymentDialog.kt = windowInsets safeDrawing.union(WindowInsets.ime)
+  - Verified: keyboard open, footer shifts up, tap completes sale.
+
+[Batch auto-gen blank-batch GRN]  PASS
+  - PO-202608-0005 (Panadol $10) -> Receive Goods -> GRN-2026-0005
+  - Batch B-0005-SKU- auto-generated; "New Batches Added: 1"
+
+[GRN sync total_items fix]  PASS
+  - GRN detail "Total Items: 1" sahi (pehle 0).
+  - DeltaSyncManager.kt: invalid sheet value -> existing DB value preserve.
+
+[Sync uploads]  PASS
+  - GRN_Headers/GRN_Items/Product_Batches/Purchase_Orders uploaded.
+
+[DEF-51 sheet-side verify]  PASS (final, 27-08)
+  - Google Sheets app (emulator): GRN_Headers tab, row 6 = GRN-2026-0005
+  - sync_status col 17 = "synced" (formula-bar read, uiautomator)
+  - status=CONFIRMED, payment_status=PAID, payment_method=CASH,
+    total_amount=10, created_at='2026-08-27 02:47 PM  all correct.
+  - NOTE: sheet verify = ANDROID Sheets app formula-bar read (uiautomator
+    EditText text). Vision model unreliable for grid cell values.
+
+PENDING: git commit (7 modified files + jarvis_vision.py untracked).

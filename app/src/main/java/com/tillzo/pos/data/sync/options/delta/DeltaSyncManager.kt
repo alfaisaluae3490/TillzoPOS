@@ -599,9 +599,17 @@ class DeltaSyncManager @Inject constructor(
                         appDatabase.purchaseOrderDao().insertPOItems(poItems.filter { it.poItemId !in pendingPoItemIds })
                     }
                     tabName == "GRN_Headers" -> {
+                        // FIX (2026-08-26): sheet par total_items/total_received_qty
+                        // blank/empty hone par sync DB ka sahi value 0 se overwrite
+                        // kar deta tha (GRN detail "Total Items: 0" bug). Ab
+                        // invalid sheet value → existing DB value preserve.
+                        val existingGrns = appDatabase.grnDao().getAllGrns()
+                            .first().associateBy { it.grnId }
                         val grns = tabRows.map { row ->
+                            val grnId = row["grn_id"] as? String ?: java.util.UUID.randomUUID().toString()
+                            val existing = existingGrns[grnId]
                             com.tillzo.pos.data.local.entity.GrnHeaderEntity(
-                                grnId = row["grn_id"] as? String ?: java.util.UUID.randomUUID().toString(),
+                                grnId = grnId,
                                 grnNumber = row["grn_number"] as? String ?: "",
                                 poId = row["po_id"] as? String ?: "",
                                 poNumber = row["po_number"] as? String ?: "",
@@ -612,8 +620,8 @@ class DeltaSyncManager @Inject constructor(
                                 notes = row["notes"] as? String ?: "",
                                 receivedBy = row["received_by"] as? String ?: "",
                                 receivedByName = row["received_by_name"] as? String ?: "",
-                                totalItems = (row["total_items"] as? String)?.toIntOrNull() ?: 0,
-                                totalReceivedQty = (row["total_received_qty"] as? String)?.toDoubleOrNull() ?: 0.0,
+                                totalItems = (row["total_items"] as? String)?.toIntOrNull() ?: existing?.totalItems ?: 0,
+                                totalReceivedQty = (row["total_received_qty"] as? String)?.toDoubleOrNull() ?: existing?.totalReceivedQty ?: 0.0,
                                 totalAmount = (row["total_amount"] as? String)?.toDoubleOrNull() ?: 0.0,
                                 paymentStatus = row["payment_status"] as? String ?: "UNPAID",
                                 paidAmount = (row["paid_amount"] as? String)?.toDoubleOrNull() ?: 0.0,

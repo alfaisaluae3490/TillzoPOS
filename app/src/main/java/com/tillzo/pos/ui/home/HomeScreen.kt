@@ -646,7 +646,10 @@ fun HomeScreen(
             cartItems = cartItems,
             viewModel = viewModel,
             currencySymbol = currencySymbol,
-            onDismiss = { showPaymentDialog = false }
+            onDismiss = {
+                viewModel.resetPayment() // DEF-47: don't leak card/wallet amounts into next sale
+                showPaymentDialog = false
+            }
         )
     }
 

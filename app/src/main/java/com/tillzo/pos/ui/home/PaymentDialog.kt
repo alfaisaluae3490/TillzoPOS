@@ -101,7 +101,15 @@ fun PaymentDialog(
         // Default insets ke saath sheet nav bar ke UPAR expand hoti hai aur footer
         // hamesha reachable rehta hai.
         containerColor = SurfaceDark,
-        tonalElevation = 8.dp
+        tonalElevation = 8.dp,
+        // ULTRA-L6 FIX v5 (2026-08-27): windowInsets mein IME union — keyboard
+        // khula hone par sheet IME ke UPAR shift hoti hai. v4 (default insets) se
+        // footer [411,2026] par hi rehta tha jab keyboard khula tha (IME ke
+        // peeche) → tap keyboard par lagta tha, Confirm Payment click nahi hota
+        // tha (observed live 27-08: pehla tap miss, keyboard band karne par
+        // chalta). imePadding() sirf tab kaam karta hai jab window ko IME insets
+        // milte hain — ModalBottomSheet default insets IME exclude karte hain.
+        windowInsets = WindowInsets.safeDrawing.union(WindowInsets.ime)
     ) {
         // ULTRA-L6 FIX v2 (2026-08-26): Confirm Payment footer ko ACTUALLY scroll
         // ke bahar rakha. v1 comment me "outside the scroll" tha lekin footer abhi

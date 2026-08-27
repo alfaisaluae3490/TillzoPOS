@@ -329,6 +329,16 @@ class PosViewModel @Inject constructor(
         appLogger.logInfo("UI_CLICK", "Cart cleared")
     }
 
+    /** DEF-47 FIX: reset only the payment breakdown when the payment dialog is
+     *  dismissed without completing — otherwise a typed Card/Wallet amount
+     *  persists in the ViewModel and leaks into the NEXT sale's receipt as a
+     *  phantom 'Card Paid'/'Wallet Paid' line (observed live: $25 card + $25
+     *  wallet on a single $25 sale after dismissing the dialog once). */
+    fun resetPayment() {
+        _paymentBreakdown.value = PaymentBreakdown()
+        appLogger.logInfo("UI_CLICK", "Payment breakdown reset (dialog dismissed)")
+    }
+
     fun setDiscount(amount: Double) {
         // FIX (2026-08-22, DEF-42): clamp discount to [0, subtotal+tax] —
         // a negative discount INCREASES the total (customer overcharged) and

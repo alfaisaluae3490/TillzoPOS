@@ -59,7 +59,7 @@ class ConfirmGrnUseCase @Inject constructor(
                                 description = "",
                                 cost_price = item.unitCostPrice,
                                 tax_percent = 0.0,
-                                batch_number = item.batchNumber,
+                                batch_number = effectiveBatchNumber(item, grnHeader.grnNumber),
                                 expiry_date = item.expiryDate,
                                 manufacturing_date = item.manufacturingDate,
                                 is_damaged_stock = false,
@@ -76,7 +76,7 @@ class ConfirmGrnUseCase @Inject constructor(
                                 batchId = batchId,
                                 productId = newProduct.system_row_id,
                                 barcodeId = newProduct.barcode_id,
-                                batchNumber = item.batchNumber,
+                                batchNumber = effectiveBatchNumber(item, grnHeader.grnNumber),
                                 manufacturingDate = item.manufacturingDate,
                                 expiryDate = item.expiryDate,
                                 stockQty = item.receivedQty,
@@ -99,7 +99,7 @@ class ConfirmGrnUseCase @Inject constructor(
                                 batchId = batchId,
                                 productId = item.productId,
                                 barcodeId = item.barcodeId.takeIf { it.isNotBlank() } ?: item.productId,
-                                batchNumber = item.batchNumber,
+                                batchNumber = effectiveBatchNumber(item, grnHeader.grnNumber),
                                 manufacturingDate = item.manufacturingDate,
                                 expiryDate = item.expiryDate,
                                 stockQty = item.receivedQty,
@@ -138,7 +138,7 @@ class ConfirmGrnUseCase @Inject constructor(
                                     batchId = newBatchId,
                                     productId = item.productId,
                                     barcodeId = item.barcodeId.takeIf { it.isNotBlank() } ?: item.productId,
-                                    batchNumber = item.batchNumber,
+                                    batchNumber = effectiveBatchNumber(item, grnHeader.grnNumber),
                                     manufacturingDate = item.manufacturingDate,
                                     expiryDate = item.expiryDate,
                                     stockQty = item.receivedQty,
@@ -209,5 +209,20 @@ class ConfirmGrnUseCase @Inject constructor(
 
     companion object {
         private const val TAG = "ConfirmGrnUseCase"
+    }
+
+    /**
+     * FIX (2026-08-26): blank batch number (manual GRN entry chhod deta tha)
+     * → auto-generate so every batch is trackable (GRN detail "PENDING"
+     * badge, FIFO deduction, sheet sync sabko number chahiye).
+     */
+    private fun effectiveBatchNumber(
+        item: com.tillzo.pos.data.local.entity.GrnItemEntity,
+        grnNumber: String
+    ): String {
+        if (item.batchNumber.isNotBlank()) return item.batchNumber
+        val seed = listOf(item.sku, item.barcodeId, item.productId)
+            .firstOrNull { it.isNotBlank() } ?: "NEW"
+        return "B-${grnNumber.takeLast(4)}-${seed.take(4).uppercase()}"
     }
 }

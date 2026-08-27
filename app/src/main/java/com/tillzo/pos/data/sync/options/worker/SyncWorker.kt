@@ -463,7 +463,7 @@ class SyncWorker @AssistedInject constructor(
                 if (items.isNotEmpty()) {
                     val newItems = items.filter { it.poItemId !in existingItemIds }
                     if (newItems.isNotEmpty()) {
-                        val itemsResult = sheetsRepository.uploadBatch("PO_Items", newItems.map { it.toSheetRow() })
+                        val itemsResult = sheetsRepository.uploadBatch("PO_Items", newItems.map { it.toSheetRow().withSyncedStatus(11) })
                         if (itemsResult !is SyncResult.Success) {
                             Log.w(TAG, "PO_Items upload failed for PO ${po.poId} — keeping pending")
                             itemsSucceeded = false
@@ -474,7 +474,7 @@ class SyncWorker @AssistedInject constructor(
 
                 // 2. Upload header (only if not already on sheet)
                 if (po.poId !in existingHeaderIds) {
-                    val headerResult = sheetsRepository.uploadBatch("Purchase_Orders", listOf(po.toSheetRow()))
+                    val headerResult = sheetsRepository.uploadBatch("Purchase_Orders", listOf(po.toSheetRow().withSyncedStatus(10)))
                     if (headerResult !is SyncResult.Success) {
                         Log.w(TAG, "PO header upload failed for ${po.poId} — keeping pending")
                         continue
@@ -485,7 +485,7 @@ class SyncWorker @AssistedInject constructor(
                     // flipped SENT → RECEIVED). Previously the existing header was
                     // silently skipped and then marked synced, so the sheet kept
                     // the old status forever. Update it in place.
-                    val updated = sheetsRepository.updateRowByUuid("Purchase_Orders", po.poId, po.toSheetRow())
+                    val updated = sheetsRepository.updateRowByUuid("Purchase_Orders", po.poId, po.toSheetRow().withSyncedStatus(10))
                     if (!updated) {
                         Log.w(TAG, "PO header update failed for ${po.poId} — keeping pending")
                         continue
@@ -514,7 +514,7 @@ class SyncWorker @AssistedInject constructor(
                 if (items.isNotEmpty()) {
                     val newItems = items.filter { it.grnItemId !in existingItemIds }
                     if (newItems.isNotEmpty()) {
-                        val itemsResult = sheetsRepository.uploadBatch("GRN_Items", newItems.map { it.toSheetRow() })
+                        val itemsResult = sheetsRepository.uploadBatch("GRN_Items", newItems.map { it.toSheetRow().withSyncedStatus(16) })
                         if (itemsResult !is SyncResult.Success) {
                             Log.w(TAG, "GRN_Items upload failed for GRN ${grn.grnId} — keeping pending")
                             itemsSucceeded = false
@@ -525,7 +525,7 @@ class SyncWorker @AssistedInject constructor(
 
                 // 2. Upload header (only if not already on sheet)
                 if (grn.grnId !in existingHeaderIds) {
-                    val headerResult = sheetsRepository.uploadBatch("GRN_Headers", listOf(grn.toSheetRow()))
+                    val headerResult = sheetsRepository.uploadBatch("GRN_Headers", listOf(grn.toSheetRow().withSyncedStatus(16)))
                     if (headerResult !is SyncResult.Success) {
                         Log.w(TAG, "GRN header upload failed for ${grn.grnId} — keeping pending")
                         continue
@@ -534,7 +534,7 @@ class SyncWorker @AssistedInject constructor(
                     // FIX (2026-08-22, DEF-44 follow-up): same as PO — an existing
                     // GRN header whose status changed (DRAFT → CONFIRMED) was
                     // silently skipped then marked synced; update in place.
-                    val updated = sheetsRepository.updateRowByUuid("GRN_Headers", grn.grnId, grn.toSheetRow())
+                    val updated = sheetsRepository.updateRowByUuid("GRN_Headers", grn.grnId, grn.toSheetRow().withSyncedStatus(16))
                     if (!updated) {
                         Log.w(TAG, "GRN header update failed for ${grn.grnId} — keeping pending")
                         continue
@@ -602,7 +602,7 @@ class SyncWorker @AssistedInject constructor(
             
             var ok = true
             if (newBatches.isNotEmpty()) {
-                val result = sheetsRepository.uploadBatch("Product_Batches", newBatches.map { it.toSheetRow() })
+                val result = sheetsRepository.uploadBatch("Product_Batches", newBatches.map { it.toSheetRow().withSyncedStatus(12) })
                 if (result is SyncResult.Success) {
                     newBatches.forEach { productBatchDao.markSynced(it.batchId) }
                 } else {
@@ -614,7 +614,7 @@ class SyncWorker @AssistedInject constructor(
             if (updateBatches.isNotEmpty()) {
                 var allUpdated = true
                 for (batch in updateBatches) {
-                    val updated = sheetsRepository.updateRowByUuid("Product_Batches", batch.batchId, batch.toSheetRow())
+                    val updated = sheetsRepository.updateRowByUuid("Product_Batches", batch.batchId, batch.toSheetRow().withSyncedStatus(12))
                     if (updated) {
                         productBatchDao.markSynced(batch.batchId)
                     } else {
@@ -643,7 +643,7 @@ class SyncWorker @AssistedInject constructor(
             val termId = appSetupPrefs.spreadsheetId.take(20).ifBlank { "TERM_1" }
             
             val result = if (newAdj.isNotEmpty()) {
-                uploadTableIfNeeded("Stock_Adjustments", newAdj.map { it.toSheetRow(termId) })
+                uploadTableIfNeeded("Stock_Adjustments", newAdj.map { it.toSheetRow(termId).withSyncedStatus(6) })
             } else {
                 SyncResult.Success(0)
             }
@@ -691,11 +691,11 @@ class SyncWorker @AssistedInject constructor(
             // Now they are PUT-updated in place.
             var allOk = true
             if (newSessions.isNotEmpty()) {
-                val result = sheetsRepository.uploadBatch("Till_Sessions", newSessions.map { sessionRow(it) })
+                val result = sheetsRepository.uploadBatch("Till_Sessions", newSessions.map { sessionRow(it).withSyncedStatus(19) })
                 if (result !is SyncResult.Success) allOk = false
             }
             for (s in updateSessions) {
-                val ok = sheetsRepository.updateRowByUuid("Till_Sessions", s.sessionId, sessionRow(s))
+                val ok = sheetsRepository.updateRowByUuid("Till_Sessions", s.sessionId, sessionRow(s).withSyncedStatus(19))
                 if (!ok) allOk = false
             }
             
@@ -715,7 +715,7 @@ class SyncWorker @AssistedInject constructor(
                 val newWastage = pendingWastage.filter { it.wastageId !in existingIds }
 
                 val result = if (newWastage.isNotEmpty()) {
-                    sheetsRepository.uploadBatch("Wastage_Ledger", newWastage.map { it.toSheetRow() })
+                    sheetsRepository.uploadBatch("Wastage_Ledger", newWastage.map { it.toSheetRow().withSyncedStatus(13) })
                 } else {
                     SyncResult.Success(0)
                 }
@@ -758,7 +758,7 @@ class SyncWorker @AssistedInject constructor(
                 val existingIds = sheetsRepository.getExistingUuids("Returns")
                 val newReturns = pendingReturns.filter { it.returnId !in existingIds }
                 val result = if (newReturns.isNotEmpty()) {
-                    sheetsRepository.uploadBatch("Returns", newReturns.map { it.toSheetRow() })
+                    sheetsRepository.uploadBatch("Returns", newReturns.map { it.toSheetRow().withSyncedStatus(9) })
                 } else {
                     SyncResult.Success(0)
                 }
@@ -817,5 +817,12 @@ fun com.tillzo.pos.data.local.entity.StockAdjustmentEntity.toSheetRow(posTermina
     adjustmentId, productId, adjustmentType, quantityChanged, reason, adjustedBy, syncStatus,
     posTerminalId, createdAt.ts(), updatedAt.ts()
 )
+
+/** DEF-51 (2026-08-26): sheet row ke sync_status column ko 'synced' reflect karo.
+ *  Row tabhi sheet pe jati hai jab upload/update SUCCESSFUL hota hai — isliye
+ *  upload-time snapshot ('pending') misleading tha: data synced hone ke bawajood
+ *  sheet pe 'pending' dikhta tha. Wastage delete-marker (DEF-90) ka wahi pattern. */
+fun List<Any>.withSyncedStatus(index: Int): List<Any> =
+    mapIndexed { i, v -> if (i == index) "synced" else v }
 
 

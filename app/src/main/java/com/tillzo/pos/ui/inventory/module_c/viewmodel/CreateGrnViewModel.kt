@@ -280,7 +280,17 @@ class CreateGrnViewModel @Inject constructor(
                 attachedFileUrl = attachedFileUrl
             )
             
-            val itemsToSave = currentItems.map { it.copy(grnId = grnId) }
+            // FIX (2026-08-26): blank batch number → auto-generate on save,
+            // taaki manual GRN entry mein bhi har item ka batch trackable ho
+            // (ConfirmGrnUseCase mein bhi fallback hai — double safety).
+            val itemsToSave = currentItems.map {
+                val autoBatch = if (it.batchNumber.isBlank()) {
+                    val seed = listOf(it.sku, it.barcodeId, it.productId)
+                        .firstOrNull { s -> s.isNotBlank() } ?: "NEW"
+                    "B-${grnNumber.takeLast(4)}-${seed.take(4).uppercase()}"
+                } else it.batchNumber
+                it.copy(grnId = grnId, batchNumber = autoBatch)
+            }
             
             saveGrnDraftUseCase(header, itemsToSave)
             val result = confirmGrnUseCase(grnId)
